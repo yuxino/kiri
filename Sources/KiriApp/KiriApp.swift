@@ -1,3 +1,4 @@
+import KiriCore
 import SwiftUI
 
 @main
@@ -26,12 +27,26 @@ private struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("Capture Region  ⇧⌘2") {
+        Button("Capture Region  \(model.captureShortcutLabel)") {
             model.startCapture()
         }
         Button("Open Library") {
             openWindow(id: "library")
             NSApplication.shared.activate(ignoringOtherApps: true)
+        }
+        Menu("Capture Shortcut") {
+            ForEach(CaptureShortcutPreset.allCases) { preset in
+                Button {
+                    model.selectShortcut(preset)
+                } label: {
+                    HStack {
+                        Text(preset.shortcut.displayLabel)
+                        if preset == model.captureShortcutPreset {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
         }
         Divider()
         if let error = model.errorMessage {
@@ -48,4 +63,3 @@ private struct MenuBarView: View {
         }
     }
 }
-

@@ -8,6 +8,21 @@ final class AppModel: ObservableObject {
     @Published var searchQuery = ""
     @Published var showingTrash = false
     @Published var errorMessage: String?
+    @Published var captureShortcutPreset: CaptureShortcutPreset {
+        didSet {
+            UserDefaults.standard.set(
+                captureShortcutPreset.rawValue,
+                forKey: Self.shortcutDefaultsKey
+            )
+            if hasStarted {
+                shortcutMonitor.start(
+                    shortcut: captureShortcutPreset.shortcut
+                ) { [weak self] in
+                    self?.startCapture()
+                }
+            }
+        }
+    }
 
     let libraryRoot: URL
 
@@ -19,6 +34,10 @@ final class AppModel: ObservableObject {
     private var hasStarted = false
 
     init() {
+        captureShortcutPreset = UserDefaults.standard
+            .string(forKey: Self.shortcutDefaultsKey)
+            .flatMap(CaptureShortcutPreset.init(rawValue:))
+            ?? .shiftCommand2
         let setup = Self.makeLibrary()
         libraryRoot = setup.root
         library = setup.library
@@ -33,12 +52,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    var captureShortcutLabel: String {
+        captureShortcutPreset.shortcut.displayLabel
+    }
+
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
-        shortcutMonitor.start { [weak self] in
+        shortcutMonitor.start(
+            shortcut: captureShortcutPreset.shortcut
+        ) { [weak self] in
             self?.startCapture()
         }
+    }
+
+    func selectShortcut(_ preset: CaptureShortcutPreset) {
+        captureShortcutPreset = preset
     }
 
     func startCapture() {
@@ -203,6 +232,8 @@ final class AppModel: ObservableObject {
             return (fallback, library, "Using a temporary library: \(error.localizedDescription)")
         }
     }
+
+    private static let shortcutDefaultsKey = "captureShortcutPreset"
 }
 
 private enum CaptureExportError: LocalizedError {
@@ -218,26 +249,54 @@ private final class GlobalShortcutMonitor {
     private var globalMonitor: Any?
     private var localMonitor: Any?
 
-    func start(action: @escaping @MainActor () -> Void) {
-        guard globalMonitor == nil, localMonitor == nil else { return }
+    func start(
+        shortcut: CaptureShortcut,
+        action: @escaping @MainActor () -> Void
+    ) {
+        stop()
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            Self.handle(event, action: action)
+            Self.handle(event, shortcut: shortcut, action: action)
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard Self.matches(event) else { return event }
+            guard Self.matches(event, shortcut: shortcut) else { return event }
             Task { @MainActor in action() }
             return nil
         }
     }
 
-    private static func handle(_ event: NSEvent, action: @escaping @MainActor () -> Void) {
-        guard matches(event) else { return }
+    private func stop() {
+        if let globalMonitor {
+            NSEvent.removeMonitor(globalMonitor)
+            self.globalMonitor = nil
+        }
+        if let localMonitor {
+            NSEvent.removeMonitor(localMonitor)
+            self.localMonitor = nil
+        }
+    }
+
+    private static func handle(
+        _ event: NSEvent,
+        shortcut: CaptureShortcut,
+        action: @escaping @MainActor () -> Void
+    ) {
+        guard matches(event, shortcut: shortcut) else { return }
         Task { @MainActor in action() }
     }
 
-    private static func matches(_ event: NSEvent) -> Bool {
-        let required: NSEvent.ModifierFlags = [.command, .shift]
-        return event.charactersIgnoringModifiers == "2"
-            && event.modifierFlags.intersection(required) == required
+    private static func matches(_ event: NSEvent, shortcut: CaptureShortcut) -> Bool {
+        let relevant: NSEvent.ModifierFlags = [.control, .option, .shift, .command]
+        let required = shortcut.modifiers.reduce(into: NSEvent.ModifierFlags()) {
+            flags,
+            modifier in
+            switch modifier {
+            case .control: flags.insert(.control)
+            case .option: flags.insert(.option)
+            case .shift: flags.insert(.shift)
+            case .command: flags.insert(.command)
+            }
+        }
+        return event.charactersIgnoringModifiers == shortcut.key
+            && event.modifierFlags.intersection(relevant) == required
     }
 }

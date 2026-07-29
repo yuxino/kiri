@@ -7,6 +7,15 @@ let tests = [
     KiriTest(name: "asset searchable text") {
         try searchableTextIncludesFilenameKindAndApplication()
     },
+    KiriTest(name: "capture shortcut labels") {
+        try captureShortcutPresetsHaveStableLabels()
+    },
+    KiriTest(name: "capture shortcut round-trip") {
+        try captureShortcutRoundTrips()
+    },
+    KiriTest(name: "capture shortcut modifiers") {
+        try captureShortcutExposesNormalizedModifiers()
+    },
     KiriTest(name: "library import persistence") {
         try await importPersistsAcrossLibraryInstances()
     },

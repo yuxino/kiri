@@ -42,7 +42,7 @@ struct LibraryView: View {
             Button(model.showingTrash ? "Library" : "Trash") {
                 model.showingTrash.toggle()
             }
-            Button("Capture  ⇧⌘2") {
+            Button("Capture  \(model.captureShortcutLabel)") {
                 model.startCapture()
             }
             .buttonStyle(.borderedProminent)
@@ -61,7 +61,7 @@ struct LibraryView: View {
         } description: {
             Text(model.showingTrash
                  ? "Deleted captures stay recoverable here."
-                 : "Press ⇧⌘2 to capture a region. Every result is saved here automatically.")
+                 : "Press \(model.captureShortcutLabel) to capture a region. Every result is saved here automatically.")
         } actions: {
             if !model.showingTrash {
                 Button("Capture Region") {
@@ -153,4 +153,3 @@ private struct CaptureCard: View {
         .help(systemName)
     }
 }
-
