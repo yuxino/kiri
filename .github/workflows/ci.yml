@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core tests
+        run: swift run kiri-core-tests
+      - name: Strict app build
+        run: swift build --product kiri -Xswiftc -warnings-as-errors
+
