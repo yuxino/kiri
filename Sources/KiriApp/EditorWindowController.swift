@@ -36,6 +36,8 @@ final class EditorWindowController: NSWindowController {
             button("Pen", action: #selector(usePen)),
             button("Rectangle", action: #selector(useRectangle)),
             button("Arrow", action: #selector(useArrow)),
+            button("Text", action: #selector(useText)),
+            button("Mosaic", action: #selector(useMosaic)),
             button("Undo", action: #selector(undo)),
             NSView(),
             button("Cancel", action: #selector(cancel)),
@@ -82,6 +84,28 @@ final class EditorWindowController: NSWindowController {
         canvas.tool = .arrow
     }
 
+    @objc private func useText() {
+        let alert = NSAlert()
+        alert.messageText = "Add text"
+        alert.informativeText = "Enter the text, then click the image to place it."
+        alert.addButton(withTitle: "Place")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(string: "")
+        field.placeholderString = "Text"
+        field.frame = CGRect(x: 0, y: 0, width: 280, height: 24)
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        canvas.beginTextPlacement(text)
+    }
+
+    @objc private func useMosaic() {
+        canvas.tool = .mosaic
+    }
+
     @objc private func undo() {
         canvas.undo()
     }
@@ -119,12 +143,16 @@ private enum AnnotationTool {
     case pen
     case rectangle
     case arrow
+    case text
+    case mosaic
 }
 
 private enum AnnotationMark {
     case pen([CGPoint])
     case rectangle(CGRect)
     case arrow(CGPoint, CGPoint)
+    case text(String, CGPoint)
+    case mosaic(CGRect)
 }
 
 private final class AnnotationCanvasView: NSView {
@@ -135,6 +163,7 @@ private final class AnnotationCanvasView: NSView {
     private var draftPoints: [CGPoint] = []
     private var dragStart: CGPoint?
     private var dragCurrent: CGPoint?
+    private var pendingText: String?
 
     init(image: CGImage) {
         self.image = image
@@ -157,7 +186,10 @@ private final class AnnotationCanvasView: NSView {
         let target = imageRect
         NSImage(cgImage: image, size: target.size).draw(in: target)
 
-        for mark in marks {
+        for mark in marks where mark.isMosaic {
+            draw(mark)
+        }
+        for mark in marks where !mark.isMosaic {
             draw(mark)
         }
         if tool == .pen, draftPoints.count > 1 {
@@ -173,7 +205,16 @@ private final class AnnotationCanvasView: NSView {
                 )))
             case .arrow:
                 draw(.arrow(dragStart, dragCurrent))
-            case .pen:
+            case .mosaic:
+                drawMosaicPreview(
+                    in: CGRect(
+                        x: min(dragStart.x, dragCurrent.x),
+                        y: min(dragStart.y, dragCurrent.y),
+                        width: abs(dragCurrent.x - dragStart.x),
+                        height: abs(dragCurrent.y - dragStart.y)
+                    )
+                )
+            case .pen, .text:
                 break
             }
         }
@@ -181,6 +222,13 @@ private final class AnnotationCanvasView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
+        if tool == .text, let pendingText {
+            marks.append(.text(pendingText, point))
+            self.pendingText = nil
+            tool = .rectangle
+            needsDisplay = true
+            return
+        }
         dragStart = point
         dragCurrent = point
         draftPoints = tool == .pen ? [point] : []
@@ -210,6 +258,18 @@ private final class AnnotationCanvasView: NSView {
             )))
         case .arrow:
             marks.append(.arrow(start, end))
+        case .mosaic:
+            let rect = CGRect(
+                x: min(start.x, end.x),
+                y: min(start.y, end.y),
+                width: abs(end.x - start.x),
+                height: abs(end.y - start.y)
+            )
+            if rect.width >= 4, rect.height >= 4 {
+                marks.append(.mosaic(rect))
+            }
+        case .text:
+            break
         default:
             break
         }
@@ -224,6 +284,11 @@ private final class AnnotationCanvasView: NSView {
         needsDisplay = true
     }
 
+    func beginTextPlacement(_ text: String) {
+        pendingText = text
+        tool = .text
+    }
+
     func renderedImage() -> CGImage? {
         let outputSize = NSSize(width: image.width, height: image.height)
         let output = NSImage(size: outputSize)
@@ -236,7 +301,10 @@ private final class AnnotationCanvasView: NSView {
             fraction: 1
         )
 
-        for mark in marks {
+        for mark in marks where mark.isMosaic {
+            drawForExport(mark, outputHeight: outputSize.height)
+        }
+        for mark in marks where !mark.isMosaic {
             drawForExport(mark, outputHeight: outputSize.height)
         }
         output.unlockFocus()
@@ -286,6 +354,13 @@ private final class AnnotationCanvasView: NSView {
             path.stroke()
         case let .arrow(start, end):
             drawArrow(from: start, to: end, width: 3)
+        case let .text(text, point):
+            text.draw(
+                at: point,
+                withAttributes: textAttributes(fontSize: 18)
+            )
+        case let .mosaic(rect):
+            drawMosaicPreview(in: rect)
         }
     }
 
@@ -323,7 +398,83 @@ private final class AnnotationCanvasView: NSView {
             path.stroke()
         case let .arrow(start, end):
             drawArrow(from: convert(start), to: convert(end), width: max(4, 3 * scaleX))
+        case let .text(text, point):
+            let fontSize = max(18, 18 * min(scaleX, scaleY))
+            let converted = convert(point)
+            text.draw(
+                at: CGPoint(x: converted.x, y: converted.y - fontSize),
+                withAttributes: textAttributes(fontSize: fontSize)
+            )
+        case let .mosaic(rect):
+            let topLeft = convert(CGPoint(x: rect.minX, y: rect.maxY))
+            let bottomRight = convert(CGPoint(x: rect.maxX, y: rect.minY))
+            let outputRect = CGRect(
+                x: min(topLeft.x, bottomRight.x),
+                y: min(topLeft.y, bottomRight.y),
+                width: abs(bottomRight.x - topLeft.x),
+                height: abs(bottomRight.y - topLeft.y)
+            )
+            guard let mosaic = pixelatedCrop(for: rect) else { return }
+            NSGraphicsContext.current?.imageInterpolation = .none
+            mosaic.draw(
+                in: outputRect,
+                from: NSRect(origin: .zero, size: mosaic.size),
+                operation: .copy,
+                fraction: 1
+            )
         }
+    }
+
+    private func textAttributes(fontSize: CGFloat) -> [NSAttributedString.Key: Any] {
+        [
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+            .foregroundColor: NSColor.white,
+            .backgroundColor: NSColor.black.withAlphaComponent(0.68)
+        ]
+    }
+
+    private func drawMosaicPreview(in rect: CGRect) {
+        guard let mosaic = pixelatedCrop(for: rect) else { return }
+        NSGraphicsContext.current?.imageInterpolation = .none
+        mosaic.draw(
+            in: rect,
+            from: NSRect(origin: .zero, size: mosaic.size),
+            operation: .copy,
+            fraction: 1
+        )
+    }
+
+    private func pixelatedCrop(for viewRect: CGRect) -> NSImage? {
+        let clipped = viewRect.standardized.intersection(imageRect)
+        guard clipped.width >= 1, clipped.height >= 1 else { return nil }
+        let scaleX = CGFloat(image.width) / imageRect.width
+        let scaleY = CGFloat(image.height) / imageRect.height
+        let cropRect = CGRect(
+            x: (clipped.minX - imageRect.minX) * scaleX,
+            y: (clipped.minY - imageRect.minY) * scaleY,
+            width: clipped.width * scaleX,
+            height: clipped.height * scaleY
+        ).integral.intersection(
+            CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        )
+        guard let cropped = image.cropping(to: cropRect) else { return nil }
+
+        let blockSize: CGFloat = 12
+        let smallSize = NSSize(
+            width: max(1, ceil(cropRect.width / blockSize)),
+            height: max(1, ceil(cropRect.height / blockSize))
+        )
+        let small = NSImage(size: smallSize)
+        small.lockFocus()
+        NSGraphicsContext.current?.imageInterpolation = .none
+        NSImage(cgImage: cropped, size: smallSize).draw(
+            in: NSRect(origin: .zero, size: smallSize),
+            from: .zero,
+            operation: .copy,
+            fraction: 1
+        )
+        small.unlockFocus()
+        return small
     }
 
     private func drawArrow(from start: CGPoint, to end: CGPoint, width: CGFloat) {
@@ -355,3 +506,12 @@ private final class AnnotationCanvasView: NSView {
     }
 }
 
+private extension AnnotationMark {
+    var isMosaic: Bool {
+        if case .mosaic = self {
+            true
+        } else {
+            false
+        }
+    }
+}
