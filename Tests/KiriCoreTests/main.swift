@@ -30,6 +30,18 @@ let tests = [
     },
     KiriTest(name: "selection minimum size") {
         try rejectsTinySelection()
+    },
+    KiriTest(name: "selection handle hit testing") {
+        try hitTestsSelectionHandles()
+    },
+    KiriTest(name: "selection handle resizing") {
+        try resizesSelectionFromHandles()
+    },
+    KiriTest(name: "selection movement clamping") {
+        try movesSelectionWithinBounds()
+    },
+    KiriTest(name: "selection offset display conversion") {
+        try convertsSelectionsOnOffsetDisplays()
     }
 ]
 
