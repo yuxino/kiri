@@ -1,6 +1,6 @@
 import AppKit
 import CoreGraphics
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 
 struct CapturedDisplay {
     let image: CGImage
@@ -59,4 +59,3 @@ final class CaptureCoordinator {
         return CapturedDisplay(image: image, screenFrame: screen.frame)
     }
 }
-
