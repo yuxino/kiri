@@ -10,6 +10,25 @@ struct LibraryView: View {
         VStack(spacing: 0) {
             header
             Divider()
+            if let errorMessage = model.errorMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(errorMessage)
+                        .font(.callout)
+                    Spacer()
+                    Button {
+                        model.errorMessage = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 9)
+                .background(Color.orange.opacity(0.1))
+                Divider()
+            }
             if model.filteredAssets.isEmpty {
                 emptyState
             } else {

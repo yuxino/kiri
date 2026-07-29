@@ -4,6 +4,7 @@ set -eu
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 app_dir="$project_root/dist/kiri.app"
 contents_dir="$app_dir/Contents"
+signing_identity=${KIRI_CODESIGN_IDENTITY:--}
 
 cd "$project_root"
 swift build -c release --product kiri -Xswiftc -warnings-as-errors
@@ -13,6 +14,5 @@ cp "$project_root/.build/release/kiri" "$contents_dir/MacOS/kiri"
 cp "$project_root/Sources/KiriApp/Info.plist" "$contents_dir/Info.plist"
 cp "$project_root/Resources/kiri.icns" "$contents_dir/Resources/kiri.icns"
 
-codesign --force --deep --sign - "$app_dir"
+codesign --force --deep --sign "$signing_identity" "$app_dir"
 echo "$app_dir"
-

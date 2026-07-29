@@ -75,3 +75,30 @@ func searchFiltersBySourceApplication() async throws {
     try expect(preview.count == 1, "Search should find source application")
     try expect(safari.isEmpty, "Search should exclude non-matches")
 }
+
+func replacementKeepsStableAssetURL() async throws {
+    let temporaryURL = temporaryLibraryURL()
+    defer { try? FileManager.default.removeItem(at: temporaryURL) }
+    let library = try AssetLibrary(rootURL: temporaryURL)
+    let asset = try await library.importData(
+        Data("before".utf8),
+        kind: .image,
+        fileExtension: "png",
+        pixelWidth: 10,
+        pixelHeight: 10
+    )
+    let originalURL = await library.assetURL(for: asset)
+
+    let replaced = try await library.replaceData(
+        Data("after".utf8),
+        for: asset.id
+    )
+    let replacementURL = await library.assetURL(for: replaced)
+
+    try expect(replaced == asset, "Replacing image bytes should preserve asset metadata")
+    try expect(replacementURL == originalURL, "Replacement should keep the stable asset URL")
+    try expect(
+        try Data(contentsOf: replacementURL) == Data("after".utf8),
+        "Replacement should atomically update the stored bytes"
+    )
+}

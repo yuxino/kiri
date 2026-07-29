@@ -168,3 +168,27 @@ public enum SelectionGeometry {
         return CGRect(origin: CGPoint(x: x, y: y), size: rect.size)
     }
 }
+
+public enum WindowSnapGeometry {
+    public static func candidate(
+        at point: CGPoint,
+        windowsFrontToBack: [CGRect],
+        within bounds: CGRect,
+        minimumSide: CGFloat = 8
+    ) -> CGRect? {
+        let displayBounds = bounds.standardized
+        let minimum = max(1, minimumSide)
+
+        for window in windowsFrontToBack {
+            let visible = window.standardized.intersection(displayBounds)
+            guard !visible.isNull,
+                  visible.width >= minimum,
+                  visible.height >= minimum,
+                  visible.contains(point) else {
+                continue
+            }
+            return visible
+        }
+        return nil
+    }
+}

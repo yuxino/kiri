@@ -18,10 +18,12 @@ does not disappear just because the clipboard changed.
 ## Available today
 
 - Start region capture with the exclusive **⌥⌘2** default or **⌃⇧2**
-- Freeze the active display with live dimensions and a pixel loupe
-- Move or resize the selection with eight handles, then double-click or press Return
-- Annotate with pen, rectangle, arrow, text, and mosaic tools
-- Undo, copy to the clipboard, or save as PNG
+- Freeze the active display, snap to the frontmost window, or drag a free region
+- Resize with eight handles, then double-click or press Return for inline annotation
+- Distinguish pen, rectangle, arrow, text, and mosaic tools by color
+- Press Return to copy immediately, or save, pin, or open the full editor
+- Preview, drag, and continue from the bottom-right Quick Access panel
+- Persist each completed capture once and add it to History in the background
 - Search, favorite, reveal, and copy captures from the local library
 - Move captures to a recoverable trash, restore them, or delete permanently
 - Keep source application, dimensions, type, and creation time as metadata
@@ -40,6 +42,10 @@ swift run kiri-core-tests
 ./scripts/package-app.sh
 open dist/kiri.app
 ```
+
+If a local signing certificate is available, run
+`KIRI_CODESIGN_IDENTITY="Certificate Name" ./scripts/package-app.sh` to keep
+the app identity stable across local builds.
 
 macOS asks for Screen & System Audio Recording permission on the first capture.
 If capture remains unavailable after approval, quit and reopen kiri.

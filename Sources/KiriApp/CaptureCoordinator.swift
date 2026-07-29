@@ -1,10 +1,12 @@
 import AppKit
 import CoreGraphics
+import ImageIO
 @preconcurrency import ScreenCaptureKit
 
 struct CapturedDisplay {
     let image: CGImage
     let screenFrame: CGRect
+    let windowRectsFrontToBack: [CGRect]
 }
 
 enum CaptureCoordinatorError: LocalizedError {
@@ -24,6 +26,15 @@ enum CaptureCoordinatorError: LocalizedError {
 @MainActor
 final class CaptureCoordinator {
     func captureActiveDisplay() async throws -> CapturedDisplay {
+#if DEBUG
+        let usesFixture = ProcessInfo.processInfo.environment["KIRI_CAPTURE_FIXTURE"] == "1"
+            || CommandLine.arguments.contains("--capture-fixture")
+        if usesFixture,
+           let fixture = Self.makeFixture() {
+            return fixture
+        }
+#endif
+
         if !CGPreflightScreenCaptureAccess(), !CGRequestScreenCaptureAccess() {
             throw CaptureCoordinatorError.permissionRequired
         }
@@ -45,6 +56,26 @@ final class CaptureCoordinator {
             throw CaptureCoordinatorError.displayUnavailable
         }
 
+        let displayBounds = CGDisplayBounds(displayID)
+        let currentProcessID = ProcessInfo.processInfo.processIdentifier
+        let windowRects = content.windows.compactMap { window -> CGRect? in
+            guard window.isOnScreen,
+                  window.windowLayer == 0,
+                  window.owningApplication?.processID != currentProcessID else {
+                return nil
+            }
+            let visible = window.frame.standardized.intersection(displayBounds)
+            guard !visible.isNull, visible.width >= 8, visible.height >= 8 else {
+                return nil
+            }
+            return CGRect(
+                x: visible.minX - displayBounds.minX,
+                y: visible.minY - displayBounds.minY,
+                width: visible.width,
+                height: visible.height
+            )
+        }
+
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let configuration = SCStreamConfiguration()
         configuration.width = display.width
@@ -56,6 +87,82 @@ final class CaptureCoordinator {
             contentFilter: filter,
             configuration: configuration
         )
-        return CapturedDisplay(image: image, screenFrame: screen.frame)
+        return CapturedDisplay(
+            image: image,
+            screenFrame: screen.frame,
+            windowRectsFrontToBack: windowRects
+        )
     }
+
+#if DEBUG
+    private static func makeFixture() -> CapturedDisplay? {
+        guard let screen = NSScreen.main else { return nil }
+        let size = screen.frame.size
+        let windows = [
+            CGRect(x: 90, y: 75, width: min(620, size.width - 180), height: min(420, size.height - 180)),
+            CGRect(x: max(240, size.width * 0.42), y: 155, width: min(520, size.width * 0.48), height: min(360, size.height - 240))
+        ]
+        let fixture = NSImage(size: size)
+        fixture.lockFocus()
+
+        NSColor(calibratedRed: 0.12, green: 0.14, blue: 0.19, alpha: 1).setFill()
+        CGRect(origin: .zero, size: size).fill()
+        drawFixtureWindow(
+            topLeftRect: windows[1],
+            in: size,
+            color: NSColor(calibratedRed: 0.17, green: 0.22, blue: 0.31, alpha: 1),
+            title: "Reference"
+        )
+        drawFixtureWindow(
+            topLeftRect: windows[0],
+            in: size,
+            color: NSColor(calibratedRed: 0.95, green: 0.95, blue: 0.97, alpha: 1),
+            title: "Kiri interaction fixture"
+        )
+
+        fixture.unlockFocus()
+        guard let data = fixture.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: data),
+              let pngData = bitmap.representation(using: .png, properties: [:]),
+              let source = CGImageSourceCreateWithData(pngData as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            return nil
+        }
+        return CapturedDisplay(
+            image: image,
+            screenFrame: screen.frame,
+            windowRectsFrontToBack: windows
+        )
+    }
+
+    private static func drawFixtureWindow(
+        topLeftRect: CGRect,
+        in canvasSize: CGSize,
+        color: NSColor,
+        title: String
+    ) {
+        let rect = CGRect(
+            x: topLeftRect.minX,
+            y: canvasSize.height - topLeftRect.maxY,
+            width: topLeftRect.width,
+            height: topLeftRect.height
+        )
+        let path = NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12)
+        color.setFill()
+        path.fill()
+
+        let titleBar = CGRect(x: rect.minX, y: rect.maxY - 42, width: rect.width, height: 42)
+        NSColor.black.withAlphaComponent(0.08).setFill()
+        titleBar.fill()
+        (title as NSString).draw(
+            at: CGPoint(x: rect.minX + 18, y: rect.maxY - 29),
+            withAttributes: [
+                .font: NSFont.systemFont(ofSize: 14, weight: .semibold),
+                .foregroundColor: color.brightnessComponent > 0.6
+                    ? NSColor.labelColor
+                    : NSColor.white
+            ]
+        )
+    }
+#endif
 }

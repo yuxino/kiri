@@ -28,6 +28,9 @@ let tests = [
     KiriTest(name: "library source application search") {
         try await searchFiltersBySourceApplication()
     },
+    KiriTest(name: "library replacement keeps stable URL") {
+        try await replacementKeepsStableAssetURL()
+    },
     KiriTest(name: "selection reverse drag") {
         try normalizesReverseDrag()
     },
@@ -54,6 +57,15 @@ let tests = [
     },
     KiriTest(name: "selection offset display conversion") {
         try convertsSelectionsOnOffsetDisplays()
+    },
+    KiriTest(name: "window snap topmost hit") {
+        try windowSnapChoosesTopmostCandidate()
+    },
+    KiriTest(name: "window snap display clipping") {
+        try windowSnapClipsToDisplay()
+    },
+    KiriTest(name: "window snap candidate filtering") {
+        try windowSnapFiltersInvalidCandidates()
     }
 ]
 

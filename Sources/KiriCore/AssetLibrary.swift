@@ -119,6 +119,15 @@ public actor AssetLibrary {
         assetsURL.appendingPathComponent(asset.filename)
     }
 
+    @discardableResult
+    public func replaceData(_ data: Data, for id: UUID) throws -> CaptureAsset {
+        guard let asset = index.first(where: { $0.id == id }) else {
+            throw AssetLibraryError.assetNotFound
+        }
+        try data.write(to: assetURL(for: asset), options: [.atomic])
+        return asset
+    }
+
     public func setFavorite(_ favorite: Bool, id: UUID) throws {
         try update(id: id) { $0.isFavorite = favorite }
     }
