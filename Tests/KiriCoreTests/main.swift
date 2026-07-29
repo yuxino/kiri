@@ -16,6 +16,9 @@ let tests = [
     KiriTest(name: "capture shortcut modifiers") {
         try captureShortcutExposesNormalizedModifiers()
     },
+    KiriTest(name: "capture shortcut legacy migration") {
+        try captureShortcutMigratesLegacyPreset()
+    },
     KiriTest(name: "library import persistence") {
         try await importPersistsAcrossLibraryInstances()
     },

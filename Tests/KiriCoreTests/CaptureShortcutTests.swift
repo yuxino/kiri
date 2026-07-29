@@ -3,7 +3,7 @@ import Foundation
 
 func captureShortcutPresetsHaveStableLabels() throws {
     try expect(
-        CaptureShortcutPreset.shiftCommand2.shortcut.displayLabel == "⇧⌘2",
+        CaptureShortcutPreset.shiftCommandA.shortcut.displayLabel == "⇧⌘A",
         "Shift-command preset should use the expected macOS label"
     )
     try expect(
@@ -25,11 +25,21 @@ func captureShortcutRoundTrips() throws {
 }
 
 func captureShortcutExposesNormalizedModifiers() throws {
-    let shortcut = CaptureShortcutPreset.shiftCommand2.shortcut
-    try expect(shortcut.key == "2", "Capture shortcut should expose its key")
+    let shortcut = CaptureShortcutPreset.shiftCommandA.shortcut
+    try expect(shortcut.key == "A", "Capture shortcut should expose its key")
     try expect(
         shortcut.modifiers == [.shift, .command],
         "Capture shortcut should expose a normalized modifier set"
     )
 }
 
+func captureShortcutMigratesLegacyPreset() throws {
+    try expect(
+        CaptureShortcutPreset(storedIdentifier: "shiftCommand2") == .shiftCommandA,
+        "The former default preset should migrate to command-shift-A"
+    )
+    try expect(
+        CaptureShortcutPreset(storedIdentifier: "optionCommand2") == .optionCommand2,
+        "Current preset identifiers should still load"
+    )
+}

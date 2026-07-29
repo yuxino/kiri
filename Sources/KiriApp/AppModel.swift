@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Combine
 import KiriCore
 
@@ -8,21 +9,7 @@ final class AppModel: ObservableObject {
     @Published var searchQuery = ""
     @Published var showingTrash = false
     @Published var errorMessage: String?
-    @Published var captureShortcutPreset: CaptureShortcutPreset {
-        didSet {
-            UserDefaults.standard.set(
-                captureShortcutPreset.rawValue,
-                forKey: Self.shortcutDefaultsKey
-            )
-            if hasStarted {
-                shortcutMonitor.start(
-                    shortcut: captureShortcutPreset.shortcut
-                ) { [weak self] in
-                    self?.startCapture()
-                }
-            }
-        }
-    }
+    @Published private(set) var captureShortcutPreset: CaptureShortcutPreset
 
     let libraryRoot: URL
 
@@ -36,8 +23,8 @@ final class AppModel: ObservableObject {
     init() {
         captureShortcutPreset = UserDefaults.standard
             .string(forKey: Self.shortcutDefaultsKey)
-            .flatMap(CaptureShortcutPreset.init(rawValue:))
-            ?? .shiftCommand2
+            .flatMap(CaptureShortcutPreset.init(storedIdentifier:))
+            ?? .shiftCommandA
         let setup = Self.makeLibrary()
         libraryRoot = setup.root
         library = setup.library
@@ -59,15 +46,28 @@ final class AppModel: ObservableObject {
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
-        shortcutMonitor.start(
-            shortcut: captureShortcutPreset.shortcut
-        ) { [weak self] in
-            self?.startCapture()
+        do {
+            try registerShortcut(captureShortcutPreset)
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
     func selectShortcut(_ preset: CaptureShortcutPreset) {
-        captureShortcutPreset = preset
+        guard preset != captureShortcutPreset else { return }
+        do {
+            if hasStarted {
+                try registerShortcut(preset)
+            }
+            captureShortcutPreset = preset
+            UserDefaults.standard.set(
+                preset.rawValue,
+                forKey: Self.shortcutDefaultsKey
+            )
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     func startCapture() {
@@ -219,6 +219,12 @@ final class AppModel: ObservableObject {
         NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
     }
 
+    private func registerShortcut(_ preset: CaptureShortcutPreset) throws {
+        try shortcutMonitor.start(shortcut: preset.shortcut) { [weak self] in
+            self?.startCapture()
+        }
+    }
+
     private static func makeLibrary() -> (root: URL, library: AssetLibrary, warning: String?) {
         do {
             let root = try AssetLibrary.defaultRootURL()
@@ -246,57 +252,150 @@ private enum CaptureExportError: LocalizedError {
 
 @MainActor
 private final class GlobalShortcutMonitor {
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
+    private static let hotKeyID = EventHotKeyID(signature: 0x4B49_5249, id: 1)
+
+    private var eventHandler: EventHandlerRef?
+    private var hotKey: EventHotKeyRef?
+    private var activeShortcut: CaptureShortcut?
+    private var action: (@MainActor () -> Void)?
 
     func start(
         shortcut: CaptureShortcut,
         action: @escaping @MainActor () -> Void
-    ) {
-        stop()
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            Self.handle(event, shortcut: shortcut, action: action)
+    ) throws {
+        if activeShortcut == shortcut, hotKey != nil {
+            self.action = action
+            return
         }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            guard Self.matches(event, shortcut: shortcut) else { return event }
-            Task { @MainActor in action() }
-            return nil
+
+        try installEventHandlerIfNeeded()
+
+        var newHotKey: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            try Self.keyCode(for: shortcut.key),
+            Self.modifierFlags(for: shortcut.modifiers),
+            Self.hotKeyID,
+            GetApplicationEventTarget(),
+            OptionBits(kEventHotKeyExclusive),
+            &newHotKey
+        )
+        guard status == noErr, let newHotKey else {
+            if status == eventHotKeyExistsErr {
+                throw GlobalShortcutError.alreadyInUse(shortcut.displayLabel)
+            }
+            throw GlobalShortcutError.registrationFailed(
+                shortcut.displayLabel,
+                status
+            )
+        }
+
+        let previousHotKey = hotKey
+        hotKey = newHotKey
+        activeShortcut = shortcut
+        self.action = action
+        if let previousHotKey {
+            UnregisterEventHotKey(previousHotKey)
         }
     }
 
-    private func stop() {
-        if let globalMonitor {
-            NSEvent.removeMonitor(globalMonitor)
-            self.globalMonitor = nil
-        }
-        if let localMonitor {
-            NSEvent.removeMonitor(localMonitor)
-            self.localMonitor = nil
+    private func installEventHandlerIfNeeded() throws {
+        guard eventHandler == nil else { return }
+        var eventType = EventTypeSpec(
+            eventClass: OSType(kEventClassKeyboard),
+            eventKind: UInt32(kEventHotKeyPressed)
+        )
+        let context = Unmanaged.passUnretained(self).toOpaque()
+        let status = InstallEventHandler(
+            GetApplicationEventTarget(),
+            Self.handleEvent,
+            1,
+            &eventType,
+            context,
+            &eventHandler
+        )
+        guard status == noErr else {
+            throw GlobalShortcutError.eventHandlerInstallationFailed(status)
         }
     }
 
-    private static func handle(
-        _ event: NSEvent,
-        shortcut: CaptureShortcut,
-        action: @escaping @MainActor () -> Void
-    ) {
-        guard matches(event, shortcut: shortcut) else { return }
-        Task { @MainActor in action() }
+    private func performAction() {
+        action?()
     }
 
-    private static func matches(_ event: NSEvent, shortcut: CaptureShortcut) -> Bool {
-        let relevant: NSEvent.ModifierFlags = [.control, .option, .shift, .command]
-        let required = shortcut.modifiers.reduce(into: NSEvent.ModifierFlags()) {
-            flags,
-            modifier in
+    private static let handleEvent: EventHandlerUPP = {
+        _,
+        event,
+        context in
+        guard let event, let context else {
+            return OSStatus(eventNotHandledErr)
+        }
+
+        var hotKeyID = EventHotKeyID()
+        let status = GetEventParameter(
+            event,
+            EventParamName(kEventParamDirectObject),
+            EventParamType(typeEventHotKeyID),
+            nil,
+            MemoryLayout<EventHotKeyID>.size,
+            nil,
+            &hotKeyID
+        )
+        guard status == noErr,
+              hotKeyID.signature == GlobalShortcutMonitor.hotKeyID.signature,
+              hotKeyID.id == GlobalShortcutMonitor.hotKeyID.id else {
+            return OSStatus(eventNotHandledErr)
+        }
+
+        let monitor = Unmanaged<GlobalShortcutMonitor>
+            .fromOpaque(context)
+            .takeUnretainedValue()
+        Task { @MainActor in
+            monitor.performAction()
+        }
+        return noErr
+    }
+
+    private static func keyCode(for key: String) throws -> UInt32 {
+        switch key.uppercased() {
+        case "A":
+            UInt32(kVK_ANSI_A)
+        case "2":
+            UInt32(kVK_ANSI_2)
+        default:
+            throw GlobalShortcutError.unsupportedKey(key)
+        }
+    }
+
+    private static func modifierFlags(
+        for modifiers: Set<CaptureShortcutModifier>
+    ) -> UInt32 {
+        modifiers.reduce(into: UInt32(0)) { flags, modifier in
             switch modifier {
-            case .control: flags.insert(.control)
-            case .option: flags.insert(.option)
-            case .shift: flags.insert(.shift)
-            case .command: flags.insert(.command)
+            case .control: flags |= UInt32(controlKey)
+            case .option: flags |= UInt32(optionKey)
+            case .shift: flags |= UInt32(shiftKey)
+            case .command: flags |= UInt32(cmdKey)
             }
         }
-        return event.charactersIgnoringModifiers == shortcut.key
-            && event.modifierFlags.intersection(relevant) == required
+    }
+}
+
+private enum GlobalShortcutError: LocalizedError {
+    case alreadyInUse(String)
+    case eventHandlerInstallationFailed(OSStatus)
+    case registrationFailed(String, OSStatus)
+    case unsupportedKey(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .alreadyInUse(label):
+            "The \(label) shortcut is already in use by another app."
+        case let .eventHandlerInstallationFailed(status):
+            "Could not install the global shortcut handler (error \(status))."
+        case let .registrationFailed(label, status):
+            "Could not reserve the \(label) shortcut (error \(status))."
+        case let .unsupportedKey(key):
+            "The \(key.uppercased()) key is not supported as a capture shortcut."
+        }
     }
 }
