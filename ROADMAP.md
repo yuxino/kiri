@@ -10,6 +10,11 @@ Available in the source preview:
 - [x] Native ScreenCaptureKit still capture
 - [x] Region selection and dimension feedback
 - [x] Pen, rectangle, and arrow annotation
+- [x] Text annotation
+- [x] Mosaic annotation
+- [x] Configurable shortcut presets
+- [x] Selection resizing and pixel loupe
+- [x] Offset and mixed-scale display coordinate tests
 - [x] Clipboard and PNG export
 - [x] Local capture library
 - [x] Search, favorites, recoverable trash, and restore
@@ -17,10 +22,7 @@ Available in the source preview:
 
 Before the first packaged release:
 
-- [ ] Text annotation
-- [ ] Mosaic and blur
-- [ ] Configurable global shortcut
-- [ ] Better selection resizing and pixel loupe
+- [ ] Blur annotation
 - [ ] Mixed-scale multi-display acceptance testing
 - [ ] Signed and notarized release builds
 
@@ -49,4 +51,3 @@ Before the first packaged release:
 - [ ] Tags and smart collections
 - [ ] Optional user-controlled sync
 - [ ] Windows exploration after the native macOS experience is mature
-

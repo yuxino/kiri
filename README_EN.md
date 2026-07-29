@@ -17,9 +17,10 @@ does not disappear just because the clipboard changed.
 
 ## Available today
 
-- Start region capture with **⇧⌘2**
-- Freeze the active display and see live selection dimensions
-- Annotate with pen, rectangle, and arrow tools
+- Start region capture with the exclusive **⇧⌘A** default, **⌥⌘2**, or **⌃⇧2**
+- Freeze the active display with live dimensions and a pixel loupe
+- Move or resize the selection with eight handles, then double-click or press Return
+- Annotate with pen, rectangle, arrow, text, and mosaic tools
 - Undo, copy to the clipboard, or save as PNG
 - Search, favorite, reveal, and copy captures from the local library
 - Move captures to a recoverable trash, restore them, or delete permanently
@@ -50,4 +51,3 @@ See [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
 [SECURITY.md](SECURITY.md).
 
 [MIT](LICENSE) © 2026 yuxino
-
