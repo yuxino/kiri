@@ -17,7 +17,7 @@ does not disappear just because the clipboard changed.
 
 ## Available today
 
-- Start region capture with the exclusive **⇧⌘A** default, **⌥⌘2**, or **⌃⇧2**
+- Start region capture with the exclusive **⌥⌘2** default or **⌃⇧2**
 - Freeze the active display with live dimensions and a pixel loupe
 - Move or resize the selection with eight handles, then double-click or press Return
 - Annotate with pen, rectangle, arrow, text, and mosaic tools

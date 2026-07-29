@@ -35,15 +35,14 @@ public struct CaptureShortcut: Codable, Equatable, Sendable {
 }
 
 public enum CaptureShortcutPreset: String, Codable, CaseIterable, Identifiable, Sendable {
-    case shiftCommandA
     case optionCommand2
     case controlShift2
 
     public var id: String { rawValue }
 
     public init?(storedIdentifier: String) {
-        if storedIdentifier == "shiftCommand2" {
-            self = .shiftCommandA
+        if storedIdentifier == "shiftCommand2" || storedIdentifier == "shiftCommandA" {
+            self = .optionCommand2
         } else {
             self.init(rawValue: storedIdentifier)
         }
@@ -51,8 +50,6 @@ public enum CaptureShortcutPreset: String, Codable, CaseIterable, Identifiable, 
 
     public var shortcut: CaptureShortcut {
         switch self {
-        case .shiftCommandA:
-            CaptureShortcut(key: "A", modifiers: [.shift, .command])
         case .optionCommand2:
             CaptureShortcut(key: "2", modifiers: [.option, .command])
         case .controlShift2:

@@ -24,7 +24,7 @@ final class AppModel: ObservableObject {
         captureShortcutPreset = UserDefaults.standard
             .string(forKey: Self.shortcutDefaultsKey)
             .flatMap(CaptureShortcutPreset.init(storedIdentifier:))
-            ?? .shiftCommandA
+            ?? .optionCommand2
         let setup = Self.makeLibrary()
         libraryRoot = setup.root
         library = setup.library
