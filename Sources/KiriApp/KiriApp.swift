@@ -32,15 +32,9 @@ private struct KiriCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Capture") {
-            Button("Capture & Copy") {
-                model.startCapture(intent: .copy)
+            Button("Capture") {
+                model.startCapture()
             }
-            .disabled(model.isCaptureStarting)
-
-            Button("Capture & Edit") {
-                model.startCapture(intent: .annotate)
-            }
-            .keyboardShortcut("2", modifiers: [.option, .shift, .command])
             .disabled(model.isCaptureStarting)
         }
 
@@ -60,17 +54,13 @@ private struct MenuBarView: View {
 
     var body: some View {
         Button {
-            model.startCapture(intent: .copy)
+            model.startCapture()
         } label: {
             if model.isCaptureStarting {
                 Label("Preparing Capture…", systemImage: "hourglass")
             } else {
-                Text("Capture & Copy  \(model.captureShortcutLabel)")
+                Text("Capture  \(model.captureShortcutLabel)")
             }
-        }
-        .disabled(model.isCaptureStarting)
-        Button("Capture & Edit") {
-            model.startCapture(intent: .annotate)
         }
         .disabled(model.isCaptureStarting)
         Divider()

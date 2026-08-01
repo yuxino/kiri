@@ -2,13 +2,13 @@
 
 ## Goal
 
-Make common screenshot markup discoverable without slowing down Kiri's default capture flow. Users should be able to draw a box, a plain connecting line, or an arrow immediately after choosing **Capture & Edit**.
+Make common screenshot markup discoverable in one capture flow. Users should be able to draw a box, a plain connecting line, or an arrow immediately after selecting a capture region.
 
 ## Interaction
 
-Kiri keeps two capture paths. **Capture & Copy** remains the fastest path: selecting a region copies it immediately. **Capture & Edit** opens the inline annotation canvas after region selection. The edit toolbar exposes Pen, Rectangle, Line, Arrow, Text, and Mosaic as first-level tools. Rectangle uses `R`, Line uses `L`, and Arrow uses `A`. Every drag-based tool previews while dragging, commits on mouse-up, and participates in the existing undo/redo history.
+Kiri exposes one **Capture** action everywhere: the library, menu bar, application menu, and global shortcut all start the same flow. Selecting a region opens the inline annotation canvas. The toolbar exposes Pen, Rectangle, Line, Arrow, Text, and Mosaic as first-level tools. Rectangle uses `R`, Line uses `L`, and Arrow uses `A`. Every drag-based tool previews while dragging, commits on mouse-up, and participates in the existing undo/redo history. Users who do not need markup press Return or click Done immediately to copy the untouched capture.
 
-The same tool ordering and shortcuts appear in the standalone editor so users do not have to relearn controls. The library and menu-bar entry use the explicit label **Capture & Edit** instead of the less actionable **Annotate**.
+The same tool ordering and shortcuts appear in the standalone editor so users do not have to relearn controls. There is no separate copy-versus-edit decision before capture.
 
 ## Rendering and edge cases
 
@@ -20,5 +20,6 @@ Line marks store start and end points, render with rounded caps, and scale with 
 - `R`, `L`, and `A` switch tools in inline annotation and the standalone editor.
 - Line previews during drag and is preserved in copied or saved output.
 - Undo, redo, and clear include line marks.
-- Fast Capture & Copy remains one-step.
+- The app exposes only one Capture action.
+- Return or Done copies a capture with or without annotations.
 - Compact and dark library layouts remain unclipped.

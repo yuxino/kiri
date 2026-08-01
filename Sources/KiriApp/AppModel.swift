@@ -93,7 +93,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func startCapture(intent: CaptureIntent = .copy) {
+    func startCapture() {
         guard overlayController == nil, !isCaptureStarting else { return }
         isCaptureStarting = true
         errorMessage = nil
@@ -109,7 +109,7 @@ final class AppModel: ObservableObject {
                     try? await Task.sleep(for: .milliseconds(120))
                 }
                 let capture = try await captureCoordinator.captureActiveDisplay()
-                let controller = SelectionOverlayController(capture: capture, intent: intent)
+                let controller = SelectionOverlayController(capture: capture)
                 overlayController = controller
                 controller.present(
                     onComplete: { [weak self] image, action in

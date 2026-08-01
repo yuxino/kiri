@@ -111,37 +111,28 @@ struct LibraryView: View {
     }
 
     private var captureActions: some View {
-        HStack(spacing: KiriUI.Spacing.compact) {
-            Button {
-                model.startCapture(intent: .annotate)
-            } label: {
-                Label("Capture & Edit", systemImage: "pencil.and.outline")
-            }
-            .buttonStyle(.bordered)
-            .help("Capture a region, then add boxes, lines, arrows, text, or mosaic")
-
-            Button {
-                model.startCapture(intent: .copy)
-            } label: {
-                HStack(spacing: 7) {
-                    if model.isCaptureStarting {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "viewfinder")
-                    }
-                    Text(model.isCaptureStarting ? "Preparing…" : "Capture & Copy")
-                    if !model.isCaptureStarting {
-                        Text(model.captureShortcutLabel)
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.white.opacity(0.78))
-                    }
+        Button {
+            model.startCapture()
+        } label: {
+            HStack(spacing: 7) {
+                if model.isCaptureStarting {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "viewfinder")
+                }
+                Text(model.isCaptureStarting ? "Preparing…" : "Capture")
+                if !model.isCaptureStarting {
+                    Text(model.captureShortcutLabel)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.white.opacity(0.78))
                 }
             }
-            .buttonStyle(.borderedProminent)
         }
+        .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .disabled(model.isCaptureStarting)
+        .help("Capture a region, then add boxes, lines, arrows, text, or mosaic")
     }
 
     @ViewBuilder
@@ -255,46 +246,37 @@ struct LibraryView: View {
             VStack(spacing: 7) {
                 Text("Ready for your first capture")
                     .font(.title2.weight(.semibold))
-                Text("Drag a region, then paste it anywhere. Annotate only when you need to.")
+                Text("Select a region, add markup if needed, then copy it anywhere.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
             Button {
-                model.startCapture(intent: .copy)
+                model.startCapture()
             } label: {
-                Label("Capture & Copy", systemImage: "viewfinder")
+                Label("Capture", systemImage: "viewfinder")
                     .frame(minWidth: 150)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-            HStack(spacing: 10) {
-                Text("or press  \(model.captureShortcutLabel)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                Text("·")
-                    .foregroundStyle(.tertiary)
-                Button("Capture & Edit") {
-                    model.startCapture(intent: .annotate)
-                }
-                .buttonStyle(.link)
-                .font(.caption)
-            }
+            Text("or press  \(model.captureShortcutLabel)")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
 
             Divider()
                 .frame(width: 400)
 
             HStack(spacing: 18) {
-                OnboardingStep(number: "1", title: "Drag", detail: "Choose a region")
+                OnboardingStep(number: "1", title: "Select", detail: "Choose a region")
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                OnboardingStep(number: "2", title: "Copy", detail: "Happens instantly")
+                OnboardingStep(number: "2", title: "Mark up", detail: "Optional tools")
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                OnboardingStep(number: "3", title: "Paste", detail: "Use it anywhere")
+                OnboardingStep(number: "3", title: "Copy", detail: "Press Return")
             }
         }
         .padding(.horizontal, 40)

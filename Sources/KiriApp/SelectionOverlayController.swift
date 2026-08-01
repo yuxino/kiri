@@ -8,29 +8,13 @@ enum CaptureSessionAction {
     case edit
 }
 
-enum CaptureIntent {
-    case copy
-    case annotate
-
-    var actionVerb: String {
-        switch self {
-        case .copy:
-            "copy"
-        case .annotate:
-            "annotate"
-        }
-    }
-}
-
 @MainActor
 final class SelectionOverlayController {
     private let capture: CapturedDisplay
-    private let intent: CaptureIntent
     private var window: NSWindow?
 
-    init(capture: CapturedDisplay, intent: CaptureIntent) {
+    init(capture: CapturedDisplay) {
         self.capture = capture
-        self.intent = intent
     }
 
     func present(
@@ -53,8 +37,7 @@ final class SelectionOverlayController {
 
         let sessionView = CaptureSessionView(
             image: capture.image,
-            windowRectsFrontToBack: capture.windowRectsFrontToBack,
-            intent: intent
+            windowRectsFrontToBack: capture.windowRectsFrontToBack
         )
         sessionView.onCancel = { [weak self] in
             self?.close()
@@ -86,7 +69,6 @@ private final class CaptureSessionView: NSView {
 
     private let image: CGImage
     private let windowRectsFrontToBack: [CGRect]
-    private let intent: CaptureIntent
     private var phase: CapturePhase = .selecting
     private var dragStart: CGPoint?
     private var isSelecting = false
@@ -104,12 +86,10 @@ private final class CaptureSessionView: NSView {
 
     init(
         image: CGImage,
-        windowRectsFrontToBack: [CGRect],
-        intent: CaptureIntent
+        windowRectsFrontToBack: [CGRect]
     ) {
         self.image = image
         self.windowRectsFrontToBack = windowRectsFrontToBack
-        self.intent = intent
         super.init(frame: .zero)
         wantsLayer = true
     }
@@ -348,13 +328,7 @@ private final class CaptureSessionView: NSView {
     }
 
     private func finishSelection() {
-        switch intent {
-        case .copy:
-            guard let cropped = croppedSelection() else { return }
-            onComplete?(cropped, .copy)
-        case .annotate:
-            beginAnnotation()
-        }
+        beginAnnotation()
     }
 
     private func beginAnnotation() {
@@ -730,17 +704,17 @@ private final class CaptureSessionView: NSView {
     }
 
     private func drawHint() {
-        let text = "Release to \(intent.actionVerb) · Esc to cancel" as NSString
+        let text = "Release to edit · Esc to cancel" as NSString
         drawHint(text, near: selection)
     }
 
     private func drawWindowHint(for rect: CGRect) {
-        let text = "Click to \(intent.actionVerb) window · Drag for a region" as NSString
+        let text = "Click to select window · Drag for a region" as NSString
         drawHint(text, near: rect)
     }
 
     private func drawInitialHint() {
-        let text = "Drag to \(intent.actionVerb)   ·   Click a window   ·   Esc to cancel" as NSString
+        let text = "Drag to capture   ·   Click a window   ·   Esc to cancel" as NSString
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white
