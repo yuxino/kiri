@@ -105,13 +105,13 @@ private final class QuickAccessView: NSVisualEffectView {
 
     init(image: NSImage, fileURL: URL) {
         super.init(frame: .zero)
-        material = .hudWindow
+        material = .popover
         blendingMode = .behindWindow
         state = .active
         wantsLayer = true
-        layer?.cornerRadius = 14
+        layer?.cornerRadius = 12
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+        layer?.borderColor = CaptureUIColors.surfaceBorder.cgColor
         layer?.masksToBounds = true
 
         let preview = DraggableImageView(image: image, fileURL: fileURL)
@@ -126,44 +126,30 @@ private final class QuickAccessView: NSVisualEffectView {
             CaptureActionButton(
                 symbol: "doc.on.doc.fill",
                 label: "Copy",
-                style: .primary(CaptureUIColors.copy),
+                style: .primary,
                 showsTitle: true,
                 target: self,
                 action: #selector(copyCapture)
             ),
             CaptureActionButton(
-                symbol: "square.and.arrow.down.fill",
-                label: "Save",
-                style: .secondary(CaptureUIColors.save),
+                symbol: "ellipsis",
+                label: "More Actions",
+                style: .secondary,
                 target: self,
-                action: #selector(saveCapture)
-            ),
-            CaptureActionButton(
-                symbol: "pin.fill",
-                label: "Pin",
-                style: .secondary(CaptureUIColors.pin),
-                target: self,
-                action: #selector(pinCapture)
-            ),
-            CaptureActionButton(
-                symbol: "slider.horizontal.3",
-                label: "Edit",
-                style: .secondary(CaptureUIColors.edit),
-                target: self,
-                action: #selector(editCapture)
+                action: #selector(showMoreActions(_:))
             ),
             NSView(),
             CaptureActionButton(
                 symbol: "xmark",
                 label: "Dismiss",
-                style: .secondary(CaptureUIColors.dismiss),
+                style: .secondary,
                 target: self,
                 action: #selector(dismiss)
             )
         ])
         actions.orientation = .horizontal
         actions.alignment = .centerY
-        actions.spacing = 5
+        actions.spacing = 4
         actions.translatesAutoresizingMaskIntoConstraints = false
 
         let hint = NSTextField(labelWithString: "Saved to History  ·  Drag preview to share")
@@ -222,6 +208,31 @@ private final class QuickAccessView: NSVisualEffectView {
 
     @objc private func copyCapture() {
         onCopy?()
+    }
+
+    @objc private func showMoreActions(_ sender: NSButton) {
+        let menu = NSMenu()
+        menu.addItem(
+            menuItem("Save As…", symbol: "square.and.arrow.down", action: #selector(saveCapture))
+        )
+        menu.addItem(
+            menuItem("Pin on Screen", symbol: "pin", action: #selector(pinCapture))
+        )
+        menu.addItem(
+            menuItem("Open in Editor", symbol: "slider.horizontal.3", action: #selector(editCapture))
+        )
+        menu.popUp(
+            positioning: nil,
+            at: CGPoint(x: sender.bounds.minX, y: sender.bounds.maxY + 4),
+            in: sender
+        )
+    }
+
+    private func menuItem(_ title: String, symbol: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+        return item
     }
 
     @objc private func saveCapture() {

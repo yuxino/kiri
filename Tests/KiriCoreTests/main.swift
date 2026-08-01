@@ -1,6 +1,18 @@
 import Darwin
 
 let tests = [
+    KiriTest(name: "annotation history empty state") {
+        try annotationHistoryStartsEmpty()
+    },
+    KiriTest(name: "annotation history undo and redo") {
+        try annotationHistorySupportsUndoAndRedo()
+    },
+    KiriTest(name: "annotation history branch invalidation") {
+        try annotationHistoryInvalidatesRedoBranch()
+    },
+    KiriTest(name: "annotation history clear") {
+        try annotationHistoryClearsAllState()
+    },
     KiriTest(name: "capture kinds round-trip") {
         try allCaptureKindsRoundTrip()
     },

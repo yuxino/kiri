@@ -7,6 +7,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private let completion: Completion
     private var onClose: (() -> Void)?
     private let canvas: AnnotationCanvasView
+    private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
+    private var undoButton: CaptureActionButton?
+    private var redoButton: CaptureActionButton?
+    private var clearButton: CaptureActionButton?
 
     init(
         image: CGImage,
@@ -45,44 +49,164 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         let root = NSView()
         root.translatesAutoresizingMaskIntoConstraints = false
 
-        let toolbar = NSStackView(views: [
-            button("Pen", action: #selector(usePen)),
-            button("Rectangle", action: #selector(useRectangle)),
-            button("Arrow", action: #selector(useArrow)),
-            button("Text", action: #selector(useText)),
-            button("Mosaic", action: #selector(useMosaic)),
-            button("Undo", action: #selector(undo)),
-            NSView(),
-            button("Cancel", action: #selector(cancel)),
-            button("Save…", action: #selector(save)),
-            button("Copy", action: #selector(copyImage))
-        ])
+        let toolbarSurface = NSVisualEffectView()
+        toolbarSurface.material = .headerView
+        toolbarSurface.blendingMode = .withinWindow
+        toolbarSurface.state = .active
+        toolbarSurface.translatesAutoresizingMaskIntoConstraints = false
+
+        let toolbar = NSStackView()
         toolbar.orientation = .horizontal
-        toolbar.spacing = 8
+        toolbar.alignment = .centerY
+        toolbar.spacing = 4
         toolbar.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
         toolbar.translatesAutoresizingMaskIntoConstraints = false
-        canvas.translatesAutoresizingMaskIntoConstraints = false
 
-        root.addSubview(toolbar)
+        let tools: [(AnnotationTool, String, String, String, Selector)] = [
+            (.pen, "pencil.tip", "Pen (P)", "p", #selector(usePen)),
+            (.rectangle, "rectangle", "Rectangle (R)", "r", #selector(useRectangle)),
+            (.arrow, "arrow.up.right", "Arrow (A)", "a", #selector(useArrow)),
+            (.text, "character.textbox", "Text (T)", "t", #selector(useText)),
+            (.mosaic, "square.grid.3x3", "Mosaic (M)", "m", #selector(useMosaic))
+        ]
+        for (tool, symbol, label, keyEquivalent, action) in tools {
+            let button = CaptureActionButton(
+                symbol: symbol,
+                label: label,
+                style: .tool,
+                target: self,
+                action: action
+            )
+            button.keyEquivalent = keyEquivalent
+            button.keyEquivalentModifierMask = []
+            toolButtons[tool] = button
+            toolbar.addArrangedSubview(button)
+        }
+        toolbar.addArrangedSubview(CaptureDividerView(height: 24))
+
+        let undoButton = historyButton(
+            symbol: "arrow.uturn.backward",
+            label: "Undo (⌘Z)",
+            action: #selector(undo),
+            keyEquivalent: "z",
+            modifiers: [.command]
+        )
+        self.undoButton = undoButton
+        toolbar.addArrangedSubview(undoButton)
+
+        let redoButton = historyButton(
+            symbol: "arrow.uturn.forward",
+            label: "Redo (⇧⌘Z)",
+            action: #selector(redo),
+            keyEquivalent: "z",
+            modifiers: [.command, .shift]
+        )
+        self.redoButton = redoButton
+        toolbar.addArrangedSubview(redoButton)
+
+        let clearButton = CaptureActionButton(
+            symbol: "trash",
+            label: "Clear Annotations",
+            style: .secondary,
+            target: self,
+            action: #selector(clearAnnotations)
+        )
+        clearButton.setActionEnabled(false)
+        self.clearButton = clearButton
+        toolbar.addArrangedSubview(clearButton)
+        toolbar.addArrangedSubview(NSView())
+
+        toolbar.addArrangedSubview(
+            CaptureActionButton(
+                symbol: "xmark",
+                label: "Cancel",
+                style: .secondary,
+                target: self,
+                action: #selector(cancel)
+            )
+        )
+        toolbar.addArrangedSubview(
+            CaptureActionButton(
+                symbol: "square.and.arrow.down",
+                label: "Save As…",
+                style: .secondary,
+                target: self,
+                action: #selector(save)
+            )
+        )
+        let copyButton = CaptureActionButton(
+            symbol: "doc.on.doc",
+            label: "Copy",
+            style: .primary,
+            showsTitle: true,
+            target: self,
+            action: #selector(copyImage)
+        )
+        copyButton.keyEquivalent = "\r"
+        copyButton.keyEquivalentModifierMask = []
+        toolbar.addArrangedSubview(copyButton)
+
+        canvas.translatesAutoresizingMaskIntoConstraints = false
+        canvas.onToolChange = { [weak self] tool in
+            self?.updateToolButtons(selected: tool)
+        }
+        canvas.onHistoryChange = { [weak self] canUndo, canRedo in
+            self?.updateHistoryControls(canUndo: canUndo, canRedo: canRedo)
+        }
+
+        root.addSubview(toolbarSurface)
+        toolbarSurface.addSubview(toolbar)
         root.addSubview(canvas)
         NSLayoutConstraint.activate([
-            toolbar.topAnchor.constraint(equalTo: root.topAnchor),
-            toolbar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
-            toolbar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            toolbar.heightAnchor.constraint(equalToConstant: 48),
-            canvas.topAnchor.constraint(equalTo: toolbar.bottomAnchor),
+            toolbarSurface.topAnchor.constraint(equalTo: root.topAnchor),
+            toolbarSurface.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            toolbarSurface.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            toolbarSurface.heightAnchor.constraint(equalToConstant: 46),
+            toolbar.topAnchor.constraint(equalTo: toolbarSurface.topAnchor),
+            toolbar.leadingAnchor.constraint(equalTo: toolbarSurface.leadingAnchor),
+            toolbar.trailingAnchor.constraint(equalTo: toolbarSurface.trailingAnchor),
+            toolbar.bottomAnchor.constraint(equalTo: toolbarSurface.bottomAnchor),
+            canvas.topAnchor.constraint(equalTo: toolbarSurface.bottomAnchor),
             canvas.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             canvas.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             canvas.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
+        updateToolButtons(selected: canvas.tool)
+        updateHistoryControls(canUndo: false, canRedo: false)
         controller.view = root
         return controller
     }
 
-    private func button(_ title: String, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
-        button.bezelStyle = .texturedRounded
+    private func historyButton(
+        symbol: String,
+        label: String,
+        action: Selector,
+        keyEquivalent: String,
+        modifiers: NSEvent.ModifierFlags
+    ) -> CaptureActionButton {
+        let button = CaptureActionButton(
+            symbol: symbol,
+            label: label,
+            style: .secondary,
+            target: self,
+            action: action
+        )
+        button.keyEquivalent = keyEquivalent
+        button.keyEquivalentModifierMask = modifiers
+        button.setActionEnabled(false)
         return button
+    }
+
+    private func updateToolButtons(selected: AnnotationTool) {
+        for (tool, button) in toolButtons {
+            button.setToolSelected(tool == selected)
+        }
+    }
+
+    private func updateHistoryControls(canUndo: Bool, canRedo: Bool) {
+        undoButton?.setActionEnabled(canUndo)
+        redoButton?.setActionEnabled(canRedo)
+        clearButton?.setActionEnabled(canUndo)
     }
 
     @objc private func usePen() {
@@ -108,6 +232,14 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func undo() {
         canvas.undo()
+    }
+
+    @objc private func redo() {
+        canvas.redo()
+    }
+
+    @objc private func clearAnnotations() {
+        canvas.clearAnnotations()
     }
 
     @objc private func cancel() {

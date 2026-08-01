@@ -1,25 +1,21 @@
 import AppKit
 
 enum CaptureUIColors {
-    static let pen = NSColor.systemPink
-    static let rectangle = NSColor.systemTeal
-    static let arrow = NSColor.systemPurple
-    static let text = NSColor.systemBlue
-    static let mosaic = NSColor.systemOrange
-
-    static let undo = NSColor.white.withAlphaComponent(0.72)
-    static let copy = NSColor.systemBlue
-    static let save = NSColor.systemGreen
-    static let pin = NSColor.systemOrange
-    static let edit = NSColor.systemPurple
-    static let dismiss = NSColor.white.withAlphaComponent(0.72)
+    static let accent = NSColor.controlAccentColor
+    static let label = NSColor.labelColor
+    static let secondaryLabel = NSColor.secondaryLabelColor
+    static let disabledLabel = NSColor.tertiaryLabelColor
+    static let hoverFill = NSColor.labelColor.withAlphaComponent(0.09)
+    static let selectedFill = NSColor.controlAccentColor.withAlphaComponent(0.16)
+    static let divider = NSColor.separatorColor.withAlphaComponent(0.7)
+    static let surfaceBorder = NSColor.separatorColor.withAlphaComponent(0.55)
 }
 
 final class CaptureDividerView: NSView {
     init(height: CGFloat = 24) {
         super.init(frame: CGRect(x: 0, y: 0, width: 1, height: height))
         wantsLayer = true
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        layer?.backgroundColor = CaptureUIColors.divider.cgColor
         setFrameSize(CGSize(width: 1, height: height))
     }
 
@@ -31,9 +27,9 @@ final class CaptureDividerView: NSView {
 
 final class CaptureActionButton: NSButton {
     enum Style {
-        case tool(NSColor)
-        case secondary(NSColor)
-        case primary(NSColor)
+        case tool
+        case secondary
+        case primary
     }
 
     private let visualStyle: Style
@@ -61,19 +57,18 @@ final class CaptureActionButton: NSButton {
             systemSymbolName: symbol,
             accessibilityDescription: label
         )?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
         )
         imagePosition = showsTitle ? .imageLeading : .imageOnly
         imageHugsTitle = true
-        font = .systemFont(ofSize: 12, weight: .semibold)
+        font = .systemFont(ofSize: 12, weight: .medium)
         isBordered = false
         focusRingType = .none
         toolTip = label
         setAccessibilityLabel(label)
         wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.borderWidth = 1
-        setFrameSize(CGSize(width: showsTitle ? 76 : 34, height: 32))
+        layer?.cornerRadius = 7
+        setFrameSize(CGSize(width: showsTitle ? 72 : 30, height: 30))
         refreshAppearance()
     }
 
@@ -84,6 +79,11 @@ final class CaptureActionButton: NSButton {
 
     func setToolSelected(_ selected: Bool) {
         selectedTool = selected
+        refreshAppearance()
+    }
+
+    func setActionEnabled(_ enabled: Bool) {
+        isEnabled = enabled
         refreshAppearance()
     }
 
@@ -111,35 +111,43 @@ final class CaptureActionButton: NSButton {
         refreshAppearance()
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
     private func refreshAppearance() {
         let tint: NSColor
         let background: NSColor
-        let border: NSColor
         let titleColor: NSColor
 
-        switch visualStyle {
-        case let .tool(color):
-            tint = color
-            background = color.withAlphaComponent(
-                selectedTool ? 0.25 : (hovering ? 0.14 : 0.07)
-            )
-            border = color.withAlphaComponent(selectedTool ? 0.72 : 0.18)
-            titleColor = color
-        case let .secondary(color):
-            tint = color
-            background = color.withAlphaComponent(hovering ? 0.24 : 0.12)
-            border = color.withAlphaComponent(hovering ? 0.48 : 0.22)
-            titleColor = color
-        case let .primary(color):
-            tint = .white
-            background = hovering ? color.highlight(withLevel: 0.12) ?? color : color
-            border = color.withAlphaComponent(0.9)
-            titleColor = .white
+        if !isEnabled {
+            tint = CaptureUIColors.disabledLabel
+            background = .clear
+            titleColor = CaptureUIColors.disabledLabel
+        } else {
+            switch visualStyle {
+            case .tool:
+                tint = selectedTool ? CaptureUIColors.accent : CaptureUIColors.label
+                background = selectedTool
+                    ? CaptureUIColors.selectedFill
+                    : (hovering ? CaptureUIColors.hoverFill : .clear)
+                titleColor = tint
+            case .secondary:
+                tint = CaptureUIColors.secondaryLabel
+                background = hovering ? CaptureUIColors.hoverFill : .clear
+                titleColor = CaptureUIColors.label
+            case .primary:
+                let color = CaptureUIColors.accent
+                tint = .white
+                background = hovering ? color.highlight(withLevel: 0.1) ?? color : color
+                titleColor = .white
+            }
         }
 
         contentTintColor = tint
         layer?.backgroundColor = background.cgColor
-        layer?.borderColor = border.cgColor
+        layer?.borderWidth = 0
         if !title.isEmpty {
             attributedTitle = NSAttributedString(
                 string: label,

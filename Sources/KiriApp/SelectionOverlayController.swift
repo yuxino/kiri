@@ -79,6 +79,9 @@ private final class CaptureSessionView: NSView {
     private var annotationCanvas: AnnotationCanvasView?
     private var toolbar: NSVisualEffectView?
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
+    private var undoButton: CaptureActionButton?
+    private var redoButton: CaptureActionButton?
+    private var clearAnnotationsItem: NSMenuItem?
 
     init(image: CGImage, windowRectsFrontToBack: [CGRect]) {
         self.image = image
@@ -303,7 +306,33 @@ private final class CaptureSessionView: NSView {
                     complete(.save)
                     return
                 case "z":
-                    annotationCanvas?.undo()
+                    if event.modifierFlags.contains(.shift) {
+                        redo()
+                    } else {
+                        undo()
+                    }
+                    return
+                default:
+                    break
+                }
+            }
+            let commandModifiers: NSEvent.ModifierFlags = [.command, .control, .option]
+            if event.modifierFlags.intersection(commandModifiers).isEmpty {
+                switch event.charactersIgnoringModifiers?.lowercased() {
+                case "p":
+                    usePen()
+                    return
+                case "r":
+                    useRectangle()
+                    return
+                case "a":
+                    useArrow()
+                    return
+                case "t":
+                    useText()
+                    return
+                case "m":
+                    useMosaic()
                     return
                 default:
                     break
@@ -328,6 +357,9 @@ private final class CaptureSessionView: NSView {
         canvas.onToolChange = { [weak self] tool in
             self?.updateToolButtons(selected: tool)
         }
+        canvas.onHistoryChange = { [weak self] canUndo, canRedo in
+            self?.updateHistoryControls(canUndo: canUndo, canRedo: canRedo)
+        }
         addSubview(canvas)
         annotationCanvas = canvas
 
@@ -336,6 +368,7 @@ private final class CaptureSessionView: NSView {
         self.toolbar = toolbar
         layoutAnnotationUI()
         updateToolButtons(selected: canvas.tool)
+        updateHistoryControls(canUndo: false, canRedo: false)
         window?.makeFirstResponder(self)
         needsDisplay = true
     }
@@ -347,6 +380,9 @@ private final class CaptureSessionView: NSView {
         toolbar?.removeFromSuperview()
         toolbar = nil
         toolButtons.removeAll()
+        undoButton = nil
+        redoButton = nil
+        clearAnnotationsItem = nil
         NSCursor.crosshair.set()
         window?.makeFirstResponder(self)
         needsDisplay = true
@@ -370,34 +406,34 @@ private final class CaptureSessionView: NSView {
 
     private func makeToolbar() -> NSVisualEffectView {
         let effect = NSVisualEffectView()
-        effect.material = .hudWindow
+        effect.material = .popover
         effect.blendingMode = .withinWindow
         effect.state = .active
         effect.wantsLayer = true
-        effect.layer?.cornerRadius = 14
+        effect.layer?.cornerRadius = 12
         effect.layer?.borderWidth = 1
-        effect.layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+        effect.layer?.borderColor = CaptureUIColors.surfaceBorder.cgColor
         effect.layer?.masksToBounds = true
 
         let stack = NSStackView()
         stack.orientation = .horizontal
         stack.alignment = .centerY
-        stack.spacing = 6
-        stack.edgeInsets = NSEdgeInsets(top: 7, left: 8, bottom: 7, right: 8)
+        stack.spacing = 3
+        stack.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
-        let tools: [(AnnotationTool, String, String, NSColor, Selector)] = [
-            (.pen, "pencil.tip", "Pen", CaptureUIColors.pen, #selector(usePen)),
-            (.rectangle, "rectangle", "Rectangle", CaptureUIColors.rectangle, #selector(useRectangle)),
-            (.arrow, "arrow.up.right", "Arrow", CaptureUIColors.arrow, #selector(useArrow)),
-            (.text, "character.textbox", "Text", CaptureUIColors.text, #selector(useText)),
-            (.mosaic, "square.grid.3x3.fill", "Mosaic", CaptureUIColors.mosaic, #selector(useMosaic))
+        let tools: [(AnnotationTool, String, String, Selector)] = [
+            (.pen, "pencil.tip", "Pen (P)", #selector(usePen)),
+            (.rectangle, "rectangle", "Rectangle (R)", #selector(useRectangle)),
+            (.arrow, "arrow.up.right", "Arrow (A)", #selector(useArrow)),
+            (.text, "character.textbox", "Text (T)", #selector(useText)),
+            (.mosaic, "square.grid.3x3", "Mosaic (M)", #selector(useMosaic))
         ]
-        for (tool, symbol, help, color, action) in tools {
+        for (tool, symbol, help, action) in tools {
             let button = CaptureActionButton(
                 symbol: symbol,
                 label: help,
-                style: .tool(color),
+                style: .tool,
                 target: self,
                 action: action
             )
@@ -405,47 +441,39 @@ private final class CaptureSessionView: NSView {
             stack.addArrangedSubview(button)
         }
         stack.addArrangedSubview(separator())
-        stack.addArrangedSubview(
-            actionButton(
-                symbol: "arrow.uturn.backward",
-                label: "Undo",
-                color: CaptureUIColors.undo,
-                action: #selector(undo)
-            )
+        let undoButton = actionButton(
+            symbol: "arrow.uturn.backward",
+            label: "Undo (⌘Z)",
+            action: #selector(undo)
         )
+        undoButton.setActionEnabled(false)
+        self.undoButton = undoButton
+        stack.addArrangedSubview(undoButton)
+
+        let redoButton = actionButton(
+            symbol: "arrow.uturn.forward",
+            label: "Redo (⇧⌘Z)",
+            action: #selector(redo)
+        )
+        redoButton.setActionEnabled(false)
+        self.redoButton = redoButton
+        stack.addArrangedSubview(redoButton)
         stack.addArrangedSubview(separator())
         stack.addArrangedSubview(
             CaptureActionButton(
-                symbol: "doc.on.doc.fill",
-                label: "Copy",
-                style: .primary(CaptureUIColors.copy),
+                symbol: "checkmark",
+                label: "Done",
+                style: .primary,
                 showsTitle: true,
                 target: self,
-                action: #selector(copyCapture)
+                action: #selector(finishCapture)
             )
         )
         stack.addArrangedSubview(
             actionButton(
-                symbol: "square.and.arrow.down.fill",
-                label: "Save",
-                color: CaptureUIColors.save,
-                action: #selector(saveCapture)
-            )
-        )
-        stack.addArrangedSubview(
-            actionButton(
-                symbol: "pin.fill",
-                label: "Pin",
-                color: CaptureUIColors.pin,
-                action: #selector(pinCapture)
-            )
-        )
-        stack.addArrangedSubview(
-            actionButton(
-                symbol: "slider.horizontal.3",
-                label: "Full editor",
-                color: CaptureUIColors.edit,
-                action: #selector(editCapture)
+                symbol: "ellipsis",
+                label: "More Actions",
+                action: #selector(showMoreActions(_:))
             )
         )
 
@@ -462,13 +490,12 @@ private final class CaptureSessionView: NSView {
     private func actionButton(
         symbol: String,
         label: String,
-        color: NSColor,
         action: Selector
     ) -> CaptureActionButton {
         CaptureActionButton(
             symbol: symbol,
             label: label,
-            style: .secondary(color),
+            style: .secondary,
             target: self,
             action: action
         )
@@ -503,6 +530,12 @@ private final class CaptureSessionView: NSView {
         }
     }
 
+    private func updateHistoryControls(canUndo: Bool, canRedo: Bool) {
+        undoButton?.setActionEnabled(canUndo)
+        redoButton?.setActionEnabled(canRedo)
+        clearAnnotationsItem?.isEnabled = canUndo
+    }
+
     @objc private func usePen() {
         selectTool(.pen)
     }
@@ -533,8 +566,55 @@ private final class CaptureSessionView: NSView {
         window?.makeFirstResponder(self)
     }
 
-    @objc private func copyCapture() {
+    @objc private func redo() {
+        annotationCanvas?.redo()
+        window?.makeFirstResponder(self)
+    }
+
+    @objc private func finishCapture() {
         complete(.copy)
+    }
+
+    @objc private func showMoreActions(_ sender: NSButton) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.addItem(
+            menuItem("Save As…", symbol: "square.and.arrow.down", action: #selector(saveCapture))
+        )
+        menu.addItem(
+            menuItem("Pin on Screen", symbol: "pin", action: #selector(pinCapture))
+        )
+        menu.addItem(
+            menuItem("Open in Editor", symbol: "slider.horizontal.3", action: #selector(editCapture))
+        )
+        menu.addItem(.separator())
+        let clearItem = menuItem(
+            "Clear Annotations",
+            symbol: "trash",
+            action: #selector(clearAnnotations)
+        )
+        clearItem.isEnabled = undoButton?.isEnabled == true
+        clearAnnotationsItem = clearItem
+        menu.addItem(clearItem)
+        menu.popUp(
+            positioning: nil,
+            at: CGPoint(x: sender.bounds.minX, y: sender.bounds.maxY + 4),
+            in: sender
+        )
+        clearAnnotationsItem = nil
+        window?.makeFirstResponder(self)
+    }
+
+    private func menuItem(_ title: String, symbol: String, action: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+        return item
+    }
+
+    @objc private func clearAnnotations() {
+        annotationCanvas?.clearAnnotations()
+        window?.makeFirstResponder(self)
     }
 
     @objc private func saveCapture() {

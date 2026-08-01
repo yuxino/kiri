@@ -1,4 +1,5 @@
 import AppKit
+import KiriCore
 
 enum AnnotationTool: CaseIterable {
     case pen
@@ -19,6 +20,11 @@ private enum AnnotationMark {
 final class AnnotationCanvasView: NSView {
     let image: CGImage
     var onToolChange: ((AnnotationTool) -> Void)?
+    var onHistoryChange: ((_ canUndo: Bool, _ canRedo: Bool) -> Void)? {
+        didSet {
+            publishHistoryState()
+        }
+    }
     var tool: AnnotationTool = .rectangle {
         didSet {
             onToolChange?(tool)
@@ -26,7 +32,7 @@ final class AnnotationCanvasView: NSView {
         }
     }
 
-    private var marks: [AnnotationMark] = []
+    private var history = AnnotationHistory<AnnotationMark>()
     private var draftPoints: [CGPoint] = []
     private var dragStart: CGPoint?
     private var dragCurrent: CGPoint?
@@ -54,10 +60,10 @@ final class AnnotationCanvasView: NSView {
         let target = imageRect
         NSImage(cgImage: image, size: target.size).draw(in: target)
 
-        for mark in marks where mark.isMosaic {
+        for mark in history.elements where mark.isMosaic {
             draw(mark)
         }
-        for mark in marks where !mark.isMosaic {
+        for mark in history.elements where !mark.isMosaic {
             draw(mark)
         }
         if tool == .pen, draftPoints.count > 1 {
@@ -79,10 +85,9 @@ final class AnnotationCanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
         if tool == .text, let pendingText {
-            marks.append(.text(pendingText, point))
+            append(.text(pendingText, point))
             self.pendingText = nil
             tool = .rectangle
-            needsDisplay = true
             return
         }
         dragStart = point
@@ -104,15 +109,15 @@ final class AnnotationCanvasView: NSView {
         guard let start = dragStart, let end = dragCurrent else { return }
         switch tool {
         case .pen where draftPoints.count > 1:
-            marks.append(.pen(draftPoints))
+            append(.pen(draftPoints))
         case .rectangle:
-            marks.append(.rectangle(Self.rect(from: start, to: end)))
+            append(.rectangle(Self.rect(from: start, to: end)))
         case .arrow:
-            marks.append(.arrow(start, end))
+            append(.arrow(start, end))
         case .mosaic:
             let rect = Self.rect(from: start, to: end)
             if rect.width >= 4, rect.height >= 4 {
-                marks.append(.mosaic(rect))
+                append(.mosaic(rect))
             }
         case .text:
             break
@@ -126,7 +131,21 @@ final class AnnotationCanvasView: NSView {
     }
 
     func undo() {
-        _ = marks.popLast()
+        guard history.undo() != nil else { return }
+        publishHistoryState()
+        needsDisplay = true
+    }
+
+    func redo() {
+        guard history.redo() != nil else { return }
+        publishHistoryState()
+        needsDisplay = true
+    }
+
+    func clearAnnotations() {
+        guard history.canUndo || history.canRedo else { return }
+        history.clear()
+        publishHistoryState()
         needsDisplay = true
     }
 
@@ -147,10 +166,10 @@ final class AnnotationCanvasView: NSView {
             fraction: 1
         )
 
-        for mark in marks where mark.isMosaic {
+        for mark in history.elements where mark.isMosaic {
             drawForExport(mark, outputHeight: outputSize.height)
         }
-        for mark in marks where !mark.isMosaic {
+        for mark in history.elements where !mark.isMosaic {
             drawForExport(mark, outputHeight: outputSize.height)
         }
         output.unlockFocus()
@@ -172,6 +191,16 @@ final class AnnotationCanvasView: NSView {
         }
         let width = bounds.height * imageAspect
         return CGRect(x: (bounds.width - width) / 2, y: 0, width: width, height: bounds.height)
+    }
+
+    private func append(_ mark: AnnotationMark) {
+        history.append(mark)
+        publishHistoryState()
+        needsDisplay = true
+    }
+
+    private func publishHistoryState() {
+        onHistoryChange?(history.canUndo, history.canRedo)
     }
 
     private func clampedPoint(_ point: CGPoint) -> CGPoint {
