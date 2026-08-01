@@ -4,6 +4,7 @@ import KiriCore
 enum AnnotationTool: CaseIterable {
     case pen
     case rectangle
+    case line
     case arrow
     case text
     case mosaic
@@ -12,6 +13,7 @@ enum AnnotationTool: CaseIterable {
 private enum AnnotationMark {
     case pen([CGPoint])
     case rectangle(CGRect)
+    case line(CGPoint, CGPoint)
     case arrow(CGPoint, CGPoint)
     case text(String, CGPoint)
     case mosaic(CGRect)
@@ -72,6 +74,8 @@ final class AnnotationCanvasView: NSView {
             switch tool {
             case .rectangle:
                 draw(.rectangle(Self.rect(from: dragStart, to: dragCurrent)))
+            case .line:
+                draw(.line(dragStart, dragCurrent))
             case .arrow:
                 draw(.arrow(dragStart, dragCurrent))
             case .mosaic:
@@ -112,8 +116,12 @@ final class AnnotationCanvasView: NSView {
             append(.pen(draftPoints))
         case .rectangle:
             append(.rectangle(Self.rect(from: start, to: end)))
+        case .line where Self.hasVisibleLength(from: start, to: end):
+            append(.line(start, end))
         case .arrow:
-            append(.arrow(start, end))
+            if Self.hasVisibleLength(from: start, to: end) {
+                append(.arrow(start, end))
+            }
         case .mosaic:
             let rect = Self.rect(from: start, to: end)
             if rect.width >= 4, rect.height >= 4 {
@@ -219,6 +227,10 @@ final class AnnotationCanvasView: NSView {
         )
     }
 
+    private static func hasVisibleLength(from start: CGPoint, to end: CGPoint) -> Bool {
+        hypot(end.x - start.x, end.y - start.y) >= 3
+    }
+
     private func draw(_ mark: AnnotationMark) {
         annotationColor.setStroke()
         switch mark {
@@ -235,6 +247,8 @@ final class AnnotationCanvasView: NSView {
             let path = NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
             path.lineWidth = 3
             path.stroke()
+        case let .line(start, end):
+            drawLine(from: start, to: end, width: 3)
         case let .arrow(start, end):
             drawArrow(from: start, to: end, width: 3)
         case let .text(text, point):
@@ -276,6 +290,12 @@ final class AnnotationCanvasView: NSView {
             let path = NSBezierPath(roundedRect: converted, xRadius: 3, yRadius: 3)
             path.lineWidth = max(4, 3 * scaleX)
             path.stroke()
+        case let .line(start, end):
+            drawLine(
+                from: convert(start),
+                to: convert(end),
+                width: max(4, 3 * scaleX)
+            )
         case let .arrow(start, end):
             drawArrow(from: convert(start), to: convert(end), width: max(4, 3 * scaleX))
         case let .text(text, point):
@@ -362,12 +382,7 @@ final class AnnotationCanvasView: NSView {
     }
 
     private func drawArrow(from start: CGPoint, to end: CGPoint, width: CGFloat) {
-        let path = NSBezierPath()
-        path.move(to: start)
-        path.line(to: end)
-        path.lineWidth = width
-        path.lineCapStyle = .round
-        path.stroke()
+        drawLine(from: start, to: end, width: width)
 
         let angle = atan2(end.y - start.y, end.x - start.x)
         let headLength = max(12, width * 4)
@@ -387,6 +402,15 @@ final class AnnotationCanvasView: NSView {
         head.lineCapStyle = .round
         head.lineJoinStyle = .round
         head.stroke()
+    }
+
+    private func drawLine(from start: CGPoint, to end: CGPoint, width: CGFloat) {
+        let path = NSBezierPath()
+        path.move(to: start)
+        path.line(to: end)
+        path.lineWidth = width
+        path.lineCapStyle = .round
+        path.stroke()
     }
 }
 

@@ -115,10 +115,10 @@ struct LibraryView: View {
             Button {
                 model.startCapture(intent: .annotate)
             } label: {
-                Label("Annotate", systemImage: "pencil.tip")
+                Label("Capture & Edit", systemImage: "pencil.and.outline")
             }
             .buttonStyle(.bordered)
-            .help("Capture a region and open annotation tools")
+            .help("Capture a region, then add boxes, lines, arrows, text, or mosaic")
 
             Button {
                 model.startCapture(intent: .copy)
@@ -275,7 +275,7 @@ struct LibraryView: View {
                     .foregroundStyle(.secondary)
                 Text("·")
                     .foregroundStyle(.tertiary)
-                Button("Capture & Annotate") {
+                Button("Capture & Edit") {
                     model.startCapture(intent: .annotate)
                 }
                 .buttonStyle(.link)

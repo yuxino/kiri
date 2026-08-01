@@ -327,6 +327,9 @@ private final class CaptureSessionView: NSView {
                 case "r":
                     useRectangle()
                     return
+                case "l":
+                    useLine()
+                    return
                 case "a":
                     useArrow()
                     return
@@ -450,6 +453,7 @@ private final class CaptureSessionView: NSView {
                 "Rectangle (R) — Draw a box",
                 #selector(useRectangle)
             ),
+            (.line, "line.diagonal", "Line (L)", "Line (L) — Connect two points", #selector(useLine)),
             (.arrow, "arrow.up.right", "Arrow (A)", "Arrow (A) — Point something out", #selector(useArrow)),
             (.text, "character.textbox", "Text (T)", "Text (T) — Add a note", #selector(useText)),
             (.mosaic, "square.grid.3x3", "Mosaic (M)", "Mosaic (M) — Hide sensitive content", #selector(useMosaic))
@@ -593,6 +597,10 @@ private final class CaptureSessionView: NSView {
 
     @objc private func useRectangle() {
         selectTool(.rectangle)
+    }
+
+    @objc private func useLine() {
+        selectTool(.line)
     }
 
     @objc private func useArrow() {

@@ -65,6 +65,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         let tools: [(AnnotationTool, String, String, String, Selector)] = [
             (.pen, "pencil.tip", "Pen (P)", "p", #selector(usePen)),
             (.rectangle, "rectangle", "Rectangle (R)", "r", #selector(useRectangle)),
+            (.line, "line.diagonal", "Line (L)", "l", #selector(useLine)),
             (.arrow, "arrow.up.right", "Arrow (A)", "a", #selector(useArrow)),
             (.text, "character.textbox", "Text (T)", "t", #selector(useText)),
             (.mosaic, "square.grid.3x3", "Mosaic (M)", "m", #selector(useMosaic))
@@ -215,6 +216,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func useRectangle() {
         canvas.tool = .rectangle
+    }
+
+    @objc private func useLine() {
+        canvas.tool = .line
     }
 
     @objc private func useArrow() {

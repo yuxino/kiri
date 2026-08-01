@@ -37,7 +37,7 @@ private struct KiriCommands: Commands {
             }
             .disabled(model.isCaptureStarting)
 
-            Button("Capture & Annotate") {
+            Button("Capture & Edit") {
                 model.startCapture(intent: .annotate)
             }
             .keyboardShortcut("2", modifiers: [.option, .shift, .command])
@@ -69,7 +69,7 @@ private struct MenuBarView: View {
             }
         }
         .disabled(model.isCaptureStarting)
-        Button("Capture & Annotate") {
+        Button("Capture & Edit") {
             model.startCapture(intent: .annotate)
         }
         .disabled(model.isCaptureStarting)
