@@ -92,10 +92,19 @@ final class CaptureCoordinator {
 
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let configuration = SCStreamConfiguration()
-        configuration.width = display.width
-        configuration.height = display.height
+        // SCDisplay dimensions are measured in points, while the stream output
+        // dimensions are pixels. Capture at the screen's backing resolution so
+        // the full-screen selection overlay stays sharp on Retina displays.
+        let backingScale = max(screen.backingScaleFactor, 1)
+        configuration.width = max(
+            1,
+            Int((CGFloat(display.width) * backingScale).rounded())
+        )
+        configuration.height = max(
+            1,
+            Int((CGFloat(display.height) * backingScale).rounded())
+        )
         configuration.showsCursor = false
-        configuration.captureResolution = .best
 
         let image = try await SCScreenshotManager.captureImage(
             contentFilter: filter,
