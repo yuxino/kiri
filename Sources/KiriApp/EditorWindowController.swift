@@ -64,11 +64,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
         let tools: [(AnnotationTool, String, String, String, Selector)] = [
             (.pen, "pencil.tip", "Pen (P)", "p", #selector(usePen)),
-            (.rectangle, "rectangle", "Rectangle (R)", "r", #selector(useRectangle)),
+            (.rectangle, "rectangle.dashed", "Rectangle (R)", "r", #selector(useRectangle)),
             (.line, "line.diagonal", "Line (L)", "l", #selector(useLine)),
             (.arrow, "arrow.up.right", "Arrow (A)", "a", #selector(useArrow)),
-            (.text, "character.textbox", "Text (T)", "t", #selector(useText)),
-            (.mosaic, "square.grid.3x3", "Mosaic (M)", "m", #selector(useMosaic))
+            (.text, "textformat", "Text (T)", "t", #selector(useText)),
+            (.mosaic, "square.grid.3x3.fill", "Mosaic (M)", "m", #selector(useMosaic))
         ]
         for (tool, symbol, label, keyEquivalent, action) in tools {
             let button = CaptureActionButton(
@@ -117,15 +117,16 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         toolbar.addArrangedSubview(clearButton)
         toolbar.addArrangedSubview(NSView())
 
-        toolbar.addArrangedSubview(
-            CaptureActionButton(
-                symbol: "xmark",
-                label: "Cancel",
-                style: .secondary,
-                target: self,
-                action: #selector(cancel)
-            )
+        let cancelButton = CaptureActionButton(
+            symbol: "xmark.circle",
+            label: "Cancel (Esc)",
+            style: .secondary,
+            target: self,
+            action: #selector(cancel)
         )
+        cancelButton.keyEquivalent = "\u{1b}"
+        cancelButton.keyEquivalentModifierMask = []
+        toolbar.addArrangedSubview(cancelButton)
         toolbar.addArrangedSubview(
             CaptureActionButton(
                 symbol: "square.and.arrow.down",
@@ -162,7 +163,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             toolbarSurface.topAnchor.constraint(equalTo: root.topAnchor),
             toolbarSurface.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             toolbarSurface.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            toolbarSurface.heightAnchor.constraint(equalToConstant: 46),
+            toolbarSurface.heightAnchor.constraint(equalToConstant: 50),
             toolbar.topAnchor.constraint(equalTo: toolbarSurface.topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: toolbarSurface.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: toolbarSurface.trailingAnchor),

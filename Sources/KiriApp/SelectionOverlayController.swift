@@ -83,6 +83,7 @@ private final class CaptureSessionView: NSView {
     private var redoButton: CaptureActionButton?
     private var clearAnnotationsItem: NSMenuItem?
     private var toolbarHintLabel: NSTextField?
+    private var isCompleting = false
 
     init(
         image: CGImage,
@@ -266,11 +267,7 @@ private final class CaptureSessionView: NSView {
     override func keyDown(with event: NSEvent) {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         if event.keyCode == 53 {
-            if phase == .annotating {
-                returnToSelection()
-            } else {
-                onCancel?()
-            }
+            onCancel?()
             return
         }
 
@@ -362,7 +359,7 @@ private final class CaptureSessionView: NSView {
         needsDisplay = true
     }
 
-    private func returnToSelection() {
+    @objc private func returnToSelection() {
         phase = .selecting
         selection = .null
         annotationCanvas?.removeFromSuperview()
@@ -391,8 +388,22 @@ private final class CaptureSessionView: NSView {
     }
 
     private func complete(_ action: CaptureSessionAction) {
-        guard let rendered = annotationCanvas?.renderedImage() else { return }
-        onComplete?(rendered, action)
+        guard !isCompleting, let canvas = annotationCanvas else { return }
+        isCompleting = true
+
+        // Remove the full-screen overlay before doing pixel work so Done feels
+        // immediate even for a Retina-sized capture with several annotations.
+        window?.orderOut(nil)
+        Task { @MainActor [weak self, canvas] in
+            await Task.yield()
+            guard let self else { return }
+            guard let rendered = canvas.renderedImage() else {
+                isCompleting = false
+                window?.makeKeyAndOrderFront(nil)
+                return
+            }
+            onComplete?(rendered, action)
+        }
     }
 
     private func makeToolbar() -> NSVisualEffectView {
@@ -401,7 +412,8 @@ private final class CaptureSessionView: NSView {
         effect.blendingMode = .withinWindow
         effect.state = .active
         effect.wantsLayer = true
-        effect.layer?.cornerRadius = 12
+        effect.layer?.cornerRadius = 15
+        effect.layer?.cornerCurve = .continuous
         effect.layer?.borderWidth = 1
         effect.layer?.borderColor = CaptureUIColors.surfaceBorder.cgColor
         effect.layer?.masksToBounds = true
@@ -409,28 +421,43 @@ private final class CaptureSessionView: NSView {
         let content = NSStackView()
         content.orientation = .vertical
         content.alignment = .centerX
-        content.spacing = 2
-        content.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 5, right: 6)
+        content.spacing = 3
+        content.edgeInsets = NSEdgeInsets(top: 7, left: 8, bottom: 6, right: 8)
         content.translatesAutoresizingMaskIntoConstraints = false
 
         let actions = NSStackView()
         actions.orientation = .horizontal
         actions.alignment = .centerY
-        actions.spacing = 3
+        actions.spacing = 5
+
+        actions.addArrangedSubview(CaptureSparkleView())
+        let cancelButton = actionButton(
+            symbol: "xmark",
+            label: "Cancel (Esc)",
+            hoverHint: "Cancel capture · Esc",
+            action: #selector(cancelCapture)
+        )
+        actions.addArrangedSubview(cancelButton)
+        actions.addArrangedSubview(separator())
+
+        let toolGroup = NSStackView()
+        toolGroup.orientation = .horizontal
+        toolGroup.alignment = .centerY
+        toolGroup.spacing = 1
 
         let tools: [(AnnotationTool, String, String, String, Selector)] = [
             (.pen, "pencil.tip", "Pen (P)", "Pen (P) — Draw freehand", #selector(usePen)),
             (
                 .rectangle,
-                "rectangle",
+                "rectangle.dashed",
                 "Rectangle (R)",
                 "Rectangle (R) — Draw a box",
                 #selector(useRectangle)
             ),
             (.line, "line.diagonal", "Line (L)", "Line (L) — Connect two points", #selector(useLine)),
             (.arrow, "arrow.up.right", "Arrow (A)", "Arrow (A) — Point something out", #selector(useArrow)),
-            (.text, "character.textbox", "Text (T)", "Text (T) — Add a note", #selector(useText)),
-            (.mosaic, "square.grid.3x3", "Mosaic (M)", "Mosaic (M) — Hide sensitive content", #selector(useMosaic))
+            (.text, "textformat", "Text (T)", "Text (T) — Add a note", #selector(useText)),
+            (.mosaic, "square.grid.3x3.fill", "Mosaic (M)", "Mosaic (M) — Hide sensitive content", #selector(useMosaic))
         ]
         for (tool, symbol, help, hoverHint, action) in tools {
             let button = CaptureActionButton(
@@ -443,8 +470,9 @@ private final class CaptureSessionView: NSView {
             )
             connectToolbarHint(to: button)
             toolButtons[tool] = button
-            actions.addArrangedSubview(button)
+            toolGroup.addArrangedSubview(button)
         }
+        actions.addArrangedSubview(CaptureToolGroupView(content: toolGroup))
         actions.addArrangedSubview(separator())
         let undoButton = actionButton(
             symbol: "arrow.uturn.backward",
@@ -467,7 +495,7 @@ private final class CaptureSessionView: NSView {
         actions.addArrangedSubview(redoButton)
         actions.addArrangedSubview(separator())
         let doneButton = CaptureActionButton(
-            symbol: "checkmark",
+            symbol: "checkmark.circle.fill",
             label: "Done",
             style: .primary,
             showsTitle: true,
@@ -479,7 +507,7 @@ private final class CaptureSessionView: NSView {
         actions.addArrangedSubview(doneButton)
 
         let moreButton = actionButton(
-            symbol: "ellipsis",
+            symbol: "ellipsis.circle",
             label: "More Actions",
             hoverHint: "More — Save, pin, edit, or clear",
             action: #selector(showMoreActions(_:))
@@ -608,9 +636,17 @@ private final class CaptureSessionView: NSView {
         complete(.copy)
     }
 
+    @objc private func cancelCapture() {
+        onCancel?()
+    }
+
     @objc private func showMoreActions(_ sender: NSButton) {
         let menu = NSMenu()
         menu.autoenablesItems = false
+        menu.addItem(
+            menuItem("Reselect Region", symbol: "crop", action: #selector(returnToSelection))
+        )
+        menu.addItem(.separator())
         menu.addItem(
             menuItem("Save As…", symbol: "square.and.arrow.down", action: #selector(saveCapture))
         )
@@ -736,7 +772,7 @@ private final class CaptureSessionView: NSView {
         )
     }
 
-    private static let defaultToolbarHint = "Return  Copy   ·   Esc  Reselect   ·   ⌘Z  Undo"
+    private static let defaultToolbarHint = "Return  Copy   ·   Esc  Cancel   ·   ⌘Z  Undo"
 
     private func drawHint(_ text: NSString, near rect: CGRect) {
         let attributes = labelAttributes(monospaced: false)

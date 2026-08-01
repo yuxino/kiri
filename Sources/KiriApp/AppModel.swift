@@ -264,12 +264,13 @@ final class AppModel: ObservableObject {
             }
         }
 
-        guard let data = pngData(for: image) else {
-            errorMessage = "Could not encode the capture as PNG."
-            return
-        }
-
         Task {
+            guard let data = await Task.detached(priority: .utility, operation: {
+                Self.pngData(for: image)
+            }).value else {
+                errorMessage = "Could not encode the capture as PNG."
+                return
+            }
             do {
                 let asset = try await library.importData(
                     data,
@@ -343,12 +344,13 @@ final class AppModel: ObservableObject {
         copyToClipboard: Bool,
         saveURL: URL?
     ) {
-        guard let data = pngData(for: image) else {
-            errorMessage = "Could not encode the capture as PNG."
-            return
-        }
-
         Task {
+            guard let data = await Task.detached(priority: .utility, operation: {
+                Self.pngData(for: image)
+            }).value else {
+                errorMessage = "Could not encode the capture as PNG."
+                return
+            }
             do {
                 _ = try await library.replaceData(data, for: stored.asset.id)
                 if let saveURL {
@@ -412,7 +414,7 @@ final class AppModel: ObservableObject {
         return NSPasteboard.general.writeObjects([image])
     }
 
-    private func pngData(for image: CGImage) -> Data? {
+    nonisolated private static func pngData(for image: CGImage) -> Data? {
         NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
     }
 

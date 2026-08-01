@@ -1,14 +1,32 @@
 import AppKit
 
 enum CaptureUIColors {
-    static let accent = NSColor.controlAccentColor
+    static let accent = NSColor(
+        calibratedRed: 0.49,
+        green: 0.37,
+        blue: 0.96,
+        alpha: 1
+    )
+    static let accentStrong = NSColor(
+        calibratedRed: 0.39,
+        green: 0.28,
+        blue: 0.90,
+        alpha: 1
+    )
+    static let blossom = NSColor(
+        calibratedRed: 0.98,
+        green: 0.42,
+        blue: 0.67,
+        alpha: 1
+    )
     static let label = NSColor.labelColor
     static let secondaryLabel = NSColor.secondaryLabelColor
     static let disabledLabel = NSColor.tertiaryLabelColor
-    static let hoverFill = NSColor.labelColor.withAlphaComponent(0.09)
-    static let selectedFill = NSColor.controlAccentColor.withAlphaComponent(0.16)
+    static let hoverFill = accent.withAlphaComponent(0.09)
+    static let selectedFill = accent.withAlphaComponent(0.18)
     static let divider = NSColor.separatorColor.withAlphaComponent(0.7)
-    static let surfaceBorder = NSColor.separatorColor.withAlphaComponent(0.55)
+    static let surfaceBorder = accent.withAlphaComponent(0.24)
+    static let groupFill = accent.withAlphaComponent(0.055)
 }
 
 final class CaptureDividerView: NSView {
@@ -17,6 +35,63 @@ final class CaptureDividerView: NSView {
         wantsLayer = true
         layer?.backgroundColor = CaptureUIColors.divider.cgColor
         setFrameSize(CGSize(width: 1, height: height))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+}
+
+final class CaptureToolGroupView: NSView {
+    init(content: NSView) {
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.cornerCurve = .continuous
+        refreshAppearance()
+
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            content.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            content.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    private func refreshAppearance() {
+        layer?.backgroundColor = CaptureUIColors.groupFill.cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = CaptureUIColors.surfaceBorder.withAlphaComponent(0.55).cgColor
+    }
+}
+
+final class CaptureSparkleView: NSImageView {
+    init() {
+        super.init(frame: CGRect(x: 0, y: 0, width: 24, height: 30))
+        image = NSImage(
+            systemSymbolName: "sparkles",
+            accessibilityDescription: "Kiri tools"
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        )
+        contentTintColor = CaptureUIColors.blossom
+        imageScaling = .scaleProportionallyDown
+        toolTip = "Kiri capture tools"
+        setAccessibilityElement(false)
+        setFrameSize(CGSize(width: 24, height: 30))
     }
 
     @available(*, unavailable)
@@ -35,6 +110,7 @@ final class CaptureActionButton: NSButton {
     private let visualStyle: Style
     private let label: String
     private let hoverHint: String
+    private let preferredSize: CGSize
     private var hovering = false
     private var pressed = false
     private var selectedTool = false
@@ -53,6 +129,7 @@ final class CaptureActionButton: NSButton {
         visualStyle = style
         self.label = label
         self.hoverHint = hoverHint ?? label
+        preferredSize = CGSize(width: showsTitle ? 78 : 32, height: 32)
         super.init(frame: .zero)
 
         self.target = target
@@ -62,7 +139,7 @@ final class CaptureActionButton: NSButton {
             systemSymbolName: symbol,
             accessibilityDescription: label
         )?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
         )
         imagePosition = showsTitle ? .imageLeading : .imageOnly
         imageHugsTitle = true
@@ -72,14 +149,19 @@ final class CaptureActionButton: NSButton {
         toolTip = label
         setAccessibilityLabel(label)
         wantsLayer = true
-        layer?.cornerRadius = KiriUI.Radius.control
-        setFrameSize(CGSize(width: showsTitle ? 72 : 30, height: 30))
+        layer?.cornerRadius = 9
+        layer?.cornerCurve = .continuous
+        setFrameSize(preferredSize)
         refreshAppearance()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        preferredSize
     }
 
     func setToolSelected(_ selected: Bool) {
@@ -157,7 +239,7 @@ final class CaptureActionButton: NSButton {
                     : (hovering ? CaptureUIColors.hoverFill : .clear)
                 titleColor = CaptureUIColors.label
             case .primary:
-                let color = CaptureUIColors.accent
+                let color = CaptureUIColors.accentStrong
                 tint = .white
                 if pressed {
                     background = color.shadow(withLevel: 0.14) ?? color
@@ -170,7 +252,17 @@ final class CaptureActionButton: NSButton {
 
         contentTintColor = tint
         layer?.backgroundColor = background.cgColor
-        layer?.borderWidth = 0
+        layer?.borderWidth = selectedTool || visualStyle == .primary ? 1 : 0
+        layer?.borderColor = visualStyle == .primary
+            ? NSColor.white.withAlphaComponent(0.22).cgColor
+            : CaptureUIColors.accent.withAlphaComponent(0.32).cgColor
+        layer?.shadowColor = CaptureUIColors.accentStrong.cgColor
+        layer?.shadowOpacity = visualStyle == .primary && isEnabled ? 0.22 : 0
+        layer?.shadowRadius = 5
+        layer?.shadowOffset = CGSize(width: 0, height: 2)
+        layer?.transform = pressed
+            ? CATransform3DMakeScale(0.94, 0.94, 1)
+            : CATransform3DIdentity
         if !title.isEmpty {
             attributedTitle = NSAttributedString(
                 string: label,

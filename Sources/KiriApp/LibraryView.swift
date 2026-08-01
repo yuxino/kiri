@@ -3,6 +3,10 @@ import ImageIO
 import KiriCore
 import SwiftUI
 
+private extension Color {
+    static let kiriAccent = Color(nsColor: CaptureUIColors.accent)
+}
+
 struct LibraryView: View {
     @ObservedObject var model: AppModel
     @FocusState private var searchIsFocused: Bool
@@ -36,6 +40,7 @@ struct LibraryView: View {
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .tint(Color(nsColor: CaptureUIColors.accent))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay(alignment: .top) {
             if let notice = model.notice {
@@ -236,10 +241,14 @@ struct LibraryView: View {
         VStack(spacing: 20) {
             ZStack {
                 Circle()
-                    .fill(Color.accentColor.opacity(0.12))
+                    .fill(Color.kiriAccent.opacity(0.12))
                 Image(systemName: "viewfinder")
                     .font(.system(size: 29, weight: .medium))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Color.kiriAccent)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color(nsColor: CaptureUIColors.blossom))
+                    .offset(x: 27, y: -25)
             }
             .frame(width: 68, height: 68)
 
@@ -315,9 +324,9 @@ private struct OnboardingStep: View {
         HStack(spacing: 8) {
             Text(number)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color.kiriAccent)
                 .frame(width: 22, height: 22)
-                .background(Color.accentColor.opacity(0.12))
+                .background(Color.kiriAccent.opacity(0.12))
                 .clipShape(Circle())
             VStack(alignment: .leading, spacing: 1) {
                 Text(title)
@@ -467,7 +476,7 @@ private struct CaptureCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: KiriUI.Radius.card)
                 .stroke(
-                    isHovered ? Color.accentColor.opacity(0.42) : Color.primary.opacity(0.09),
+                    isHovered ? Color.kiriAccent.opacity(0.42) : Color.primary.opacity(0.09),
                     lineWidth: isHovered ? 1.5 : 1
                 )
         }
@@ -633,7 +642,7 @@ private struct LibraryNoticeView: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: notice.symbol)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color.kiriAccent)
             Text(notice.title)
                 .font(.callout.weight(.medium))
             Button(action: dismiss) {

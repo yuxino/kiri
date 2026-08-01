@@ -164,9 +164,24 @@ final class AnnotationCanvasView: NSView {
 
     func renderedImage() -> CGImage? {
         let outputSize = NSSize(width: image.width, height: image.height)
-        let output = NSImage(size: outputSize)
-        output.lockFocus()
-        NSGraphicsContext.current?.imageInterpolation = .high
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: image.width,
+            pixelsHigh: image.height,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+            return nil
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        context.imageInterpolation = .high
         NSImage(cgImage: image, size: outputSize).draw(
             in: NSRect(origin: .zero, size: outputSize),
             from: .zero,
@@ -180,12 +195,8 @@ final class AnnotationCanvasView: NSView {
         for mark in history.elements where !mark.isMosaic {
             drawForExport(mark, outputHeight: outputSize.height)
         }
-        output.unlockFocus()
-
-        guard let data = output.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: data) else {
-            return nil
-        }
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
         return bitmap.cgImage
     }
 
@@ -326,7 +337,7 @@ final class AnnotationCanvasView: NSView {
     }
 
     private var annotationColor: NSColor {
-        NSColor(calibratedRed: 0.47, green: 0.35, blue: 0.95, alpha: 1)
+        CaptureUIColors.accent
     }
 
     private func textAttributes(fontSize: CGFloat) -> [NSAttributedString.Key: Any] {
