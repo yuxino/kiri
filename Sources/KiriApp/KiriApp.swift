@@ -6,15 +6,16 @@ struct KiriApp: App {
     @StateObject private var model = AppModel()
 
     var body: some Scene {
-        Window("kiri library", id: "library") {
+        Window("Kiri", id: "library") {
             LibraryView(model: model)
-                .frame(minWidth: 760, minHeight: 500)
+                .frame(minWidth: 780, minHeight: 520)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .task {
                     model.start()
                     await model.refresh()
                 }
         }
-        .defaultSize(width: 920, height: 640)
+        .defaultSize(width: 880, height: 600)
 
         MenuBarExtra("kiri", systemImage: "viewfinder") {
             MenuBarView(model: model)

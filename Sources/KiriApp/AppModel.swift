@@ -6,6 +6,7 @@ import KiriCore
 @MainActor
 final class AppModel: ObservableObject {
     @Published private(set) var assets: [CaptureAsset] = []
+    @Published private(set) var hasLoadedLibrary = false
     @Published var searchQuery = ""
     @Published var showingTrash = false
     @Published var errorMessage: String? {
@@ -141,6 +142,7 @@ final class AppModel: ObservableObject {
 
     func refresh() async {
         assets = await library.allAssets(includeTrashed: true)
+        hasLoadedLibrary = true
     }
 
     func toggleFavorite(_ asset: CaptureAsset) {

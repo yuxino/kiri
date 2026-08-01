@@ -34,20 +34,24 @@ final class CaptureActionButton: NSButton {
 
     private let visualStyle: Style
     private let label: String
+    private let hoverHint: String
     private var hovering = false
     private var selectedTool = false
     private var hoverTrackingArea: NSTrackingArea?
+    var onHoverHintChange: ((String?) -> Void)?
 
     init(
         symbol: String,
         label: String,
         style: Style,
         showsTitle: Bool = false,
+        hoverHint: String? = nil,
         target: AnyObject?,
         action: Selector
     ) {
         visualStyle = style
         self.label = label
+        self.hoverHint = hoverHint ?? label
         super.init(frame: .zero)
 
         self.target = target
@@ -104,11 +108,13 @@ final class CaptureActionButton: NSButton {
     override func mouseEntered(with event: NSEvent) {
         hovering = true
         refreshAppearance()
+        onHoverHintChange?(hoverHint)
     }
 
     override func mouseExited(with event: NSEvent) {
         hovering = false
         refreshAppearance()
+        onHoverHintChange?(nil)
     }
 
     override func viewDidChangeEffectiveAppearance() {

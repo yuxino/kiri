@@ -49,6 +49,33 @@ func rejectsTinySelection() throws {
     )
 }
 
+func completesValidSelectionOnMouseUp() throws {
+    try expect(
+        SelectionCompletionPolicy.completesOnMouseUp(
+            selection: CGRect(x: 10, y: 10, width: 120, height: 80),
+            interactionStarted: true
+        ),
+        "A valid drag should complete as soon as the mouse is released"
+    )
+}
+
+func ignoresInvalidSelectionOnMouseUp() throws {
+    try expect(
+        !SelectionCompletionPolicy.completesOnMouseUp(
+            selection: CGRect(x: 10, y: 10, width: 2, height: 2),
+            interactionStarted: true
+        ),
+        "An accidental click should not complete an invalid region"
+    )
+    try expect(
+        !SelectionCompletionPolicy.completesOnMouseUp(
+            selection: CGRect(x: 10, y: 10, width: 120, height: 80),
+            interactionStarted: false
+        ),
+        "A stray mouse-up should not complete an old selection"
+    )
+}
+
 func hitTestsSelectionHandles() throws {
     let selection = CGRect(x: 20, y: 30, width: 100, height: 80)
     try expect(

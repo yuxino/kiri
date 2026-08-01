@@ -169,6 +169,15 @@ public enum SelectionGeometry {
     }
 }
 
+public enum SelectionCompletionPolicy {
+    public static func completesOnMouseUp(
+        selection: CGRect,
+        interactionStarted: Bool
+    ) -> Bool {
+        interactionStarted && SelectionGeometry.isValid(selection)
+    }
+}
+
 public enum WindowSnapGeometry {
     public static func candidate(
         at point: CGPoint,

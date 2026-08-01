@@ -82,6 +82,7 @@ private final class CaptureSessionView: NSView {
     private var undoButton: CaptureActionButton?
     private var redoButton: CaptureActionButton?
     private var clearAnnotationsItem: NSMenuItem?
+    private var toolbarHintLabel: NSTextField?
 
     init(image: CGImage, windowRectsFrontToBack: [CGRect]) {
         self.image = image
@@ -134,6 +135,9 @@ private final class CaptureSessionView: NSView {
 
         if phase == .selecting {
             drawLoupe()
+            if !SelectionGeometry.isValid(selection), snapCandidate == nil {
+                drawInitialHint()
+            }
         }
     }
 
@@ -165,11 +169,6 @@ private final class CaptureSessionView: NSView {
     override func mouseDown(with event: NSEvent) {
         guard phase == .selecting else { return }
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
-        if event.clickCount >= 2, SelectionGeometry.isValid(selection), selection.contains(point) {
-            beginAnnotation()
-            return
-        }
-
         dragStart = point
         pendingWindowSelection = nil
         if let handle = SelectionGeometry.hitTest(point, selection: selection, radius: 10) {
@@ -224,6 +223,7 @@ private final class CaptureSessionView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard phase == .selecting else { return }
         mouseDragged(with: event)
+        let shouldFinishSelection = interaction != nil
         if !SelectionGeometry.isValid(selection), let pendingWindowSelection {
             selection = pendingWindowSelection
         }
@@ -234,6 +234,13 @@ private final class CaptureSessionView: NSView {
         interaction = nil
         pendingWindowSelection = nil
         snapCandidate = nil
+        if SelectionCompletionPolicy.completesOnMouseUp(
+            selection: selection,
+            interactionStarted: shouldFinishSelection
+        ) {
+            beginAnnotation()
+            return
+        }
         if let hoverPoint {
             updateCursor(at: hoverPoint)
         }
@@ -383,6 +390,7 @@ private final class CaptureSessionView: NSView {
         undoButton = nil
         redoButton = nil
         clearAnnotationsItem = nil
+        toolbarHintLabel = nil
         NSCursor.crosshair.set()
         window?.makeFirstResponder(self)
         needsDisplay = true
@@ -415,74 +423,101 @@ private final class CaptureSessionView: NSView {
         effect.layer?.borderColor = CaptureUIColors.surfaceBorder.cgColor
         effect.layer?.masksToBounds = true
 
-        let stack = NSStackView()
-        stack.orientation = .horizontal
-        stack.alignment = .centerY
-        stack.spacing = 3
-        stack.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 6, right: 6)
-        stack.translatesAutoresizingMaskIntoConstraints = false
+        let content = NSStackView()
+        content.orientation = .vertical
+        content.alignment = .centerX
+        content.spacing = 2
+        content.edgeInsets = NSEdgeInsets(top: 6, left: 6, bottom: 5, right: 6)
+        content.translatesAutoresizingMaskIntoConstraints = false
 
-        let tools: [(AnnotationTool, String, String, Selector)] = [
-            (.pen, "pencil.tip", "Pen (P)", #selector(usePen)),
-            (.rectangle, "rectangle", "Rectangle (R)", #selector(useRectangle)),
-            (.arrow, "arrow.up.right", "Arrow (A)", #selector(useArrow)),
-            (.text, "character.textbox", "Text (T)", #selector(useText)),
-            (.mosaic, "square.grid.3x3", "Mosaic (M)", #selector(useMosaic))
+        let actions = NSStackView()
+        actions.orientation = .horizontal
+        actions.alignment = .centerY
+        actions.spacing = 3
+
+        let tools: [(AnnotationTool, String, String, String, Selector)] = [
+            (.pen, "pencil.tip", "Pen (P)", "Pen (P) — Draw freehand", #selector(usePen)),
+            (
+                .rectangle,
+                "rectangle",
+                "Rectangle (R)",
+                "Rectangle (R) — Draw a box",
+                #selector(useRectangle)
+            ),
+            (.arrow, "arrow.up.right", "Arrow (A)", "Arrow (A) — Point something out", #selector(useArrow)),
+            (.text, "character.textbox", "Text (T)", "Text (T) — Add a note", #selector(useText)),
+            (.mosaic, "square.grid.3x3", "Mosaic (M)", "Mosaic (M) — Hide sensitive content", #selector(useMosaic))
         ]
-        for (tool, symbol, help, action) in tools {
+        for (tool, symbol, help, hoverHint, action) in tools {
             let button = CaptureActionButton(
                 symbol: symbol,
                 label: help,
                 style: .tool,
+                hoverHint: hoverHint,
                 target: self,
                 action: action
             )
+            connectToolbarHint(to: button)
             toolButtons[tool] = button
-            stack.addArrangedSubview(button)
+            actions.addArrangedSubview(button)
         }
-        stack.addArrangedSubview(separator())
+        actions.addArrangedSubview(separator())
         let undoButton = actionButton(
             symbol: "arrow.uturn.backward",
             label: "Undo (⌘Z)",
+            hoverHint: "Undo the last annotation · ⌘Z",
             action: #selector(undo)
         )
         undoButton.setActionEnabled(false)
         self.undoButton = undoButton
-        stack.addArrangedSubview(undoButton)
+        actions.addArrangedSubview(undoButton)
 
         let redoButton = actionButton(
             symbol: "arrow.uturn.forward",
             label: "Redo (⇧⌘Z)",
+            hoverHint: "Redo the last annotation · ⇧⌘Z",
             action: #selector(redo)
         )
         redoButton.setActionEnabled(false)
         self.redoButton = redoButton
-        stack.addArrangedSubview(redoButton)
-        stack.addArrangedSubview(separator())
-        stack.addArrangedSubview(
-            CaptureActionButton(
-                symbol: "checkmark",
-                label: "Done",
-                style: .primary,
-                showsTitle: true,
-                target: self,
-                action: #selector(finishCapture)
-            )
+        actions.addArrangedSubview(redoButton)
+        actions.addArrangedSubview(separator())
+        let doneButton = CaptureActionButton(
+            symbol: "checkmark",
+            label: "Done",
+            style: .primary,
+            showsTitle: true,
+            hoverHint: "Done — Copy to clipboard · Return",
+            target: self,
+            action: #selector(finishCapture)
         )
-        stack.addArrangedSubview(
-            actionButton(
-                symbol: "ellipsis",
-                label: "More Actions",
-                action: #selector(showMoreActions(_:))
-            )
-        )
+        connectToolbarHint(to: doneButton)
+        actions.addArrangedSubview(doneButton)
 
-        effect.addSubview(stack)
+        let moreButton = actionButton(
+            symbol: "ellipsis",
+            label: "More Actions",
+            hoverHint: "More — Save, pin, edit, or clear",
+            action: #selector(showMoreActions(_:))
+        )
+        actions.addArrangedSubview(moreButton)
+
+        let hint = NSTextField(labelWithString: Self.defaultToolbarHint)
+        hint.font = .systemFont(ofSize: 10, weight: .medium)
+        hint.textColor = .secondaryLabelColor
+        hint.alignment = .center
+        hint.lineBreakMode = .byTruncatingTail
+        toolbarHintLabel = hint
+
+        content.addArrangedSubview(actions)
+        content.addArrangedSubview(hint)
+        effect.addSubview(content)
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: effect.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
-            stack.bottomAnchor.constraint(equalTo: effect.bottomAnchor)
+            content.topAnchor.constraint(equalTo: effect.topAnchor),
+            content.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
+            content.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
+            hint.widthAnchor.constraint(equalTo: actions.widthAnchor)
         ])
         return effect
     }
@@ -490,15 +525,25 @@ private final class CaptureSessionView: NSView {
     private func actionButton(
         symbol: String,
         label: String,
+        hoverHint: String? = nil,
         action: Selector
     ) -> CaptureActionButton {
-        CaptureActionButton(
+        let button = CaptureActionButton(
             symbol: symbol,
             label: label,
             style: .secondary,
+            hoverHint: hoverHint,
             target: self,
             action: action
         )
+        connectToolbarHint(to: button)
+        return button
+    }
+
+    private func connectToolbarHint(to button: CaptureActionButton) {
+        button.onHoverHintChange = { [weak self] hint in
+            self?.toolbarHintLabel?.stringValue = hint ?? Self.defaultToolbarHint
+        }
     }
 
     private func separator() -> NSView {
@@ -696,14 +741,39 @@ private final class CaptureSessionView: NSView {
     }
 
     private func drawHint() {
-        let text = "Drag to adjust · Double-click or Return to annotate · Esc to cancel" as NSString
+        let text = "Release to capture · Esc to cancel" as NSString
         drawHint(text, near: selection)
     }
 
     private func drawWindowHint(for rect: CGRect) {
-        let text = "Click to select window · Drag for a region" as NSString
+        let text = "Click to capture window · Drag anywhere for a region" as NSString
         drawHint(text, near: rect)
     }
+
+    private func drawInitialHint() {
+        let text = "Drag to capture a region   ·   Click a window   ·   Esc to cancel" as NSString
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.white
+        ]
+        let textSize = text.size(withAttributes: attributes)
+        let padding = CGSize(width: 15, height: 9)
+        let pill = CGRect(
+            x: bounds.midX - (textSize.width + padding.width * 2) / 2,
+            y: bounds.maxY - textSize.height - padding.height * 2 - 28,
+            width: textSize.width + padding.width * 2,
+            height: textSize.height + padding.height * 2
+        )
+        let path = NSBezierPath(roundedRect: pill, xRadius: pill.height / 2, yRadius: pill.height / 2)
+        NSColor.black.withAlphaComponent(0.72).setFill()
+        path.fill()
+        text.draw(
+            at: CGPoint(x: pill.minX + padding.width, y: pill.minY + padding.height),
+            withAttributes: attributes
+        )
+    }
+
+    private static let defaultToolbarHint = "Return  Copy   ·   Esc  Reselect   ·   ⌘Z  Undo"
 
     private func drawHint(_ text: NSString, near rect: CGRect) {
         let attributes = labelAttributes(monospaced: false)
