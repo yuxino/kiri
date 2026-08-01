@@ -8,7 +8,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var assets: [CaptureAsset] = []
     @Published var searchQuery = ""
     @Published var showingTrash = false
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? {
+        didSet {
+            if errorMessage != oldValue {
+                capturePermissionRecoveryAction = nil
+            }
+        }
+    }
+    @Published private(set) var capturePermissionRecoveryAction: CapturePermissionRecoveryAction?
     @Published private(set) var captureShortcutPreset: CaptureShortcutPreset
 
     let libraryRoot: URL
@@ -44,6 +51,17 @@ final class AppModel: ObservableObject {
 
     var captureShortcutLabel: String {
         captureShortcutPreset.shortcut.displayLabel
+    }
+
+    var capturePermissionRecoveryLabel: String? {
+        switch capturePermissionRecoveryAction {
+        case .openSettings:
+            "Open Settings"
+        case .quitKiri:
+            "Quit Kiri"
+        case nil:
+            nil
+        }
     }
 
     func start() {
@@ -97,9 +115,27 @@ final class AppModel: ObservableObject {
                         self?.overlayController = nil
                     }
                 )
+            } catch let error as CaptureCoordinatorError {
+                handleCaptureCoordinatorError(error)
             } catch {
                 errorMessage = error.localizedDescription
             }
+        }
+    }
+
+    func performCapturePermissionRecovery() {
+        switch capturePermissionRecoveryAction {
+        case .openSettings:
+            guard let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+            ) else {
+                return
+            }
+            NSWorkspace.shared.open(url)
+        case .quitKiri:
+            NSApplication.shared.terminate(nil)
+        case nil:
+            break
         }
     }
 
@@ -202,6 +238,18 @@ final class AppModel: ObservableObject {
             } catch {
                 errorMessage = error.localizedDescription
             }
+        }
+    }
+
+    private func handleCaptureCoordinatorError(_ error: CaptureCoordinatorError) {
+        errorMessage = error.localizedDescription
+        switch error {
+        case .permissionRestartRequired:
+            capturePermissionRecoveryAction = .quitKiri
+        case .permissionSettingsRequired:
+            capturePermissionRecoveryAction = .openSettings
+        case .displayUnavailable:
+            break
         }
     }
 
@@ -376,6 +424,11 @@ final class AppModel: ObservableObject {
     }
 
     private static let shortcutDefaultsKey = "captureShortcutPreset"
+}
+
+enum CapturePermissionRecoveryAction {
+    case openSettings
+    case quitKiri
 }
 
 private struct StoredCapture {

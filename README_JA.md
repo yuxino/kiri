@@ -47,7 +47,9 @@ open dist/kiri.app
 `KIRI_CODESIGN_IDENTITY="証明書名" ./scripts/package-app.sh` を使うと、
 ビルド後もアプリの署名 ID を安定させられます。
 
-最初のキャプチャ時に macOS の画面収録権限が必要です。データは
+最初のキャプチャ時に macOS の画面収録権限が必要です。kiri は起動ごとに
+システムの権限要求を一度だけ行い、それ以降は設定を開く、または kiri を終了する
+操作を表示して、同じダイアログを繰り返しません。データは
 `~/Library/Application Support/kiri/` に保存され、自動で外部へ送信されません。
 
 詳しくは [ROADMAP.md](ROADMAP.md) をご覧ください。

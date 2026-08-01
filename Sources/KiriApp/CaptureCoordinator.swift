@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import ImageIO
+import KiriCore
 @preconcurrency import ScreenCaptureKit
 
 struct CapturedDisplay {
@@ -10,13 +11,16 @@ struct CapturedDisplay {
 }
 
 enum CaptureCoordinatorError: LocalizedError {
-    case permissionRequired
+    case permissionRestartRequired
+    case permissionSettingsRequired
     case displayUnavailable
 
     var errorDescription: String? {
         switch self {
-        case .permissionRequired:
-            "kiri needs Screen Recording permission. Enable it in System Settings → Privacy & Security → Screen & System Audio Recording, then try again."
+        case .permissionRestartRequired:
+            "Screen Recording access was granted. Quit and reopen kiri once to finish enabling capture."
+        case .permissionSettingsRequired:
+            "Screen Recording is off. Enable kiri in System Settings, then quit and reopen it once."
         case .displayUnavailable:
             "The active display could not be captured."
         }
@@ -25,6 +29,8 @@ enum CaptureCoordinatorError: LocalizedError {
 
 @MainActor
 final class CaptureCoordinator {
+    private var permissionGate = ScreenCapturePermissionGate()
+
     func captureActiveDisplay() async throws -> CapturedDisplay {
 #if DEBUG
         let usesFixture = ProcessInfo.processInfo.environment["KIRI_CAPTURE_FIXTURE"] == "1"
@@ -35,8 +41,16 @@ final class CaptureCoordinator {
         }
 #endif
 
-        if !CGPreflightScreenCaptureAccess(), !CGRequestScreenCaptureAccess() {
-            throw CaptureCoordinatorError.permissionRequired
+        switch permissionGate.check(
+            preflight: CGPreflightScreenCaptureAccess,
+            request: CGRequestScreenCaptureAccess
+        ) {
+        case .authorized:
+            break
+        case .restartRequired:
+            throw CaptureCoordinatorError.permissionRestartRequired
+        case .settingsRequired:
+            throw CaptureCoordinatorError.permissionSettingsRequired
         }
 
         let mouseLocation = NSEvent.mouseLocation

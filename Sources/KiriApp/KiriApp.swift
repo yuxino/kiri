@@ -53,6 +53,11 @@ private struct MenuBarView: View {
             Text(error)
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
+            if let label = model.capturePermissionRecoveryLabel {
+                Button(label) {
+                    model.performCapturePermissionRecovery()
+                }
+            }
             Divider()
         }
         Button("Quit kiri") {

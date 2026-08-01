@@ -48,7 +48,9 @@ If a local signing certificate is available, run
 the app identity stable across local builds.
 
 macOS asks for Screen & System Audio Recording permission on the first capture.
-If capture remains unavailable after approval, quit and reopen kiri.
+If capture remains unavailable after approval, quit and reopen kiri. Kiri calls
+the system permission request at most once per launch; later attempts show an
+Open Settings or Quit Kiri recovery action instead of prompting repeatedly.
 
 Captures stay under `~/Library/Application Support/kiri/` and are never
 uploaded automatically.

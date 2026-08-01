@@ -17,6 +17,13 @@ struct LibraryView: View {
                     Text(errorMessage)
                         .font(.callout)
                     Spacer()
+                    if let label = model.capturePermissionRecoveryLabel {
+                        Button(label) {
+                            model.performCapturePermissionRecovery()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
                     Button {
                         model.errorMessage = nil
                     } label: {

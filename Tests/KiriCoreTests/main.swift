@@ -66,6 +66,18 @@ let tests = [
     },
     KiriTest(name: "window snap candidate filtering") {
         try windowSnapFiltersInvalidCandidates()
+    },
+    KiriTest(name: "screen permission authorized") {
+        try screenCapturePermissionSkipsRequestWhenAuthorized()
+    },
+    KiriTest(name: "screen permission granted cache") {
+        try screenCapturePermissionCachesGrantedRequest()
+    },
+    KiriTest(name: "screen permission declined cache") {
+        try screenCapturePermissionCachesDeclinedRequest()
+    },
+    KiriTest(name: "screen permission preflight override") {
+        try screenCapturePermissionPreflightOverridesCache()
     }
 ]
 
