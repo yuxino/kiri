@@ -28,8 +28,11 @@ private struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("Capture Region  \(model.captureShortcutLabel)") {
-            model.startCapture()
+        Button("Capture & Copy  \(model.captureShortcutLabel)") {
+            model.startCapture(intent: .copy)
+        }
+        Button("Capture & Annotate") {
+            model.startCapture(intent: .annotate)
         }
         Button("Open Library") {
             openWindow(id: "library")

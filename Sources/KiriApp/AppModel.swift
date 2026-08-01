@@ -26,7 +26,6 @@ final class AppModel: ObservableObject {
     private let shortcutMonitor = GlobalShortcutMonitor()
     private var overlayController: SelectionOverlayController?
     private var editorController: EditorWindowController?
-    private var quickAccessController: QuickAccessController?
     private var pinnedControllers: [UUID: PinnedImageController] = [:]
     private var isCaptureStarting = false
     private var hasStarted = false
@@ -92,7 +91,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func startCapture() {
+    func startCapture(intent: CaptureIntent = .copy) {
         guard overlayController == nil, !isCaptureStarting else { return }
         isCaptureStarting = true
         errorMessage = nil
@@ -101,7 +100,7 @@ final class AppModel: ObservableObject {
             defer { isCaptureStarting = false }
             do {
                 let capture = try await captureCoordinator.captureActiveDisplay()
-                let controller = SelectionOverlayController(capture: capture)
+                let controller = SelectionOverlayController(capture: capture, intent: intent)
                 overlayController = controller
                 controller.present(
                     onComplete: { [weak self] image, action in
@@ -214,6 +213,13 @@ final class AppModel: ObservableObject {
         action: CaptureSessionAction,
         sourceApplication: String?
     ) {
+        if case .copy = action {
+            let imageObject = Self.nsImage(from: image)
+            if !writeToClipboard(imageObject) {
+                errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
+            }
+        }
+
         guard let data = pngData(for: image) else {
             errorMessage = "Could not encode the capture as PNG."
             return
@@ -232,8 +238,7 @@ final class AppModel: ObservableObject {
                 let stored = StoredCapture(
                     asset: asset,
                     image: image,
-                    data: data,
-                    fileURL: await library.assetURL(for: asset)
+                    data: data
                 )
                 await refresh()
                 perform(action, on: stored)
@@ -258,23 +263,17 @@ final class AppModel: ObservableObject {
     private func perform(_ action: CaptureSessionAction, on stored: StoredCapture) {
         switch action {
         case .copy:
-            if !writeToClipboard(stored.nsImage) {
-                errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
-            }
-            showQuickAccess(for: stored)
+            break
         case .save:
             saveToChosenLocation(stored.data)
-            showQuickAccess(for: stored)
         case .pin:
             pin(stored.nsImage)
-            showQuickAccess(for: stored)
         case .edit:
             presentEditor(for: stored)
         }
     }
 
     private func presentEditor(for stored: StoredCapture) {
-        quickAccessController?.close()
         let controller = EditorWindowController(
             image: stored.image,
             completion: { [weak self] rendered, copy, saveURL in
@@ -307,7 +306,7 @@ final class AppModel: ObservableObject {
 
         Task {
             do {
-                let asset = try await library.replaceData(data, for: stored.asset.id)
+                _ = try await library.replaceData(data, for: stored.asset.id)
                 if let saveURL {
                     try data.write(to: saveURL, options: [.atomic])
                 }
@@ -318,45 +317,10 @@ final class AppModel: ObservableObject {
                     }
                 }
                 await refresh()
-                showQuickAccess(
-                    for: StoredCapture(
-                        asset: asset,
-                        image: image,
-                        data: data,
-                        fileURL: await library.assetURL(for: asset)
-                    )
-                )
             } catch {
                 errorMessage = error.localizedDescription
             }
         }
-    }
-
-    private func showQuickAccess(for stored: StoredCapture) {
-        quickAccessController?.close()
-        let controller = QuickAccessController()
-        quickAccessController = controller
-        controller.show(
-            image: stored.nsImage,
-            fileURL: stored.fileURL,
-            onCopy: { [weak self] in
-                guard let self, !self.writeToClipboard(stored.nsImage) else { return }
-                self.errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
-            },
-            onSave: { [weak self] in
-                self?.saveToChosenLocation(stored.data)
-            },
-            onPin: { [weak self] in
-                self?.pin(stored.nsImage)
-            },
-            onEdit: { [weak self] in
-                self?.presentEditor(for: stored)
-            },
-            onClose: { [weak self, weak controller] in
-                guard let self, self.quickAccessController === controller else { return }
-                self.quickAccessController = nil
-            }
-        )
     }
 
     private func saveToChosenLocation(_ data: Data) {
@@ -437,7 +401,6 @@ private struct StoredCapture {
     let asset: CaptureAsset
     let image: CGImage
     let data: Data
-    let fileURL: URL
 
     var nsImage: NSImage {
         NSImage(
@@ -451,7 +414,7 @@ private enum CaptureExportError: LocalizedError {
     case clipboardWriteFailed
 
     var errorDescription: String? {
-        "The capture was saved to the library, but could not be copied."
+        "Could not copy the capture to the clipboard."
     }
 }
 

@@ -11,18 +11,17 @@
 
 `kiri` comes from the Japanese word 「切り取り」—to clip or cut out.
 
-It is a native macOS visual capture tool. Capture a region, annotate it, and
-copy it while kiri quietly keeps a local, searchable copy. Your last capture
+It is a native macOS visual capture tool. Capture and copy a region in one
+gesture, or annotate only when needed, while kiri keeps a local, searchable copy. Your last capture
 does not disappear just because the clipboard changed.
 
 ## Available today
 
-- Start region capture with the exclusive **⌥⌘2** default or **⌃⇧2**
+- Capture and immediately copy with the exclusive **⌥⌘2** default or **⌃⇧2**
 - Freeze the active display, snap to the frontmost window, or drag a free region
-- Resize with eight handles, then double-click or press Return for inline annotation
-- Distinguish pen, rectangle, arrow, text, and mosaic tools by color
-- Press Return to copy immediately, or save, pin, or open the full editor
-- Preview, drag, and continue from the bottom-right Quick Access panel
+- Enter inline annotation from a separate action without slowing down quick captures
+- Use pen, rectangle, arrow, text, and mosaic tools with undo and redo
+- Press Return in annotation to copy, or save, pin, or open the full editor
 - Persist each completed capture once and add it to History in the background
 - Search, favorite, reveal, and copy captures from the local library
 - Move captures to a recoverable trash, restore them, or delete permanently

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [Kiri Capture Flow Reset](../plans/2026-08-01-kiri-capture-flow-reset-design.md).
 
 ## Context
 

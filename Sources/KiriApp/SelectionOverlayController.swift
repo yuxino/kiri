@@ -8,13 +8,29 @@ enum CaptureSessionAction {
     case edit
 }
 
+enum CaptureIntent {
+    case copy
+    case annotate
+
+    var actionVerb: String {
+        switch self {
+        case .copy:
+            "copy"
+        case .annotate:
+            "annotate"
+        }
+    }
+}
+
 @MainActor
 final class SelectionOverlayController {
     private let capture: CapturedDisplay
+    private let intent: CaptureIntent
     private var window: NSWindow?
 
-    init(capture: CapturedDisplay) {
+    init(capture: CapturedDisplay, intent: CaptureIntent) {
         self.capture = capture
+        self.intent = intent
     }
 
     func present(
@@ -37,7 +53,8 @@ final class SelectionOverlayController {
 
         let sessionView = CaptureSessionView(
             image: capture.image,
-            windowRectsFrontToBack: capture.windowRectsFrontToBack
+            windowRectsFrontToBack: capture.windowRectsFrontToBack,
+            intent: intent
         )
         sessionView.onCancel = { [weak self] in
             self?.close()
@@ -69,9 +86,10 @@ private final class CaptureSessionView: NSView {
 
     private let image: CGImage
     private let windowRectsFrontToBack: [CGRect]
+    private let intent: CaptureIntent
     private var phase: CapturePhase = .selecting
     private var dragStart: CGPoint?
-    private var interaction: SelectionInteraction?
+    private var isSelecting = false
     private var selection: CGRect = .null
     private var hoverPoint: CGPoint?
     private var snapCandidate: CGRect?
@@ -84,9 +102,14 @@ private final class CaptureSessionView: NSView {
     private var clearAnnotationsItem: NSMenuItem?
     private var toolbarHintLabel: NSTextField?
 
-    init(image: CGImage, windowRectsFrontToBack: [CGRect]) {
+    init(
+        image: CGImage,
+        windowRectsFrontToBack: [CGRect],
+        intent: CaptureIntent
+    ) {
         self.image = image
         self.windowRectsFrontToBack = windowRectsFrontToBack
+        self.intent = intent
         super.init(frame: .zero)
         wantsLayer = true
     }
@@ -123,7 +146,6 @@ private final class CaptureSessionView: NSView {
             border.stroke()
 
             if phase == .selecting, SelectionGeometry.isValid(selection) {
-                drawHandles()
                 drawDimensions()
                 drawHint()
             } else if phase == .selecting, snapCandidate != nil {
@@ -170,50 +192,22 @@ private final class CaptureSessionView: NSView {
         guard phase == .selecting else { return }
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
         dragStart = point
-        pendingWindowSelection = nil
-        if let handle = SelectionGeometry.hitTest(point, selection: selection, radius: 10) {
-            interaction = .resizing(handle: handle, original: selection)
-        } else if SelectionGeometry.isValid(selection), selection.contains(point) {
-            interaction = .moving(original: selection)
-            NSCursor.closedHand.set()
-        } else {
-            pendingWindowSelection = snapCandidate
-            interaction = .creating
-            selection = .null
-        }
+        isSelecting = true
+        pendingWindowSelection = snapCandidate
+        selection = .null
         hoverPoint = point
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard phase == .selecting, let dragStart, let interaction else { return }
+        guard phase == .selecting, isSelecting, let dragStart else { return }
         let current = clampedPoint(convert(event.locationInWindow, from: nil))
-        switch interaction {
-        case .creating:
-            if hypot(current.x - dragStart.x, current.y - dragStart.y) >= 3 {
-                pendingWindowSelection = nil
-                snapCandidate = nil
-                selection = SelectionGeometry.clamped(
-                    SelectionGeometry.normalized(from: dragStart, to: current),
-                    to: bounds
-                )
-            }
-        case let .moving(original):
-            selection = SelectionGeometry.moved(
-                original,
-                by: CGSize(
-                    width: current.x - dragStart.x,
-                    height: current.y - dragStart.y
-                ),
-                within: bounds
-            )
-        case let .resizing(handle, original):
-            selection = SelectionGeometry.resized(
-                original,
-                using: handle,
-                to: current,
-                within: bounds,
-                minimumSide: 8
+        if hypot(current.x - dragStart.x, current.y - dragStart.y) >= 3 {
+            pendingWindowSelection = nil
+            snapCandidate = nil
+            selection = SelectionGeometry.clamped(
+                SelectionGeometry.normalized(from: dragStart, to: current),
+                to: bounds
             )
         }
         hoverPoint = current
@@ -223,7 +217,7 @@ private final class CaptureSessionView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard phase == .selecting else { return }
         mouseDragged(with: event)
-        let shouldFinishSelection = interaction != nil
+        let shouldFinishSelection = isSelecting
         if !SelectionGeometry.isValid(selection), let pendingWindowSelection {
             selection = pendingWindowSelection
         }
@@ -231,14 +225,14 @@ private final class CaptureSessionView: NSView {
             selection = .null
         }
         dragStart = nil
-        interaction = nil
+        isSelecting = false
         pendingWindowSelection = nil
         snapCandidate = nil
         if SelectionCompletionPolicy.completesOnMouseUp(
             selection: selection,
             interactionStarted: shouldFinishSelection
         ) {
-            beginAnnotation()
+            finishSelection()
             return
         }
         if let hoverPoint {
@@ -251,7 +245,7 @@ private final class CaptureSessionView: NSView {
         guard phase == .selecting else { return }
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
         hoverPoint = point
-        if !SelectionGeometry.isValid(selection), interaction == nil {
+        if !SelectionGeometry.isValid(selection), !isSelecting {
             snapCandidate = WindowSnapGeometry.candidate(
                 at: point,
                 windowsFrontToBack: windowRectsFrontToBack,
@@ -291,11 +285,6 @@ private final class CaptureSessionView: NSView {
             } else {
                 onCancel?()
             }
-            return
-        }
-
-        if phase == .selecting, isReturn, SelectionGeometry.isValid(selection) {
-            beginAnnotation()
             return
         }
 
@@ -349,6 +338,16 @@ private final class CaptureSessionView: NSView {
         super.keyDown(with: event)
     }
 
+    private func finishSelection() {
+        switch intent {
+        case .copy:
+            guard let cropped = croppedSelection() else { return }
+            onComplete?(cropped, .copy)
+        case .annotate:
+            beginAnnotation()
+        }
+    }
+
     private func beginAnnotation() {
         guard phase == .selecting,
               let cropped = croppedSelection() else {
@@ -382,6 +381,7 @@ private final class CaptureSessionView: NSView {
 
     private func returnToSelection() {
         phase = .selecting
+        selection = .null
         annotationCanvas?.removeFromSuperview()
         annotationCanvas = nil
         toolbar?.removeFromSuperview()
@@ -686,22 +686,8 @@ private final class CaptureSessionView: NSView {
         )
     }
 
-    private func updateCursor(at point: CGPoint) {
-        guard interaction == nil else { return }
-        if let handle = SelectionGeometry.hitTest(point, selection: selection, radius: 10) {
-            switch handle {
-            case .top, .bottom:
-                NSCursor.resizeUpDown.set()
-            case .left, .right:
-                NSCursor.resizeLeftRight.set()
-            case .topLeft, .topRight, .bottomRight, .bottomLeft:
-                NSCursor.crosshair.set()
-            }
-        } else if SelectionGeometry.isValid(selection), selection.contains(point) {
-            NSCursor.openHand.set()
-        } else {
-            NSCursor.crosshair.set()
-        }
+    private func updateCursor(at _: CGPoint) {
+        NSCursor.crosshair.set()
     }
 
     private func dimOutside(_ rect: CGRect) {
@@ -716,19 +702,6 @@ private final class CaptureSessionView: NSView {
         ).fill()
     }
 
-    private func drawHandles() {
-        for handle in SelectionHandle.allCases {
-            let point = SelectionGeometry.handlePoint(for: handle, in: selection)
-            let rect = CGRect(x: point.x - 4, y: point.y - 4, width: 8, height: 8)
-            let path = NSBezierPath(ovalIn: rect)
-            NSColor.white.setFill()
-            NSColor(calibratedRed: 0.47, green: 0.41, blue: 0.86, alpha: 1).setStroke()
-            path.lineWidth = 1.5
-            path.fill()
-            path.stroke()
-        }
-    }
-
     private func drawDimensions() {
         let text = "\(Int(selection.width)) × \(Int(selection.height))" as NSString
         let attributes = labelAttributes(monospaced: true)
@@ -741,17 +714,17 @@ private final class CaptureSessionView: NSView {
     }
 
     private func drawHint() {
-        let text = "Release to capture · Esc to cancel" as NSString
+        let text = "Release to \(intent.actionVerb) · Esc to cancel" as NSString
         drawHint(text, near: selection)
     }
 
     private func drawWindowHint(for rect: CGRect) {
-        let text = "Click to capture window · Drag anywhere for a region" as NSString
+        let text = "Click to \(intent.actionVerb) window · Drag for a region" as NSString
         drawHint(text, near: rect)
     }
 
     private func drawInitialHint() {
-        let text = "Drag to capture a region   ·   Click a window   ·   Esc to cancel" as NSString
+        let text = "Drag to \(intent.actionVerb)   ·   Click a window   ·   Esc to cancel" as NSString
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white

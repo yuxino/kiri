@@ -60,11 +60,20 @@ struct LibraryView: View {
             .controlSize(.large)
 
             Button {
-                model.startCapture()
+                model.startCapture(intent: .annotate)
+            } label: {
+                Label("Annotate", systemImage: "pencil.tip")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .help("Capture a region and open annotation tools")
+
+            Button {
+                model.startCapture(intent: .copy)
             } label: {
                 HStack(spacing: 7) {
                     Image(systemName: "viewfinder")
-                    Text("Capture")
+                    Text("Capture & Copy")
                     Text(model.captureShortcutLabel)
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.white.opacity(0.78))
@@ -183,23 +192,32 @@ struct LibraryView: View {
             VStack(spacing: 7) {
                 Text("Ready for your first capture")
                     .font(.title2.weight(.semibold))
-                Text("Capture a region, mark what matters, and paste it anywhere.")
+                Text("Drag a region, then paste it anywhere. Annotate only when you need to.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
             Button {
-                model.startCapture()
+                model.startCapture(intent: .copy)
             } label: {
-                Label("Capture Region", systemImage: "viewfinder")
+                Label("Capture & Copy", systemImage: "viewfinder")
                     .frame(minWidth: 150)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-            Text("or press  \(model.captureShortcutLabel)")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Text("or press  \(model.captureShortcutLabel)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                Button("Capture & Annotate") {
+                    model.startCapture(intent: .annotate)
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
 
             Divider()
                 .frame(width: 400)
@@ -209,11 +227,11 @@ struct LibraryView: View {
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                OnboardingStep(number: "2", title: "Annotate", detail: "Only if needed")
+                OnboardingStep(number: "2", title: "Copy", detail: "Happens instantly")
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                OnboardingStep(number: "3", title: "Return", detail: "Copy and finish")
+                OnboardingStep(number: "3", title: "Paste", detail: "Use it anywhere")
             }
         }
         .padding(.horizontal, 40)
