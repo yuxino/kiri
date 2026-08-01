@@ -16,9 +16,40 @@ struct KiriApp: App {
                 }
         }
         .defaultSize(width: 880, height: 600)
+        .commands {
+            KiriCommands(model: model)
+        }
 
         MenuBarExtra("kiri", systemImage: "viewfinder") {
             MenuBarView(model: model)
+        }
+    }
+}
+
+private struct KiriCommands: Commands {
+    @ObservedObject var model: AppModel
+    @FocusedValue(\.focusLibrarySearch) private var focusLibrarySearch
+
+    var body: some Commands {
+        CommandMenu("Capture") {
+            Button("Capture & Copy") {
+                model.startCapture(intent: .copy)
+            }
+            .disabled(model.isCaptureStarting)
+
+            Button("Capture & Annotate") {
+                model.startCapture(intent: .annotate)
+            }
+            .keyboardShortcut("2", modifiers: [.option, .shift, .command])
+            .disabled(model.isCaptureStarting)
+        }
+
+        CommandGroup(after: .textEditing) {
+            Button("Find in Library") {
+                focusLibrarySearch?()
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .disabled(focusLibrarySearch == nil)
         }
     }
 }
@@ -28,12 +59,21 @@ private struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("Capture & Copy  \(model.captureShortcutLabel)") {
+        Button {
             model.startCapture(intent: .copy)
+        } label: {
+            if model.isCaptureStarting {
+                Label("Preparing Capture…", systemImage: "hourglass")
+            } else {
+                Text("Capture & Copy  \(model.captureShortcutLabel)")
+            }
         }
+        .disabled(model.isCaptureStarting)
         Button("Capture & Annotate") {
             model.startCapture(intent: .annotate)
         }
+        .disabled(model.isCaptureStarting)
+        Divider()
         Button("Open Library") {
             openWindow(id: "library")
             NSApplication.shared.activate(ignoringOtherApps: true)

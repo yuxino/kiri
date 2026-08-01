@@ -9,8 +9,12 @@ You need macOS 14+ and Swift 6.
 ```bash
 swift run kiri-core-tests
 swift build --product kiri -Xswiftc -warnings-as-errors
+./scripts/render-ui-snapshots.sh ./work/ui-snapshots
 ./scripts/package-app.sh
 ```
+
+The snapshot renderer runs in the background without opening an app window and
+uses generated fixtures instead of the user's capture library.
 
 ## Pull requests
 
@@ -24,4 +28,3 @@ swift build --product kiri -Xswiftc -warnings-as-errors
 
 Use Issues for bugs and feature discussion. Do not include private captures,
 credentials, or personal paths in reports.
-

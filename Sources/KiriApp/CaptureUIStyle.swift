@@ -36,6 +36,7 @@ final class CaptureActionButton: NSButton {
     private let label: String
     private let hoverHint: String
     private var hovering = false
+    private var pressed = false
     private var selectedTool = false
     private var hoverTrackingArea: NSTrackingArea?
     var onHoverHintChange: ((String?) -> Void)?
@@ -67,11 +68,11 @@ final class CaptureActionButton: NSButton {
         imageHugsTitle = true
         font = .systemFont(ofSize: 12, weight: .medium)
         isBordered = false
-        focusRingType = .none
+        focusRingType = .exterior
         toolTip = label
         setAccessibilityLabel(label)
         wantsLayer = true
-        layer?.cornerRadius = 7
+        layer?.cornerRadius = KiriUI.Radius.control
         setFrameSize(CGSize(width: showsTitle ? 72 : 30, height: 30))
         refreshAppearance()
     }
@@ -117,6 +118,12 @@ final class CaptureActionButton: NSButton {
         onHoverHintChange?(nil)
     }
 
+    override func highlight(_ flag: Bool) {
+        super.highlight(flag)
+        pressed = flag
+        refreshAppearance()
+    }
+
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         refreshAppearance()
@@ -135,18 +142,28 @@ final class CaptureActionButton: NSButton {
             switch visualStyle {
             case .tool:
                 tint = selectedTool ? CaptureUIColors.accent : CaptureUIColors.label
-                background = selectedTool
-                    ? CaptureUIColors.selectedFill
-                    : (hovering ? CaptureUIColors.hoverFill : .clear)
+                if pressed {
+                    background = CaptureUIColors.label.withAlphaComponent(0.16)
+                } else if selectedTool {
+                    background = CaptureUIColors.selectedFill
+                } else {
+                    background = hovering ? CaptureUIColors.hoverFill : .clear
+                }
                 titleColor = tint
             case .secondary:
                 tint = CaptureUIColors.secondaryLabel
-                background = hovering ? CaptureUIColors.hoverFill : .clear
+                background = pressed
+                    ? CaptureUIColors.label.withAlphaComponent(0.16)
+                    : (hovering ? CaptureUIColors.hoverFill : .clear)
                 titleColor = CaptureUIColors.label
             case .primary:
                 let color = CaptureUIColors.accent
                 tint = .white
-                background = hovering ? color.highlight(withLevel: 0.1) ?? color : color
+                if pressed {
+                    background = color.shadow(withLevel: 0.14) ?? color
+                } else {
+                    background = hovering ? color.highlight(withLevel: 0.1) ?? color : color
+                }
                 titleColor = .white
             }
         }

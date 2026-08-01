@@ -7,6 +7,9 @@ import KiriCore
 final class AppModel: ObservableObject {
     @Published private(set) var assets: [CaptureAsset] = []
     @Published private(set) var hasLoadedLibrary = false
+    @Published private(set) var libraryRevision = 0
+    @Published private(set) var isCaptureStarting = false
+    @Published private(set) var notice: AppNotice?
     @Published var searchQuery = ""
     @Published var showingTrash = false
     @Published var errorMessage: String? {
@@ -27,7 +30,6 @@ final class AppModel: ObservableObject {
     private var overlayController: SelectionOverlayController?
     private var editorController: EditorWindowController?
     private var pinnedControllers: [UUID: PinnedImageController] = [:]
-    private var isCaptureStarting = false
     private var hasStarted = false
 
     init() {
@@ -95,16 +97,24 @@ final class AppModel: ObservableObject {
         guard overlayController == nil, !isCaptureStarting else { return }
         isCaptureStarting = true
         errorMessage = nil
-        let sourceApplication = NSWorkspace.shared.frontmostApplication?.localizedName
+        let frontmostApplication = NSWorkspace.shared.frontmostApplication
+        let isKiriFrontmost = frontmostApplication?.processIdentifier
+            == ProcessInfo.processInfo.processIdentifier
+        let sourceApplication = isKiriFrontmost ? nil : frontmostApplication?.localizedName
+        let hiddenWindows = hideCaptureOriginWindowsIfNeeded(frontmostApplication)
         Task {
             defer { isCaptureStarting = false }
             do {
+                if !hiddenWindows.isEmpty {
+                    try? await Task.sleep(for: .milliseconds(120))
+                }
                 let capture = try await captureCoordinator.captureActiveDisplay()
                 let controller = SelectionOverlayController(capture: capture, intent: intent)
                 overlayController = controller
                 controller.present(
                     onComplete: { [weak self] image, action in
                         self?.overlayController = nil
+                        self?.restoreCaptureOriginWindows(hiddenWindows)
                         self?.completeCapture(
                             image: image,
                             action: action,
@@ -113,14 +123,36 @@ final class AppModel: ObservableObject {
                     },
                     onCancel: { [weak self] in
                         self?.overlayController = nil
+                        self?.restoreCaptureOriginWindows(hiddenWindows)
                     }
                 )
             } catch let error as CaptureCoordinatorError {
+                restoreCaptureOriginWindows(hiddenWindows)
                 handleCaptureCoordinatorError(error)
             } catch {
+                restoreCaptureOriginWindows(hiddenWindows)
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func hideCaptureOriginWindowsIfNeeded(
+        _ frontmostApplication: NSRunningApplication?
+    ) -> [NSWindow] {
+        guard frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier else {
+            return []
+        }
+        let windows = NSApplication.shared.windows.filter { window in
+            window.isVisible && window.level == .normal && window.styleMask.contains(.titled)
+        }
+        windows.forEach { $0.orderOut(nil) }
+        return windows
+    }
+
+    private func restoreCaptureOriginWindows(_ windows: [NSWindow]) {
+        guard !windows.isEmpty else { return }
+        windows.forEach { $0.orderFront(nil) }
+        NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     func performCapturePermissionRecovery() {
@@ -141,6 +173,7 @@ final class AppModel: ObservableObject {
 
     func refresh() async {
         assets = await library.allAssets(includeTrashed: true)
+        libraryRevision &+= 1
         hasLoadedLibrary = true
     }
 
@@ -160,6 +193,7 @@ final class AppModel: ObservableObject {
             do {
                 try await library.moveToTrash(id: asset.id)
                 await refresh()
+                showNotice(title: "Moved to Trash", symbol: "trash")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -171,6 +205,7 @@ final class AppModel: ObservableObject {
             do {
                 try await library.restore(id: asset.id)
                 await refresh()
+                showNotice(title: "Restored to Library", symbol: "arrow.uturn.backward")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -182,6 +217,7 @@ final class AppModel: ObservableObject {
             do {
                 try await library.permanentlyDelete(id: asset.id)
                 await refresh()
+                showNotice(title: "Deleted Permanently", symbol: "trash.fill")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -195,7 +231,13 @@ final class AppModel: ObservableObject {
         }
         if !writeToClipboard(image) {
             errorMessage = "Could not copy the capture."
+        } else {
+            showNotice(title: "Copied to Clipboard", symbol: "checkmark.circle.fill")
         }
+    }
+
+    func open(_ asset: CaptureAsset) {
+        NSWorkspace.shared.open(assetFileURL(asset))
     }
 
     func reveal(_ asset: CaptureAsset) {
@@ -217,6 +259,8 @@ final class AppModel: ObservableObject {
             let imageObject = Self.nsImage(from: image)
             if !writeToClipboard(imageObject) {
                 errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
+            } else {
+                showNotice(title: "Copied to Clipboard", symbol: "checkmark.circle.fill")
             }
         }
 
@@ -314,6 +358,8 @@ final class AppModel: ObservableObject {
                     let imageObject = Self.nsImage(from: image)
                     if !writeToClipboard(imageObject) {
                         errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
+                    } else {
+                        showNotice(title: "Copied to Clipboard", symbol: "checkmark.circle.fill")
                     }
                 }
                 await refresh()
@@ -331,8 +377,23 @@ final class AppModel: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try data.write(to: url, options: [.atomic])
+            showNotice(title: "Saved", symbol: "checkmark.circle.fill")
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    func dismissNotice() {
+        notice = nil
+    }
+
+    private func showNotice(title: String, symbol: String) {
+        let nextNotice = AppNotice(title: title, symbol: symbol)
+        notice = nextNotice
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard self?.notice?.id == nextNotice.id else { return }
+            self?.notice = nil
         }
     }
 
@@ -395,6 +456,12 @@ final class AppModel: ObservableObject {
 enum CapturePermissionRecoveryAction {
     case openSettings
     case quitKiri
+}
+
+struct AppNotice: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let symbol: String
 }
 
 private struct StoredCapture {

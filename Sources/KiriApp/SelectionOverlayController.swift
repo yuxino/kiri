@@ -136,13 +136,11 @@ private final class CaptureSessionView: NSView {
         if let activeRect {
             dimOutside(activeRect)
             let border = NSBezierPath(rect: activeRect)
+            border.lineWidth = phase == .annotating ? 4 : 3
+            NSColor.white.withAlphaComponent(0.92).setStroke()
+            border.stroke()
             border.lineWidth = phase == .annotating ? 2 : 1.5
-            NSColor(
-                calibratedRed: phase == .annotating ? 0.47 : 0.62,
-                green: phase == .annotating ? 0.41 : 0.62,
-                blue: phase == .annotating ? 0.86 : 0.91,
-                alpha: 1
-            ).setStroke()
+            CaptureUIColors.accent.setStroke()
             border.stroke()
 
             if phase == .selecting, SelectionGeometry.isValid(selection) {
@@ -267,6 +265,14 @@ private final class CaptureSessionView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         mouseMoved(with: event)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        if phase == .annotating {
+            returnToSelection()
+        } else {
+            onCancel?()
+        }
     }
 
     override func cursorUpdate(with event: NSEvent) {
@@ -705,12 +711,14 @@ private final class CaptureSessionView: NSView {
     private func drawDimensions() {
         let text = "\(Int(selection.width)) × \(Int(selection.height))" as NSString
         let attributes = labelAttributes(monospaced: true)
-        let size = text.size(withAttributes: attributes)
-        var origin = CGPoint(x: selection.minX, y: selection.minY - size.height - 5)
-        if origin.y < 4 {
-            origin.y = selection.minY + 5
+        let textSize = text.size(withAttributes: attributes)
+        let badgeSize = CGSize(width: textSize.width + 14, height: textSize.height + 8)
+        var origin = CGPoint(x: selection.minX, y: selection.minY - badgeSize.height - 6)
+        origin.x = min(max(origin.x, 6), bounds.maxX - badgeSize.width - 6)
+        if origin.y < 6 {
+            origin.y = selection.minY + 6
         }
-        text.draw(at: origin, withAttributes: attributes)
+        drawBadge(text, origin: origin, size: badgeSize, attributes: attributes)
     }
 
     private func drawHint() {
@@ -750,13 +758,14 @@ private final class CaptureSessionView: NSView {
 
     private func drawHint(_ text: NSString, near rect: CGRect) {
         let attributes = labelAttributes(monospaced: false)
-        let size = text.size(withAttributes: attributes)
-        var origin = CGPoint(x: rect.maxX - size.width, y: rect.maxY + 6)
-        origin.x = min(max(origin.x, 6), bounds.maxX - size.width - 6)
-        if origin.y + size.height > bounds.maxY - 6 {
-            origin.y = rect.maxY - size.height - 6
+        let textSize = text.size(withAttributes: attributes)
+        let badgeSize = CGSize(width: textSize.width + 16, height: textSize.height + 9)
+        var origin = CGPoint(x: rect.maxX - badgeSize.width, y: rect.maxY + 7)
+        origin.x = min(max(origin.x, 6), bounds.maxX - badgeSize.width - 6)
+        if origin.y + badgeSize.height > bounds.maxY - 6 {
+            origin.y = rect.maxY - badgeSize.height - 7
         }
-        text.draw(at: origin, withAttributes: attributes)
+        drawBadge(text, origin: origin, size: badgeSize, attributes: attributes)
     }
 
     private func labelAttributes(monospaced: Bool) -> [NSAttributedString.Key: Any] {
@@ -764,9 +773,36 @@ private final class CaptureSessionView: NSView {
             .font: monospaced
                 ? NSFont.monospacedSystemFont(ofSize: 11, weight: .medium)
                 : NSFont.systemFont(ofSize: 11, weight: .medium),
-            .foregroundColor: NSColor.white,
-            .backgroundColor: NSColor.black.withAlphaComponent(0.72)
+            .foregroundColor: NSColor.white
         ]
+    }
+
+    private func drawBadge(
+        _ text: NSString,
+        origin: CGPoint,
+        size: CGSize,
+        attributes: [NSAttributedString.Key: Any]
+    ) {
+        let rect = CGRect(origin: origin, size: size)
+        let background = NSBezierPath(
+            roundedRect: rect,
+            xRadius: rect.height / 2,
+            yRadius: rect.height / 2
+        )
+        NSColor.black.withAlphaComponent(0.76).setFill()
+        background.fill()
+        NSColor.white.withAlphaComponent(0.16).setStroke()
+        background.lineWidth = 1
+        background.stroke()
+
+        let textSize = text.size(withAttributes: attributes)
+        text.draw(
+            at: CGPoint(
+                x: rect.midX - textSize.width / 2,
+                y: rect.midY - textSize.height / 2
+            ),
+            withAttributes: attributes
+        )
     }
 
     private func drawLoupe() {

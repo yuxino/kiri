@@ -1,10 +1,14 @@
 import AppKit
+import ImageIO
 import KiriCore
 import SwiftUI
 
 struct LibraryView: View {
     @ObservedObject var model: AppModel
-    private let columns = [GridItem(.adaptive(minimum: 190, maximum: 260), spacing: 16)]
+    @FocusState private var searchIsFocused: Bool
+    private let columns = [
+        GridItem(.adaptive(minimum: 210, maximum: 280), spacing: KiriUI.Spacing.roomy)
+    ]
 
     var body: some View {
         VStack(spacing: 0) {
@@ -18,72 +22,126 @@ struct LibraryView: View {
                     emptyState
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: columns, spacing: 16) {
+                        LazyVGrid(columns: columns, spacing: KiriUI.Spacing.roomy) {
                             ForEach(model.filteredAssets) { asset in
                                 CaptureCard(asset: asset, model: model)
                             }
                         }
-                        .padding(24)
+                        .padding(KiriUI.Spacing.page)
                     }
+                    .id(model.showingTrash)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .underPageBackgroundColor))
+            .background(Color(nsColor: .windowBackgroundColor))
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .overlay(alignment: .top) {
+            if let notice = model.notice {
+                LibraryNoticeView(notice: notice) {
+                    model.dismissNotice()
+                }
+                .padding(.top, 78)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .zIndex(10)
+            }
+        }
+        .animation(.easeOut(duration: KiriUI.Motion.feedback), value: model.notice)
+        .focusedValue(\.focusLibrarySearch) {
+            searchIsFocused = true
+        }
     }
 
     private var header: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(model.showingTrash ? "Trash" : "Library")
-                    .font(.title2.weight(.semibold))
-                Text(sectionSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: KiriUI.Spacing.standard) {
+                titleBlock
+                Spacer(minLength: 18)
+                searchField
+                    .frame(width: 210)
+                sectionPicker
+                captureActions
             }
-            Spacer()
 
-            searchField
-
-            Button {
-                model.showingTrash.toggle()
-                model.searchQuery = ""
-            } label: {
-                Label(
-                    model.showingTrash ? "Library" : "Trash",
-                    systemImage: model.showingTrash ? "photo.on.rectangle" : "trash"
-                )
+            VStack(spacing: KiriUI.Spacing.standard) {
+                HStack(spacing: KiriUI.Spacing.standard) {
+                    titleBlock
+                    Spacer()
+                    captureActions
+                }
+                HStack(spacing: KiriUI.Spacing.compact) {
+                    searchField
+                        .frame(maxWidth: .infinity)
+                    sectionPicker
+                }
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
 
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(model.showingTrash ? "Trash" : "Library")
+                .font(.title3.weight(.semibold))
+            Text(sectionSummary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .contentTransition(.numericText())
+        }
+        .fixedSize()
+    }
+
+    private var sectionPicker: some View {
+        Picker("Section", selection: $model.showingTrash) {
+            Label("Library", systemImage: "photo.on.rectangle")
+                .tag(false)
+            Label("Trash", systemImage: "trash")
+                .tag(true)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 164)
+        .onChange(of: model.showingTrash) {
+            model.searchQuery = ""
+        }
+        .accessibilityLabel("Library section")
+    }
+
+    private var captureActions: some View {
+        HStack(spacing: KiriUI.Spacing.compact) {
             Button {
                 model.startCapture(intent: .annotate)
             } label: {
                 Label("Annotate", systemImage: "pencil.tip")
             }
             .buttonStyle(.bordered)
-            .controlSize(.large)
             .help("Capture a region and open annotation tools")
 
             Button {
                 model.startCapture(intent: .copy)
             } label: {
                 HStack(spacing: 7) {
-                    Image(systemName: "viewfinder")
-                    Text("Capture & Copy")
-                    Text(model.captureShortcutLabel)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.white.opacity(0.78))
+                    if model.isCaptureStarting {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "viewfinder")
+                    }
+                    Text(model.isCaptureStarting ? "Preparing…" : "Capture & Copy")
+                    if !model.isCaptureStarting {
+                        Text(model.captureShortcutLabel)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.white.opacity(0.78))
+                    }
                 }
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 13)
+        .controlSize(.large)
+        .disabled(model.isCaptureStarting)
     }
 
     @ViewBuilder
@@ -123,6 +181,10 @@ struct LibraryView: View {
                 .foregroundStyle(.secondary)
             TextField("Search captures", text: $model.searchQuery)
                 .textFieldStyle(.plain)
+                .focused($searchIsFocused)
+                .onSubmit {
+                    searchIsFocused = false
+                }
             if !model.searchQuery.isEmpty {
                 Button {
                     model.searchQuery = ""
@@ -135,14 +197,15 @@ struct LibraryView: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(width: 230, height: 32)
+        .frame(height: 32)
         .background(Color(nsColor: .controlBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.control))
         .overlay {
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: KiriUI.Radius.control)
                 .stroke(Color.primary.opacity(0.1))
         }
-        .disabled(sectionAssets.isEmpty)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Search captures")
     }
 
     private var loadingState: some View {
@@ -237,9 +300,9 @@ struct LibraryView: View {
         .padding(.horizontal, 40)
         .padding(.vertical, 32)
         .background(Color(nsColor: .windowBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.surface))
         .overlay {
-            RoundedRectangle(cornerRadius: 20)
+            RoundedRectangle(cornerRadius: KiriUI.Radius.surface)
                 .stroke(Color.primary.opacity(0.08))
         }
         .shadow(color: .black.opacity(0.04), radius: 18, y: 8)
@@ -331,33 +394,45 @@ private extension LibraryStatusView where Actions == EmptyView {
 private struct CaptureCard: View {
     let asset: CaptureAsset
     @ObservedObject var model: AppModel
+    @State private var isHovered = false
+    @State private var confirmsPermanentDelete = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color.black.opacity(0.06))
-                if let image = NSImage(contentsOf: model.assetFileURL(asset)) {
-                    Image(nsImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                        .padding(5)
-                } else {
-                    Image(systemName: iconName)
-                        .font(.system(size: 30))
-                        .foregroundStyle(.secondary)
+            CaptureThumbnail(
+                fileURL: model.assetFileURL(asset),
+                fallbackSystemImage: iconName,
+                reloadToken: model.libraryRevision
+            )
+            .overlay {
+                if isHovered, asset.trashedAt == nil {
+                    Button {
+                        model.copy(asset)
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                            .font(.callout.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
                 }
             }
             .aspectRatio(16 / 10, contentMode: .fit)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                model.open(asset)
+            }
+            .help("Double-click to open")
 
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(asset.createdAt, style: .date)
+                    Text(asset.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                         .font(.subheadline.weight(.medium))
-                    Text("\(asset.pixelWidth) × \(asset.pixelHeight) · \(asset.kind.rawValue)")
+                        .lineLimit(1)
+                    Text(metadata)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 Spacer()
                 if asset.isFavorite {
@@ -368,33 +443,104 @@ private struct CaptureCard: View {
 
             HStack(spacing: 6) {
                 if asset.trashedAt == nil {
-                    smallButton("doc.on.doc", help: "Copy") { model.copy(asset) }
-                    smallButton(
+                    Button {
+                        model.copy(asset)
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                    Spacer()
+                    iconButton(
                         asset.isFavorite ? "star.slash" : "star",
                         help: asset.isFavorite ? "Remove Favorite" : "Favorite"
                     ) {
                         model.toggleFavorite(asset)
                     }
-                    smallButton("folder", help: "Show in Finder") { model.reveal(asset) }
-                    Spacer()
-                    smallButton("trash", help: "Move to Trash") { model.moveToTrash(asset) }
+                    actionMenu
                 } else {
-                    Button("Restore") { model.restore(asset) }
-                        .buttonStyle(.borderless)
-                    Spacer()
-                    smallButton("trash.fill", help: "Delete Permanently") {
-                        model.permanentlyDelete(asset)
+                    Button {
+                        model.restore(asset)
+                    } label: {
+                        Label("Restore", systemImage: "arrow.uturn.backward")
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    Spacer()
+                    Button(role: .destructive) {
+                        confirmsPermanentDelete = true
+                    } label: {
+                        Image(systemName: "trash.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Delete Permanently")
+                    .accessibilityLabel("Delete Permanently")
                 }
             }
         }
         .padding(12)
-        .background(.background)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.card))
         .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(Color.primary.opacity(0.08))
+            RoundedRectangle(cornerRadius: KiriUI.Radius.card)
+                .stroke(
+                    isHovered ? Color.accentColor.opacity(0.42) : Color.primary.opacity(0.09),
+                    lineWidth: isHovered ? 1.5 : 1
+                )
         }
+        .shadow(color: .black.opacity(isHovered ? 0.10 : 0.035), radius: isHovered ? 12 : 4, y: 4)
+        .scaleEffect(isHovered ? 1.008 : 1)
+        .animation(.easeOut(duration: KiriUI.Motion.hover), value: isHovered)
+        .onHover { isHovered = $0 }
+        .onDrag {
+            NSItemProvider(contentsOf: model.assetFileURL(asset)) ?? NSItemProvider()
+        }
+        .contextMenu {
+            if asset.trashedAt == nil {
+                Button("Copy", systemImage: "doc.on.doc") { model.copy(asset) }
+                Button("Open", systemImage: "arrow.up.right.square") { model.open(asset) }
+                Button("Show in Finder", systemImage: "folder") { model.reveal(asset) }
+                Button(
+                    asset.isFavorite ? "Remove Favorite" : "Favorite",
+                    systemImage: asset.isFavorite ? "star.slash" : "star"
+                ) {
+                    model.toggleFavorite(asset)
+                }
+                Divider()
+                Button("Move to Trash", systemImage: "trash", role: .destructive) {
+                    model.moveToTrash(asset)
+                }
+            } else {
+                Button("Restore", systemImage: "arrow.uturn.backward") {
+                    model.restore(asset)
+                }
+                Divider()
+                Button("Delete Permanently", systemImage: "trash.fill", role: .destructive) {
+                    confirmsPermanentDelete = true
+                }
+            }
+        }
+        .confirmationDialog(
+            "Delete this capture permanently?",
+            isPresented: $confirmsPermanentDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Permanently", role: .destructive) {
+                model.permanentlyDelete(asset)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone.")
+        }
+    }
+
+    private var metadata: String {
+        let dimensions = "\(asset.pixelWidth) × \(asset.pixelHeight)"
+        guard let source = asset.sourceApplication, !source.isEmpty else {
+            return dimensions
+        }
+        return "\(dimensions) · \(source)"
     }
 
     private var iconName: String {
@@ -406,7 +552,30 @@ private struct CaptureCard: View {
         }
     }
 
-    private func smallButton(
+    private var actionMenu: some View {
+        Menu {
+            Button("Open", systemImage: "arrow.up.right.square") {
+                model.open(asset)
+            }
+            Button("Show in Finder", systemImage: "folder") {
+                model.reveal(asset)
+            }
+            Divider()
+            Button("Move to Trash", systemImage: "trash", role: .destructive) {
+                model.moveToTrash(asset)
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 18, height: 18)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More Actions")
+        .accessibilityLabel("More Actions")
+    }
+
+    private func iconButton(
         _ systemName: String,
         help: String,
         action: @escaping () -> Void
@@ -417,5 +586,101 @@ private struct CaptureCard: View {
         .buttonStyle(.borderless)
         .help(help)
         .accessibilityLabel(help)
+    }
+}
+
+private struct CaptureThumbnail: View {
+    let fileURL: URL
+    let fallbackSystemImage: String
+    let reloadToken: Int
+    @State private var image: CGImage?
+    @State private var hasFinishedLoading = false
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: KiriUI.Radius.preview)
+                .fill(Color.black.opacity(0.055))
+
+            if let image {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.control))
+                    .padding(5)
+            } else if hasFinishedLoading {
+                Image(systemName: fallbackSystemImage)
+                    .font(.system(size: 30, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+        }
+        .task(id: reloadToken) {
+            hasFinishedLoading = false
+            image = await CaptureThumbnailLoader.load(fileURL)
+            hasFinishedLoading = true
+        }
+    }
+}
+
+private enum CaptureThumbnailLoader {
+    static func load(_ url: URL) async -> CGImage? {
+        await Task.detached(priority: .userInitiated) {
+            guard !Task.isCancelled else { return nil }
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
+                return nil
+            }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceShouldCacheImmediately: true,
+                kCGImageSourceThumbnailMaxPixelSize: 640
+            ]
+            guard !Task.isCancelled else { return nil }
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        }.value
+    }
+}
+
+private struct LibraryNoticeView: View {
+    let notice: AppNotice
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: notice.symbol)
+                .foregroundStyle(Color.accentColor)
+            Text(notice.title)
+                .font(.callout.weight(.medium))
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 36)
+        .background(.regularMaterial, in: Capsule())
+        .overlay {
+            Capsule()
+                .stroke(Color.primary.opacity(0.12))
+        }
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct FocusLibrarySearchKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+extension FocusedValues {
+    var focusLibrarySearch: (() -> Void)? {
+        get { self[FocusLibrarySearchKey.self] }
+        set { self[FocusLibrarySearchKey.self] = newValue }
     }
 }
