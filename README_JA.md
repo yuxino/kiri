@@ -43,9 +43,10 @@ swift run kiri-core-tests
 open dist/kiri.app
 ```
 
-ローカル署名証明書がある場合は、
-`KIRI_CODESIGN_IDENTITY="証明書名" ./scripts/package-app.sh` を使うと、
-ビルド後もアプリの署名 ID を安定させられます。
+パッケージスクリプトは Apple Development、Developer ID、または kiri の安定した
+ローカル証明書を優先し、画面収録権限を壊す一時署名へ暗黙に切り替えません。
+`KIRI_CODESIGN_IDENTITY="証明書名"` で明示的に指定できます。
+`KIRI_ALLOW_ADHOC_SIGNING=1` は権限を保持しなくてよい使い捨てビルド専用です。
 
 最初のキャプチャ時に macOS の画面収録権限が必要です。kiri は起動ごとに
 システムの権限要求を一度だけ行い、それ以降は設定を開く、または kiri を終了する

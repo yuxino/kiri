@@ -42,9 +42,10 @@ swift run kiri-core-tests
 open dist/kiri.app
 ```
 
-如果本机已有代码签名证书，可用
-`KIRI_CODESIGN_IDENTITY="证书名称" ./scripts/package-app.sh` 保持签名身份稳定，
-避免系统把每次本地构建识别成新的应用。
+打包脚本会优先选择 Apple Development、Developer ID 或 kiri 已有的稳定本地证书，
+并拒绝静默使用会破坏录屏授权的临时签名。也可用
+`KIRI_CODESIGN_IDENTITY="证书名称" ./scripts/package-app.sh` 明确指定证书；只有不需要
+持久录屏权限的临时构建才应设置 `KIRI_ALLOW_ADHOC_SIGNING=1`。
 
 第一次截图时，macOS 会要求授予“屏幕与系统音频录制”权限。授权后如果截图仍不可用，
 请退出并重新打开 kiri。kiri 每次运行最多调用一次系统授权请求；如果权限尚未生效，

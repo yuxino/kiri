@@ -43,9 +43,11 @@ swift run kiri-core-tests
 open dist/kiri.app
 ```
 
-If a local signing certificate is available, run
-`KIRI_CODESIGN_IDENTITY="Certificate Name" ./scripts/package-app.sh` to keep
-the app identity stable across local builds.
+The packaging script prefers Apple Development, Developer ID, or kiri's stable
+local certificate and refuses silent ad-hoc signing that would break Screen
+Recording consent. Use `KIRI_CODESIGN_IDENTITY="Certificate Name"` to select a
+certificate explicitly. Set `KIRI_ALLOW_ADHOC_SIGNING=1` only for disposable
+builds that do not need persistent permission.
 
 macOS asks for Screen & System Audio Recording permission on the first capture.
 If capture remains unavailable after approval, quit and reopen kiri. Kiri calls
