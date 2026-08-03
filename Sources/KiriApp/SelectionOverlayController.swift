@@ -752,6 +752,12 @@ private final class CaptureSessionView: NSView {
             action: #selector(changeTextFontSize(_:)),
             accessibilityLabel: "Text font size"
         )
+        size.slider.onTrackingBegan = { [weak self] in
+            self?.annotationCanvas?.beginTextFontSizeAdjustment()
+        }
+        size.slider.onTrackingEnded = { [weak self] in
+            self?.annotationCanvas?.endTextFontSizeAdjustment()
+        }
         let backgroundControl = NSSegmentedControl(
             images: [
                 compactSymbol("square.dashed", label: "Transparent background"),
@@ -821,8 +827,8 @@ private final class CaptureSessionView: NSView {
         maximum: Double,
         action: Selector,
         accessibilityLabel: String
-    ) -> (slider: NSSlider, valueLabel: NSTextField) {
-        let slider = NSSlider(
+    ) -> (slider: CaptureTrackingSlider, valueLabel: NSTextField) {
+        let slider = CaptureTrackingSlider(
             value: value,
             minValue: minimum,
             maxValue: maximum,
@@ -1051,7 +1057,7 @@ private final class CaptureSessionView: NSView {
     @objc private func changeTextFontSize(_ sender: NSSlider) {
         let value = CGFloat(sender.doubleValue.rounded())
         sender.doubleValue = Double(value)
-        annotationCanvas?.textFontSize = value
+        annotationCanvas?.updateTextFontSize(value)
         updateValueLabel(textFontSizeValueLabel, value: value, unit: "pt")
         window?.makeFirstResponder(self)
     }

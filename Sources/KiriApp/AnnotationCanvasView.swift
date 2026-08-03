@@ -11,7 +11,7 @@ enum AnnotationTool: CaseIterable {
     case mosaic
 }
 
-enum AnnotationColorPreset: CaseIterable {
+enum AnnotationColorPreset: CaseIterable, Equatable {
     case violet
     case cherry
     case orange
@@ -56,7 +56,7 @@ enum AnnotationColorPreset: CaseIterable {
     }
 }
 
-enum AnnotationTextBackgroundStyle: CaseIterable {
+enum AnnotationTextBackgroundStyle: CaseIterable, Equatable {
     case transparent
     case dark
     case light
@@ -100,7 +100,7 @@ enum MosaicIntensityPreset: CaseIterable, Equatable {
     }
 }
 
-private enum AnnotationMark {
+private enum AnnotationMark: Equatable {
     case pen([CGPoint], AnnotationColorPreset, CGFloat)
     case rectangle(CGRect, AnnotationColorPreset, CGFloat)
     case line(CGPoint, CGPoint, AnnotationColorPreset, CGFloat)
@@ -214,6 +214,9 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     private var selectionDragOriginalMark: AnnotationMark?
     private var selectionDragPreviewMark: AnnotationMark?
     private var selectionInteraction: AnnotationSelectionInteraction?
+    private var textSizeAdjustmentMarkIndex: Int?
+    private var textSizeAdjustmentOriginalMark: AnnotationMark?
+    private var textSizeAdjustmentPreviewMark: AnnotationMark?
 
     init(image: CGImage) {
         self.image = image
@@ -482,6 +485,52 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
+    func beginTextFontSizeAdjustment() {
+        commitTextEditing()
+        textSizeAdjustmentMarkIndex = nil
+        textSizeAdjustmentOriginalMark = nil
+        textSizeAdjustmentPreviewMark = nil
+        guard let selectedMarkIndex,
+              history.elements.indices.contains(selectedMarkIndex),
+              history.elements[selectedMarkIndex].isText else { return }
+        textSizeAdjustmentMarkIndex = selectedMarkIndex
+        textSizeAdjustmentOriginalMark = history.elements[selectedMarkIndex]
+    }
+
+    func updateTextFontSize(_ fontSize: CGFloat) {
+        textFontSize = fontSize
+        guard let selectedMarkIndex,
+              history.elements.indices.contains(selectedMarkIndex),
+              history.elements[selectedMarkIndex].isText else { return }
+        let source = textSizeAdjustmentOriginalMark ?? history.elements[selectedMarkIndex]
+        let updated = textMark(source, changingFontSizeTo: fontSize)
+        if textSizeAdjustmentMarkIndex == selectedMarkIndex,
+           textSizeAdjustmentOriginalMark != nil {
+            textSizeAdjustmentPreviewMark = updated
+        } else if updated != source,
+                  history.replace(at: selectedMarkIndex, with: updated) != nil {
+            publishHistoryState()
+        }
+        needsDisplay = true
+    }
+
+    func endTextFontSizeAdjustment() {
+        defer {
+            textSizeAdjustmentMarkIndex = nil
+            textSizeAdjustmentOriginalMark = nil
+            textSizeAdjustmentPreviewMark = nil
+            needsDisplay = true
+        }
+        guard let markIndex = textSizeAdjustmentMarkIndex,
+              history.elements.indices.contains(markIndex),
+              let original = textSizeAdjustmentOriginalMark,
+              let preview = textSizeAdjustmentPreviewMark,
+              preview != original,
+              history.replace(at: markIndex, with: preview) != nil else { return }
+        selectedMarkIndex = markIndex
+        publishHistoryState()
+    }
+
     func beginTextPlacement() {
         tool = .text
     }
@@ -548,11 +597,34 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     }
 
     private func displayMark(_ mark: AnnotationMark, at index: Int) -> AnnotationMark {
-        if index == selectedMarkIndex, let selectionDragPreviewMark {
+        if index == textSizeAdjustmentMarkIndex, let textSizeAdjustmentPreviewMark {
+            textSizeAdjustmentPreviewMark
+        } else if index == selectedMarkIndex, let selectionDragPreviewMark {
             selectionDragPreviewMark
         } else {
             mark
         }
+    }
+
+    private func textMark(
+        _ mark: AnnotationMark,
+        changingFontSizeTo fontSize: CGFloat
+    ) -> AnnotationMark {
+        guard case let .text(text, rect, color, background, _) = mark else { return mark }
+        let maximumWidth = max(1, imageRect.maxX - rect.minX)
+        let measured = (text as NSString).boundingRect(
+            with: CGSize(width: maximumWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: textAttributes(fontSize: fontSize, colorPreset: color)
+        )
+        let maximumHeight = max(1, imageRect.maxY - rect.minY)
+        let resizedRect = CGRect(
+            x: rect.minX,
+            y: rect.minY,
+            width: min(maximumWidth, max(1, ceil(measured.width) + 2)),
+            height: min(maximumHeight, max(1, ceil(measured.height) + 2))
+        )
+        return .text(text, resizedRect, color, background, fontSize)
     }
 
     private func annotationMarkIndex(at point: CGPoint) -> Int? {
@@ -941,7 +1013,10 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         }
         let mark = AnnotationMark.text(text, textRect, colorPreset, backgroundStyle, fontSize)
         if let markIndex {
-            if history.replace(at: markIndex, with: mark) != nil {
+            if history.elements.indices.contains(markIndex), history.elements[markIndex] == mark {
+                selectedMarkIndex = markIndex
+                needsDisplay = true
+            } else if history.replace(at: markIndex, with: mark) != nil {
                 selectedMarkIndex = markIndex
                 publishHistoryState()
                 needsDisplay = true

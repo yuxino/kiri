@@ -78,6 +78,18 @@ final class CaptureToolGroupView: NSView {
     }
 }
 
+final class CaptureTrackingSlider: NSSlider {
+    var onTrackingBegan: (() -> Void)?
+    var onTrackingEnded: (() -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+        onTrackingBegan?()
+        super.mouseDown(with: event)
+        onTrackingEnded?()
+    }
+}
+
 final class AnnotationColorSwatchButton: NSButton {
     let preset: AnnotationColorPreset
     private var selectedColor = false

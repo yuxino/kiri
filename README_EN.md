@@ -23,7 +23,7 @@ does not disappear just because the clipboard changed.
 - Use pen, rectangle, line, arrow, text, and continuous brush mosaic tools with undo and redo
 - Use the default pointer to select and move existing text, then double-click it to edit again
 - Move pen and mosaic strokes, resize rectangles from eight handles, adjust line and arrow endpoints, or press Delete
-- Continuously adjust pen width, shape width, text size, and mosaic brush size with live numeric sliders
+- Continuously adjust pen width, shape width, text size, and mosaic brush size; text stays resizable while typing or after reopening it
 - Choose soft, standard, or strong mosaic pixelation
 - Choose from eight annotation colors; text supports complex input, long content,
   and Transparent (default), Dark, or Light backgrounds

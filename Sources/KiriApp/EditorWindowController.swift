@@ -254,7 +254,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         title.font = .systemFont(ofSize: 10, weight: .semibold)
         title.textColor = .secondaryLabelColor
 
-        let slider = NSSlider(
+        let slider = CaptureTrackingSlider(
             value: 3,
             minValue: 1,
             maxValue: 16,
@@ -266,6 +266,14 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         slider.setAccessibilityLabel("Tool size")
         slider.translatesAutoresizingMaskIntoConstraints = false
         slider.widthAnchor.constraint(equalToConstant: 92).isActive = true
+        slider.onTrackingBegan = { [weak self] in
+            guard self?.canvas.tool == .text else { return }
+            self?.canvas.beginTextFontSizeAdjustment()
+        }
+        slider.onTrackingEnded = { [weak self] in
+            guard self?.canvas.tool == .text else { return }
+            self?.canvas.endTextFontSizeAdjustment()
+        }
 
         let valueLabel = NSTextField(labelWithString: "3 px")
         valueLabel.font = .monospacedDigitSystemFont(ofSize: 9, weight: .medium)
@@ -372,7 +380,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         case .rectangle, .line, .arrow:
             canvas.shapeWidth = value
         case .text:
-            canvas.textFontSize = value
+            canvas.updateTextFontSize(value)
         case .mosaic:
             canvas.mosaicBrushDiameter = value
         }
