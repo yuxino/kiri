@@ -19,7 +19,7 @@ does not disappear just because the clipboard changed.
 
 - Start capture with **⇧⌘A**, which Kiri filters before other apps can act on it
 - Use a Simplified Chinese or English interface that follows the preferred macOS language
-- Freeze the display, click to select a window without hover outlines, or manually drag an exact region; both remain movable and resizable
+- Freeze the display, preview a window with one violet hover outline and click to select it, or manually drag an exact region; both remain movable and resizable
 - See the full toolbar as soon as the region is drawn, while it remains movable and resizable until a tool is chosen
 - Use pen, rectangle, line, arrow, text, and continuous brush mosaic tools with undo and redo
 - Use the default pointer to select and move existing text, then double-click it to edit again

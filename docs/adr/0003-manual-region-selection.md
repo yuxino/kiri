@@ -1,36 +1,36 @@
-# ADR 0003: Window selection without hover outlines
+# ADR 0003: Single-outline window hover
 
 - Status: Accepted
 - Date: 2026-08-04
-- Supersedes: The hover-preview portions of ADR 0001 and earlier capture plans
+- Supersedes: The stacked hover-preview styling in earlier capture plans
 
 ## Context
 
-The original capture overlay highlighted the window under the pointer before a
-click. In real use the changing outline felt like several boxes following the
-pointer and competed with the user's intent to choose an exact region. Removing
-both the preview and click selection went too far because one-click whole-window
-selection remains useful.
+The original capture overlay used stacked border treatments and additional
+pointer-adjacent feedback while highlighting the window under the pointer. In
+real use this felt like several boxes following the pointer. Removing hover
+entirely made one-click whole-window selection less discoverable.
 
 Kiri supports free region creation, moving, and eight-handle resizing. Window
-recognition should complement that flow without producing hover noise.
+recognition should remain visible, but its hover state must be visually quiet.
 
 ## Decision
 
-Screenshot and recording selection use silent window recognition:
+Screenshot and recording selection use restrained window recognition:
 
-- Moving the pointer before a selection does not display a window outline.
-- A click without a drag selects the frontmost eligible window at that point.
+- Hovering an eligible window displays exactly one violet outline.
+- Hover does not display handles, dimensions, a stacked white border, a loupe,
+  or a pointer-following tooltip.
+- A click selects the highlighted frontmost window.
 - Dragging creates the region.
 - Dragging inside an existing region moves it.
 - Dragging any of the eight handles resizes it.
-- `CaptureCoordinator` collects visible-window rectangles for click hit testing,
-  but the overlay never uses them to draw hover state.
+- `CaptureCoordinator` collects visible-window rectangles for hover and click
+  hit testing.
 
 ## Consequences
 
-The overlay keeps one-click whole-window capture without visual noise while the
-pointer moves. A clicked window becomes a normal selection and can be moved or
-resized, so the user retains exact size control. Historical plans and ADR 0001
-remain useful background, but their hover-preview requirement is no longer
-active.
+The overlay keeps one-click whole-window capture discoverable without the visual
+noise of several nested or pointer-following elements. A clicked window becomes
+a normal selection and can be moved or resized, so the user retains exact size
+control.

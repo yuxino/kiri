@@ -45,14 +45,14 @@ ScreenCaptureKit, AVFoundation, CoreMedia, CoreVideo, Carbon, ImageIO.
 - Pause/resume implemented as MP4 segments merged into one final asset.
 - Clipboard-first capture completion and background recording save behavior.
 - Direct library-card move to recoverable Trash.
-- Window clicks silently select the frontmost eligible window, while pointer
-  movement shows no hover-following boxes. Manual drag, move, and eight-handle
-  resize remain.
+- Window hover shows one restrained violet outline and a click selects the
+  frontmost eligible window. Hover omits handles, dimensions, stacked borders,
+  loupe, and following tooltip. Manual drag, move, and eight-handle resize remain.
 - README updates describing recording quality, countdown, and click feedback.
 
 ## Verified state
 
-The following checks passed after the silent window-click refinement:
+The following checks passed after the final single-outline hover refinement:
 
 ```text
 swift run kiri-core-tests
@@ -84,9 +84,8 @@ Rerun the full verification block in `AGENTS.md` after future implementation.
   automation. Automated clicks can accidentally create recordings. Re-query UI
   state after every action and prefer careful visual/manual acceptance for the
   overlay itself.
-- Historical capture plans and ADR 0001 still mention hover window previews.
-  ADR 0003 explicitly supersedes that visual behavior while preserving click
-  selection.
+- Historical capture plans and ADR 0001 contain older hover styling. ADR 0003
+  supersedes the stacked treatment with a single-outline preview.
 - `README_JA.md` has not been updated/localized for the full v0.2 feature set.
 - MP4 trimming, full-display recording, inline playback, and recording safety
   limits remain roadmap items, not completed features.

@@ -24,9 +24,10 @@ Kiri is a native, local-first macOS capture utility. Preserve these decisions:
   Manager with Apple frameworks rather than third-party dependencies.
 - The global capture shortcut is exclusively `Shift-Command-A` (`⇧⌘A`).
 - The initial overlay offers Screenshot and Record at the first level.
-- Window selection is silent until click. Do not restore hover-following window
-  outlines. A click selects the frontmost window; a drag creates a custom
-  region. Both selections remain movable and resizable with eight handles.
+- Window hover shows exactly one restrained violet outline without handles,
+  dimensions, stacked borders, or a following tooltip. A click selects that
+  window; a drag creates a custom region. Both selections remain movable and
+  resizable with eight handles.
 - Screenshot completion is clipboard-first and returns focus to the original
   application. Do not open the Kiri library after every capture.
 - Escape cancels capture and countdown; Return confirms a screenshot.
@@ -66,7 +67,7 @@ Kiri is a native, local-first macOS capture utility. Preserve these decisions:
 - `AppModel` coordinates capture, library operations, recording state, and
   transient feedback. Keep framework-specific services in focused controllers.
 - `CaptureCoordinator` obtains permission, freezes the active display, and
-  collects visible-window geometry only for click selection, never hover UI.
+  collects visible-window geometry for hover and click selection.
 - `SelectionOverlayController` owns screenshot/record mode selection, manual
   region interactions, and the inline annotation toolbar.
 - `AnnotationCanvasView` owns annotation history, drawing, selection, resizing,
@@ -105,8 +106,8 @@ Monitoring permissions.
 ## UI acceptance checklist
 
 - Verify both Screenshot and Record modes from the initial overlay.
-- Verify click-to-select-window without hover outlines, plus manual region drag,
-  move, and all eight resize handles.
+- Verify the single-outline window hover and click selection, plus manual region
+  drag, move, and all eight resize handles.
 - Verify Escape and Return behavior and original-app focus restoration.
 - Verify the toolbar at narrow regions and near every display edge.
 - Verify text creation, IME input, second edit, live font sizing, and background

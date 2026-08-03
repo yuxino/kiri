@@ -122,6 +122,7 @@ private final class CaptureSessionView: NSView {
     private var interactionMoved = false
     private var selection: CGRect = .null
     private var hoverPoint: CGPoint?
+    private var hoveredWindowSelection: CGRect?
     private var pendingWindowSelection: CGRect?
     private var annotationCanvas: AnnotationCanvasView?
     private var toolbar: NSVisualEffectView?
@@ -173,17 +174,23 @@ private final class CaptureSessionView: NSView {
         NSImage(cgImage: image, size: bounds.size).draw(in: bounds)
 
         let hasSelection = SelectionGeometry.isValid(selection)
-        NSColor.black.withAlphaComponent(hasSelection ? 0.48 : 0.25).setFill()
-        if hasSelection {
-            let activeRect = selection.standardized
+        let activeRect = hasSelection ? selection.standardized : hoveredWindowSelection
+        NSColor.black.withAlphaComponent(activeRect == nil ? 0.25 : (hasSelection ? 0.48 : 0.34)).setFill()
+        if let activeRect {
             dimOutside(activeRect)
             let border = NSBezierPath(rect: activeRect)
-            border.lineWidth = phase == .annotating ? 4 : 3
-            NSColor.white.withAlphaComponent(0.92).setStroke()
-            border.stroke()
-            border.lineWidth = phase == .annotating ? 2 : 1.5
-            CaptureUIColors.accent.setStroke()
-            border.stroke()
+            if hasSelection {
+                border.lineWidth = phase == .annotating ? 4 : 3
+                NSColor.white.withAlphaComponent(0.92).setStroke()
+                border.stroke()
+                border.lineWidth = phase == .annotating ? 2 : 1.5
+                CaptureUIColors.accent.setStroke()
+                border.stroke()
+            } else {
+                border.lineWidth = 2
+                CaptureUIColors.accent.withAlphaComponent(0.92).setStroke()
+                border.stroke()
+            }
 
             if phase == .selecting, SelectionGeometry.isValid(selection) {
                 drawDimensions()
@@ -197,10 +204,11 @@ private final class CaptureSessionView: NSView {
         }
 
         if phase == .selecting {
-            if !SelectionGeometry.isValid(selection) || selectionInteraction == .creating {
+            if (!hasSelection && hoveredWindowSelection == nil)
+                || selectionInteraction == .creating {
                 drawLoupe()
             }
-            if !SelectionGeometry.isValid(selection) {
+            if !hasSelection, hoveredWindowSelection == nil {
                 drawInitialHint()
             }
         }
@@ -237,6 +245,7 @@ private final class CaptureSessionView: NSView {
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
         dragStart = point
         interactionMoved = false
+        hoveredWindowSelection = nil
         if SelectionGeometry.isValid(selection) {
             if let handle = SelectionGeometry.hitTest(point, selection: selection, radius: 10) {
                 selectionInteraction = .resizing(handle: handle, original: selection)
@@ -284,6 +293,7 @@ private final class CaptureSessionView: NSView {
         }
         switch interaction {
         case .creating:
+            hoveredWindowSelection = nil
             pendingWindowSelection = nil
             selection = SelectionGeometry.clamped(
                 SelectionGeometry.normalized(from: dragStart, to: current),
@@ -328,6 +338,7 @@ private final class CaptureSessionView: NSView {
         dragStart = nil
         selectionInteraction = nil
         interactionMoved = false
+        hoveredWindowSelection = nil
         pendingWindowSelection = nil
         if SelectionGeometry.isValid(selection) {
             switch captureMode {
@@ -351,6 +362,13 @@ private final class CaptureSessionView: NSView {
         guard phase == .selecting else { return }
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
         hoverPoint = point
+        if !SelectionGeometry.isValid(selection), selectionInteraction == nil {
+            hoveredWindowSelection = WindowSelectionGeometry.candidate(
+                at: point,
+                windowsFrontToBack: windowRectsFrontToBack,
+                within: bounds
+            )
+        }
         updateCursor(at: point)
         needsDisplay = true
     }
@@ -358,6 +376,7 @@ private final class CaptureSessionView: NSView {
     override func mouseExited(with event: NSEvent) {
         guard phase == .selecting else { return }
         hoverPoint = nil
+        hoveredWindowSelection = nil
         needsDisplay = true
     }
 
@@ -601,6 +620,7 @@ private final class CaptureSessionView: NSView {
         guard let canvas = annotationCanvas else { return }
         phase = .annotating
         hoverPoint = nil
+        hoveredWindowSelection = nil
         canvas.isHidden = false
         canvas.tool = tool
         NSCursor.arrow.set()
