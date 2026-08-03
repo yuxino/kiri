@@ -78,28 +78,6 @@ final class CaptureToolGroupView: NSView {
     }
 }
 
-final class CaptureSparkleView: NSImageView {
-    init() {
-        super.init(frame: CGRect(x: 0, y: 0, width: 24, height: 30))
-        image = NSImage(
-            systemSymbolName: "sparkles",
-            accessibilityDescription: "Kiri tools"
-        )?.withSymbolConfiguration(
-            NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-        )
-        contentTintColor = CaptureUIColors.blossom
-        imageScaling = .scaleProportionallyDown
-        toolTip = "Kiri capture tools"
-        setAccessibilityElement(false)
-        setFrameSize(CGSize(width: 24, height: 30))
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-}
-
 final class AnnotationColorSwatchButton: NSButton {
     let preset: AnnotationColorPreset
     private var selectedColor = false

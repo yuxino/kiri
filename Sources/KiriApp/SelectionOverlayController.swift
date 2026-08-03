@@ -107,7 +107,6 @@ private final class CaptureSessionView: NSView {
     private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
     private var colorGroupContainer: CaptureToolGroupView?
     private var strokeOptionsRow: NSStackView?
-    private var strokeOptionsTitle: NSTextField?
     private var strokeSizeSlider: NSSlider?
     private var strokeSizeValueLabel: NSTextField?
     private var textOptionsRow: NSStackView?
@@ -121,7 +120,6 @@ private final class CaptureSessionView: NSView {
     private var undoButton: CaptureActionButton?
     private var redoButton: CaptureActionButton?
     private var clearAnnotationsItem: NSMenuItem?
-    private var toolbarHintLabel: NSTextField?
     private var isCompleting = false
 
     init(
@@ -480,8 +478,6 @@ private final class CaptureSessionView: NSView {
 
     private func clearToolSelectionForAdjustingRegion() {
         toolButtons.values.forEach { $0.setToolSelected(false) }
-        toolbarHintLabel?.isHidden = false
-        toolbarHintLabel?.stringValue = Self.adjustingRegionHint
         strokeOptionsRow?.isHidden = true
         textOptionsRow?.isHidden = true
         mosaicOptionsRow?.isHidden = true
@@ -506,7 +502,6 @@ private final class CaptureSessionView: NSView {
         colorButtons.removeAll()
         colorGroupContainer = nil
         strokeOptionsRow = nil
-        strokeOptionsTitle = nil
         strokeSizeSlider = nil
         strokeSizeValueLabel = nil
         textOptionsRow = nil
@@ -520,7 +515,6 @@ private final class CaptureSessionView: NSView {
         undoButton = nil
         redoButton = nil
         clearAnnotationsItem = nil
-        toolbarHintLabel = nil
     }
 
     private func croppedSelection() -> CGImage? {
@@ -559,25 +553,19 @@ private final class CaptureSessionView: NSView {
         effect.blendingMode = .withinWindow
         effect.state = .active
         effect.wantsLayer = true
-        effect.layer?.cornerRadius = 15
+        effect.layer?.cornerRadius = 13
         effect.layer?.cornerCurve = .continuous
         effect.layer?.borderWidth = 1
         effect.layer?.borderColor = CaptureUIColors.surfaceBorder.cgColor
         effect.layer?.masksToBounds = true
 
-        let content = NSStackView()
-        content.orientation = .vertical
-        content.alignment = .centerX
-        content.spacing = 3
-        content.edgeInsets = NSEdgeInsets(top: 7, left: 8, bottom: 6, right: 8)
-        content.translatesAutoresizingMaskIntoConstraints = false
-
         let actions = NSStackView()
         actions.orientation = .horizontal
         actions.alignment = .centerY
-        actions.spacing = 5
+        actions.spacing = 4
+        actions.edgeInsets = NSEdgeInsets(top: 6, left: 7, bottom: 6, right: 7)
+        actions.translatesAutoresizingMaskIntoConstraints = false
 
-        actions.addArrangedSubview(CaptureSparkleView())
         let cancelButton = actionButton(
             symbol: "xmark",
             label: "Cancel (Esc)",
@@ -621,11 +609,34 @@ private final class CaptureSessionView: NSView {
                 target: self,
                 action: action
             )
-            connectToolbarHint(to: button)
             toolButtons[tool] = button
             toolGroup.addArrangedSubview(button)
         }
-        actions.addArrangedSubview(CaptureToolGroupView(content: toolGroup))
+        actions.addArrangedSubview(toolGroup)
+
+        let strokeOptions = makeStrokeContextRow()
+        strokeOptions.row.isHidden = true
+        strokeOptionsRow = strokeOptions.row
+        strokeSizeSlider = strokeOptions.slider
+        strokeSizeValueLabel = strokeOptions.valueLabel
+
+        let textOptions = makeTextContextRow()
+        textOptions.row.isHidden = true
+        textOptionsRow = textOptions.row
+        textBackgroundControl = textOptions.backgroundControl
+        textFontSizeSlider = textOptions.slider
+        textFontSizeValueLabel = textOptions.valueLabel
+
+        let mosaicOptions = makeMosaicContextRow()
+        mosaicOptions.row.isHidden = true
+        mosaicOptionsRow = mosaicOptions.row
+        mosaicBrushSizeSlider = mosaicOptions.slider
+        mosaicBrushSizeValueLabel = mosaicOptions.valueLabel
+        mosaicIntensityControl = mosaicOptions.intensityControl
+
+        actions.addArrangedSubview(strokeOptions.row)
+        actions.addArrangedSubview(textOptions.row)
+        actions.addArrangedSubview(mosaicOptions.row)
         actions.addArrangedSubview(separator())
 
         let colorGroup = NSStackView()
@@ -667,15 +678,13 @@ private final class CaptureSessionView: NSView {
         actions.addArrangedSubview(redoButton)
         actions.addArrangedSubview(separator())
         let doneButton = CaptureActionButton(
-            symbol: "checkmark.circle.fill",
-            label: "Done",
+            symbol: "checkmark",
+            label: "Done (Return)",
             style: .primary,
-            showsTitle: true,
             hoverHint: "Done — Copy to clipboard · Return",
             target: self,
             action: #selector(finishCapture)
         )
-        connectToolbarHint(to: doneButton)
         actions.addArrangedSubview(doneButton)
 
         let moreButton = actionButton(
@@ -686,61 +695,25 @@ private final class CaptureSessionView: NSView {
         )
         actions.addArrangedSubview(moreButton)
 
-        let hint = NSTextField(labelWithString: Self.defaultToolbarHint)
-        hint.font = .systemFont(ofSize: 10, weight: .medium)
-        hint.textColor = .secondaryLabelColor
-        hint.alignment = .center
-        hint.lineBreakMode = .byTruncatingTail
-        toolbarHintLabel = hint
-
-        let strokeOptions = makeStrokeContextRow()
-        strokeOptions.row.isHidden = true
-        strokeOptionsRow = strokeOptions.row
-        strokeOptionsTitle = strokeOptions.title
-        strokeSizeSlider = strokeOptions.slider
-        strokeSizeValueLabel = strokeOptions.valueLabel
-
-        let textOptions = makeTextContextRow()
-        textOptions.row.isHidden = true
-        textOptionsRow = textOptions.row
-        textBackgroundControl = textOptions.backgroundControl
-        textFontSizeSlider = textOptions.slider
-        textFontSizeValueLabel = textOptions.valueLabel
-
-        let mosaicOptions = makeMosaicContextRow()
-        mosaicOptions.row.isHidden = true
-        mosaicOptionsRow = mosaicOptions.row
-        mosaicBrushSizeSlider = mosaicOptions.slider
-        mosaicBrushSizeValueLabel = mosaicOptions.valueLabel
-        mosaicIntensityControl = mosaicOptions.intensityControl
-
-        content.addArrangedSubview(actions)
-        content.addArrangedSubview(hint)
-        content.addArrangedSubview(strokeOptions.row)
-        content.addArrangedSubview(textOptions.row)
-        content.addArrangedSubview(mosaicOptions.row)
-        effect.addSubview(content)
+        effect.addSubview(actions)
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: effect.topAnchor),
-            content.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
-            content.bottomAnchor.constraint(equalTo: effect.bottomAnchor),
-            hint.widthAnchor.constraint(equalTo: actions.widthAnchor)
+            actions.topAnchor.constraint(equalTo: effect.topAnchor),
+            actions.leadingAnchor.constraint(equalTo: effect.leadingAnchor),
+            actions.trailingAnchor.constraint(equalTo: effect.trailingAnchor),
+            actions.bottomAnchor.constraint(equalTo: effect.bottomAnchor)
         ])
         return effect
     }
 
     private func makeStrokeContextRow() -> (
         row: NSStackView,
-        title: NSTextField,
         slider: NSSlider,
         valueLabel: NSTextField
     ) {
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 8
-        let title = contextLabel("Line width")
+        row.spacing = 4
         let size = makeSizeSlider(
             value: 3,
             minimum: 1,
@@ -748,14 +721,10 @@ private final class CaptureSessionView: NSView {
             action: #selector(changeStrokeSize(_:)),
             accessibilityLabel: "Annotation line width"
         )
-        let detailLabel = detailLabel("Drag to draw")
-
         row.addArrangedSubview(contextIcon("lineweight", label: "Stroke size"))
-        row.addArrangedSubview(title)
         row.addArrangedSubview(size.slider)
         row.addArrangedSubview(size.valueLabel)
-        row.addArrangedSubview(detailLabel)
-        return (row, title, size.slider, size.valueLabel)
+        return (row, size.slider, size.valueLabel)
     }
 
     private func makeTextContextRow() -> (
@@ -767,7 +736,7 @@ private final class CaptureSessionView: NSView {
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 7
+        row.spacing = 4
         let size = makeSizeSlider(
             value: 18,
             minimum: 12,
@@ -776,22 +745,27 @@ private final class CaptureSessionView: NSView {
             accessibilityLabel: "Text font size"
         )
         let backgroundControl = NSSegmentedControl(
-            labels: ["Transparent", "Dark", "Light"],
+            images: [
+                compactSymbol("square.dashed", label: "Transparent background"),
+                compactSymbol("moon.fill", label: "Dark background"),
+                compactSymbol("sun.max.fill", label: "Light background")
+            ],
             trackingMode: .selectOne,
             target: self,
             action: #selector(selectTextBackgroundOption(_:))
         )
         configureContextControl(
             backgroundControl,
-            widths: [78, 52, 52],
+            widths: [26, 26, 26],
             label: "Text background"
         )
+        backgroundControl.setToolTip("Transparent", forSegment: 0)
+        backgroundControl.setToolTip("Dark", forSegment: 1)
+        backgroundControl.setToolTip("Light", forSegment: 2)
 
         row.addArrangedSubview(contextIcon("character.textbox", label: "Text options"))
-        row.addArrangedSubview(contextLabel("Font"))
         row.addArrangedSubview(size.slider)
         row.addArrangedSubview(size.valueLabel)
-        row.addArrangedSubview(contextLabel("Background"))
         row.addArrangedSubview(backgroundControl)
         return (row, size.slider, size.valueLabel, backgroundControl)
     }
@@ -805,7 +779,7 @@ private final class CaptureSessionView: NSView {
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
-        row.spacing = 7
+        row.spacing = 4
 
         let size = makeSizeSlider(
             value: 36,
@@ -815,22 +789,21 @@ private final class CaptureSessionView: NSView {
             accessibilityLabel: "Mosaic brush size"
         )
 
-        let strengthLabel = contextLabel("Strength")
         let intensityControl = NSSegmentedControl(
-            labels: MosaicIntensityPreset.allCases.map(\.name),
+            labels: ["1", "2", "3"],
             trackingMode: .selectOne,
             target: self,
             action: #selector(selectMosaicIntensity(_:))
         )
-        configureContextControl(intensityControl, widths: [48, 66, 56], label: "Mosaic strength")
+        configureContextControl(intensityControl, widths: [24, 24, 24], label: "Mosaic strength")
+        for (index, preset) in MosaicIntensityPreset.allCases.enumerated() {
+            intensityControl.setToolTip(preset.name, forSegment: index)
+        }
 
         row.addArrangedSubview(contextIcon("square.grid.3x3.fill", label: "Mosaic brush"))
-        row.addArrangedSubview(contextLabel("Brush"))
         row.addArrangedSubview(size.slider)
         row.addArrangedSubview(size.valueLabel)
-        row.addArrangedSubview(strengthLabel)
         row.addArrangedSubview(intensityControl)
-        row.addArrangedSubview(detailLabel("Drag to paint"))
         return (row, size.slider, size.valueLabel, intensityControl)
     }
 
@@ -849,18 +822,27 @@ private final class CaptureSessionView: NSView {
             action: action
         )
         slider.isContinuous = true
-        slider.controlSize = .small
+        slider.controlSize = .mini
         slider.setAccessibilityLabel(accessibilityLabel)
         slider.translatesAutoresizingMaskIntoConstraints = false
-        slider.widthAnchor.constraint(equalToConstant: 124).isActive = true
+        slider.widthAnchor.constraint(equalToConstant: 76).isActive = true
 
-        let valueLabel = NSTextField(labelWithString: "\(Int(value)) px")
-        valueLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        let valueLabel = NSTextField(labelWithString: "\(Int(value))")
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: 9, weight: .medium)
         valueLabel.textColor = .secondaryLabelColor
         valueLabel.alignment = .right
         valueLabel.translatesAutoresizingMaskIntoConstraints = false
-        valueLabel.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        valueLabel.widthAnchor.constraint(equalToConstant: 28).isActive = true
         return (slider, valueLabel)
+    }
+
+    private func compactSymbol(_ symbol: String, label: String) -> NSImage {
+        NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: label
+        )?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 10, weight: .medium)
+        ) ?? NSImage()
     }
 
     private func contextIcon(_ symbol: String, label: String) -> NSImageView {
@@ -876,28 +858,14 @@ private final class CaptureSessionView: NSView {
         return icon
     }
 
-    private func detailLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 10, weight: .medium)
-        label.textColor = .secondaryLabelColor
-        return label
-    }
-
-    private func contextLabel(_ text: String) -> NSTextField {
-        let label = NSTextField(labelWithString: text)
-        label.font = .systemFont(ofSize: 11, weight: .semibold)
-        label.textColor = .labelColor
-        return label
-    }
-
     private func configureContextControl(
         _ control: NSSegmentedControl,
         widths: [CGFloat],
         label: String
     ) {
         control.segmentStyle = .capsule
-        control.controlSize = .small
-        control.font = .systemFont(ofSize: 10, weight: .medium)
+        control.controlSize = .mini
+        control.font = .systemFont(ofSize: 9, weight: .medium)
         control.setAccessibilityLabel(label)
         for (index, width) in widths.enumerated() {
             control.setWidth(width, forSegment: index)
@@ -918,19 +886,7 @@ private final class CaptureSessionView: NSView {
             target: self,
             action: action
         )
-        connectToolbarHint(to: button)
         return button
-    }
-
-    private func connectToolbarHint(to button: CaptureActionButton) {
-        button.onHoverHintChange = { [weak self] hint in
-            guard let self else { return }
-            toolbarHintLabel?.stringValue = hint ?? currentToolbarHint
-        }
-    }
-
-    private var currentToolbarHint: String {
-        phase == .selecting ? Self.adjustingRegionHint : Self.defaultToolbarHint
     }
 
     private func separator() -> NSView {
@@ -970,7 +926,6 @@ private final class CaptureSessionView: NSView {
     }
 
     private func updateContextualControls(selected: AnnotationTool) {
-        toolbarHintLabel?.isHidden = true
         strokeOptionsRow?.isHidden = selected == .text || selected == .mosaic
         textOptionsRow?.isHidden = selected != .text
         mosaicOptionsRow?.isHidden = selected != .mosaic
@@ -978,7 +933,6 @@ private final class CaptureSessionView: NSView {
 
         if let canvas = annotationCanvas {
             let isPen = selected == .pen
-            strokeOptionsTitle?.stringValue = isPen ? "Brush size" : "Line width"
             strokeSizeSlider?.minValue = 1
             strokeSizeSlider?.maxValue = isPen ? 24 : 16
             strokeSizeSlider?.doubleValue = Double(isPen ? canvas.penWidth : canvas.shapeWidth)
@@ -1014,7 +968,8 @@ private final class CaptureSessionView: NSView {
     }
 
     private func updateValueLabel(_ label: NSTextField?, value: CGFloat, unit: String) {
-        label?.stringValue = "\(Int(value.rounded())) \(unit)"
+        label?.stringValue = "\(Int(value.rounded()))"
+        label?.toolTip = "\(Int(value.rounded())) \(unit)"
     }
 
     private func updateHistoryControls(canUndo: Bool, canRedo: Bool) {
@@ -1287,9 +1242,6 @@ private final class CaptureSessionView: NSView {
             withAttributes: attributes
         )
     }
-
-    private static let defaultToolbarHint = "Return  Copy   ·   Esc  Cancel   ·   ⌘Z  Undo"
-    private static let adjustingRegionHint = "Adjust region · Choose a tool · Return to copy"
 
     private func drawHint(_ text: NSString, near rect: CGRect) {
         let attributes = labelAttributes(monospaced: false)
