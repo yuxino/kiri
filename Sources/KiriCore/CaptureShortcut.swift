@@ -32,28 +32,9 @@ public struct CaptureShortcut: Codable, Equatable, Sendable {
             .joined()
         return prefix + key.uppercased()
     }
-}
 
-public enum CaptureShortcutPreset: String, Codable, CaseIterable, Identifiable, Sendable {
-    case optionCommand2
-    case controlShift2
-
-    public var id: String { rawValue }
-
-    public init?(storedIdentifier: String) {
-        if storedIdentifier == "shiftCommand2" || storedIdentifier == "shiftCommandA" {
-            self = .optionCommand2
-        } else {
-            self.init(rawValue: storedIdentifier)
-        }
-    }
-
-    public var shortcut: CaptureShortcut {
-        switch self {
-        case .optionCommand2:
-            CaptureShortcut(key: "2", modifiers: [.option, .command])
-        case .controlShift2:
-            CaptureShortcut(key: "2", modifiers: [.control, .shift])
-        }
-    }
+    public static let kiriCapture = CaptureShortcut(
+        key: "a",
+        modifiers: [.shift, .command]
+    )
 }

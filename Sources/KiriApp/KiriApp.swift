@@ -68,21 +68,6 @@ private struct MenuBarView: View {
             openWindow(id: "library")
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
-        Menu("Capture Shortcut") {
-            ForEach(CaptureShortcutPreset.allCases) { preset in
-                Button {
-                    model.selectShortcut(preset)
-                } label: {
-                    HStack {
-                        Text(preset.shortcut.displayLabel)
-                        if preset == model.captureShortcutPreset {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-            }
-        }
-        Divider()
         if let error = model.errorMessage {
             Text(error)
                 .foregroundStyle(.secondary)

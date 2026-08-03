@@ -28,5 +28,7 @@
     <true/>
     <key>NSScreenCaptureUsageDescription</key>
     <string>kiri needs screen access to capture the region you choose.</string>
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>Kiri uses keyboard access only to reserve ⇧⌘A as its exclusive capture shortcut.</string>
 </dict>
 </plist>

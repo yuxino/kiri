@@ -20,16 +20,13 @@ let tests = [
         try searchableTextIncludesFilenameKindAndApplication()
     },
     KiriTest(name: "capture shortcut labels") {
-        try captureShortcutPresetsHaveStableLabels()
+        try captureShortcutHasStableLabel()
     },
     KiriTest(name: "capture shortcut round-trip") {
         try captureShortcutRoundTrips()
     },
     KiriTest(name: "capture shortcut modifiers") {
         try captureShortcutExposesNormalizedModifiers()
-    },
-    KiriTest(name: "capture shortcut legacy migration") {
-        try captureShortcutMigratesLegacyPreset()
     },
     KiriTest(name: "library import persistence") {
         try await importPersistsAcrossLibraryInstances()

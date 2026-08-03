@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import Carbon.HIToolbox
 import Combine
 import KiriCore
@@ -20,7 +21,6 @@ final class AppModel: ObservableObject {
         }
     }
     @Published private(set) var capturePermissionRecoveryAction: CapturePermissionRecoveryAction?
-    @Published private(set) var captureShortcutPreset: CaptureShortcutPreset
 
     let libraryRoot: URL
 
@@ -33,10 +33,6 @@ final class AppModel: ObservableObject {
     private var hasStarted = false
 
     init() {
-        captureShortcutPreset = UserDefaults.standard
-            .string(forKey: Self.shortcutDefaultsKey)
-            .flatMap(CaptureShortcutPreset.init(storedIdentifier:))
-            ?? .optionCommand2
         let setup = Self.makeLibrary()
         libraryRoot = setup.root
         library = setup.library
@@ -52,7 +48,7 @@ final class AppModel: ObservableObject {
     }
 
     var captureShortcutLabel: String {
-        captureShortcutPreset.shortcut.displayLabel
+        CaptureShortcut.kiriCapture.displayLabel
     }
 
     var capturePermissionRecoveryLabel: String? {
@@ -61,6 +57,8 @@ final class AppModel: ObservableObject {
             "Open Settings"
         case .quitKiri:
             "Quit Kiri"
+        case .openAccessibilitySettings:
+            "Open Accessibility Settings"
         case nil:
             nil
         }
@@ -70,24 +68,12 @@ final class AppModel: ObservableObject {
         guard !hasStarted else { return }
         hasStarted = true
         do {
-            try registerShortcut(captureShortcutPreset)
-        } catch {
+            try registerShortcut()
+        } catch let error as GlobalShortcutError {
             errorMessage = error.localizedDescription
-        }
-    }
-
-    func selectShortcut(_ preset: CaptureShortcutPreset) {
-        guard preset != captureShortcutPreset else { return }
-        do {
-            if hasStarted {
-                try registerShortcut(preset)
+            if case .accessibilityPermissionRequired = error {
+                capturePermissionRecoveryAction = .openAccessibilitySettings
             }
-            captureShortcutPreset = preset
-            UserDefaults.standard.set(
-                preset.rawValue,
-                forKey: Self.shortcutDefaultsKey
-            )
-            errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -166,6 +152,13 @@ final class AppModel: ObservableObject {
             NSWorkspace.shared.open(url)
         case .quitKiri:
             NSApplication.shared.terminate(nil)
+        case .openAccessibilitySettings:
+            guard let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            ) else {
+                return
+            }
+            NSWorkspace.shared.open(url)
         case nil:
             break
         }
@@ -425,8 +418,8 @@ final class AppModel: ObservableObject {
         )
     }
 
-    private func registerShortcut(_ preset: CaptureShortcutPreset) throws {
-        try shortcutMonitor.start(shortcut: preset.shortcut) { [weak self] in
+    private func registerShortcut() throws {
+        try shortcutMonitor.start(shortcut: .kiriCapture) { [weak self] in
             self?.startCapture()
         }
     }
@@ -452,12 +445,12 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private static let shortcutDefaultsKey = "captureShortcutPreset"
 }
 
 enum CapturePermissionRecoveryAction {
     case openSettings
     case quitKiri
+    case openAccessibilitySettings
 }
 
 struct AppNotice: Identifiable, Equatable {
@@ -489,150 +482,112 @@ private enum CaptureExportError: LocalizedError {
 
 @MainActor
 private final class GlobalShortcutMonitor {
-    private static let hotKeyID = EventHotKeyID(signature: 0x4B49_5249, id: 1)
-
-    private var eventHandler: EventHandlerRef?
-    private var hotKey: EventHotKeyRef?
-    private var activeShortcut: CaptureShortcut?
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
     private var action: (@MainActor () -> Void)?
 
     func start(
         shortcut: CaptureShortcut,
         action: @escaping @MainActor () -> Void
     ) throws {
-        if activeShortcut == shortcut, hotKey != nil {
+        precondition(shortcut == .kiriCapture)
+        if eventTap != nil {
             self.action = action
             return
         }
 
-        try installEventHandlerIfNeeded()
-
-        var newHotKey: EventHotKeyRef?
-        let status = RegisterEventHotKey(
-            try Self.keyCode(for: shortcut.key),
-            Self.modifierFlags(for: shortcut.modifiers),
-            Self.hotKeyID,
-            GetApplicationEventTarget(),
-            OptionBits(kEventHotKeyExclusive),
-            &newHotKey
-        )
-        guard status == noErr, let newHotKey else {
-            if status == eventHotKeyExistsErr {
-                throw GlobalShortcutError.alreadyInUse(shortcut.displayLabel)
-            }
-            throw GlobalShortcutError.registrationFailed(
-                shortcut.displayLabel,
-                status
-            )
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        guard AXIsProcessTrustedWithOptions(options) else {
+            throw GlobalShortcutError.accessibilityPermissionRequired
         }
 
-        let previousHotKey = hotKey
-        hotKey = newHotKey
-        activeShortcut = shortcut
+        let mask = (CGEventMask(1) << CGEventType.keyDown.rawValue)
+            | (CGEventMask(1) << CGEventType.keyUp.rawValue)
+        guard let eventTap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .defaultTap,
+            eventsOfInterest: mask,
+            callback: globalShortcutEventTapCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            throw GlobalShortcutError.eventTapCreationFailed
+        }
+        let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+
+        self.eventTap = eventTap
+        runLoopSource = source
         self.action = action
-        if let previousHotKey {
-            UnregisterEventHotKey(previousHotKey)
-        }
     }
 
-    private func installEventHandlerIfNeeded() throws {
-        guard eventHandler == nil else { return }
-        var eventType = EventTypeSpec(
-            eventClass: OSType(kEventClassKeyboard),
-            eventKind: UInt32(kEventHotKeyPressed)
-        )
-        let context = Unmanaged.passUnretained(self).toOpaque()
-        let status = InstallEventHandler(
-            GetApplicationEventTarget(),
-            Self.handleEvent,
-            1,
-            &eventType,
-            context,
-            &eventHandler
-        )
-        guard status == noErr else {
-            throw GlobalShortcutError.eventHandlerInstallationFailed(status)
-        }
-    }
-
-    private func performAction() {
+    fileprivate func performAction() {
         action?()
     }
 
-    private static let handleEvent: EventHandlerUPP = {
-        _,
-        event,
-        context in
-        guard let event, let context else {
-            return OSStatus(eventNotHandledErr)
-        }
-
-        var hotKeyID = EventHotKeyID()
-        let status = GetEventParameter(
-            event,
-            EventParamName(kEventParamDirectObject),
-            EventParamType(typeEventHotKeyID),
-            nil,
-            MemoryLayout<EventHotKeyID>.size,
-            nil,
-            &hotKeyID
-        )
-        guard status == noErr,
-              hotKeyID.signature == GlobalShortcutMonitor.hotKeyID.signature,
-              hotKeyID.id == GlobalShortcutMonitor.hotKeyID.id else {
-            return OSStatus(eventNotHandledErr)
-        }
-
-        let monitor = Unmanaged<GlobalShortcutMonitor>
-            .fromOpaque(context)
-            .takeUnretainedValue()
-        Task { @MainActor in
-            monitor.performAction()
-        }
-        return noErr
-    }
-
-    private static func keyCode(for key: String) throws -> UInt32 {
-        switch key.uppercased() {
-        case "A":
-            UInt32(kVK_ANSI_A)
-        case "2":
-            UInt32(kVK_ANSI_2)
-        default:
-            throw GlobalShortcutError.unsupportedKey(key)
-        }
-    }
-
-    private static func modifierFlags(
-        for modifiers: Set<CaptureShortcutModifier>
-    ) -> UInt32 {
-        modifiers.reduce(into: UInt32(0)) { flags, modifier in
-            switch modifier {
-            case .control: flags |= UInt32(controlKey)
-            case .option: flags |= UInt32(optionKey)
-            case .shift: flags |= UInt32(shiftKey)
-            case .command: flags |= UInt32(cmdKey)
-            }
-        }
+    fileprivate func reenableEventTap() {
+        guard let eventTap else { return }
+        CGEvent.tapEnable(tap: eventTap, enable: true)
     }
 }
 
+private func isKiriCaptureEvent(_ event: CGEvent) -> Bool {
+    guard event.getIntegerValueField(.keyboardEventKeycode)
+        == Int64(kVK_ANSI_A) else {
+        return false
+    }
+    let modifierMask: CGEventFlags = [
+        .maskCommand,
+        .maskShift,
+        .maskControl,
+        .maskAlternate
+    ]
+    return event.flags.intersection(modifierMask) == [.maskCommand, .maskShift]
+}
+
+private func globalShortcutEventTapCallback(
+    _: CGEventTapProxy,
+    type: CGEventType,
+    event: CGEvent,
+    context: UnsafeMutableRawPointer?
+) -> Unmanaged<CGEvent>? {
+    guard let context else {
+        return Unmanaged.passUnretained(event)
+    }
+
+    let monitor = Unmanaged<GlobalShortcutMonitor>
+        .fromOpaque(context)
+        .takeUnretainedValue()
+    if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        Task { @MainActor in
+            monitor.reenableEventTap()
+        }
+        return Unmanaged.passUnretained(event)
+    }
+    guard isKiriCaptureEvent(event) else {
+        return Unmanaged.passUnretained(event)
+    }
+
+    if type == .keyDown,
+       event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+        Task { @MainActor in
+            monitor.performAction()
+        }
+    }
+    return nil
+}
+
 private enum GlobalShortcutError: LocalizedError {
-    case alreadyInUse(String)
-    case eventHandlerInstallationFailed(OSStatus)
-    case registrationFailed(String, OSStatus)
-    case unsupportedKey(String)
+    case accessibilityPermissionRequired
+    case eventTapCreationFailed
 
     var errorDescription: String? {
         switch self {
-        case let .alreadyInUse(label):
-            "The \(label) shortcut is already in use by another app."
-        case let .eventHandlerInstallationFailed(status):
-            "Could not install the global shortcut handler (error \(status))."
-        case let .registrationFailed(label, status):
-            "Could not reserve the \(label) shortcut (error \(status))."
-        case let .unsupportedKey(key):
-            "The \(key.uppercased()) key is not supported as a capture shortcut."
+        case .accessibilityPermissionRequired:
+            "Enable Kiri in Accessibility settings, then quit and reopen it to reserve ⇧⌘A exclusively."
+        case .eventTapCreationFailed:
+            "Kiri could not create the exclusive ⇧⌘A keyboard filter. Check Accessibility settings, then quit and reopen Kiri."
         }
     }
 }

@@ -17,7 +17,7 @@ does not disappear just because the clipboard changed.
 
 ## Available today
 
-- Capture and immediately copy with the exclusive **⌥⌘2** default or **⌃⇧2**
+- Start capture with **⇧⌘A**, which Kiri filters before other apps can act on it
 - Freeze the active display, snap to the frontmost window, or drag a free region
 - Enter inline annotation from a separate action without slowing down quick captures
 - Use pen, rectangle, arrow, text, and mosaic tools with undo and redo
