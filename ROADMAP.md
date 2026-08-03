@@ -9,18 +9,19 @@ Available in the source preview:
 
 - [x] Native ScreenCaptureKit still capture
 - [x] Region selection and dimension feedback
-- [x] Pen, rectangle, and arrow annotation
-- [x] Text annotation
-- [x] Mosaic annotation
-- [x] Configurable shortcut presets
+- [x] Pen, rectangle, line, arrow, text, and mosaic annotation
+- [x] Select, move, reshape, resize, and delete existing annotations
+- [x] Live size controls and editable text styles
+- [x] Exclusive Shift-Command-A capture shortcut
 - [x] Selection resizing and pixel loupe
 - [x] Offset and mixed-scale display coordinate tests
 - [x] Clipboard and PNG export
+- [x] Pin captures above other windows
 - [x] Local capture library
 - [x] Search, favorites, recoverable trash, and restore
 - [x] Shared asset model for image, video, GIF, and long image
 
-Before the first packaged release:
+Before a stable v0.1 release:
 
 - [ ] Blur annotation
 - [ ] Mixed-scale multi-display acceptance testing
@@ -46,7 +47,6 @@ Before the first packaged release:
 
 ## Later
 
-- [ ] Pin captures above other windows
 - [ ] OCR and text copy
 - [ ] Tags and smart collections
 - [ ] Optional user-controlled sync

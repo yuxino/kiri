@@ -31,7 +31,7 @@ does not disappear just because the clipboard changed.
 - Save, pin, or open the full editor when needed
 - Persist each completed result once and add it to local History
 - Search, favorite, reveal, and copy captures from the local library
-- Move captures to a recoverable trash, restore them, or delete permanently
+- Move captures directly from each library card to recoverable Trash, restore them, or delete permanently
 - Keep source application, dimensions, type, and creation time as metadata
 - Keep both a Dock icon and a menu bar shortcut while Kiri is running
 
@@ -76,6 +76,16 @@ Screen & System Audio Recording permission on the first capture.
 If capture remains unavailable after approval, quit and reopen kiri. Kiri calls
 the system permission request at most once per launch; later attempts show an
 Open Settings or Quit Kiri recovery action instead of prompting repeatedly.
+
+## Capture shortcuts
+
+- **⇧⌘A**: Start Kiri capture system-wide and reserve the shortcut exclusively
+- **Escape**: Cancel from region selection, annotation, or text entry
+- **Return**: Commit active text and copy the capture
+- **V**: Select, move, or reshape existing annotations; double-click text to edit it again
+- **P / R / L / A / T / M**: Pen, rectangle, line, arrow, text, and mosaic
+- **Delete**: Remove the annotation selected with the pointer tool
+- **⌘Z / ⇧⌘Z**: Undo / redo
 
 Captures stay under `~/Library/Application Support/kiri/` and are never
 uploaded automatically.
