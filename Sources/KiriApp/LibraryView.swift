@@ -449,6 +449,9 @@ private struct CaptureCard: View {
                     ) {
                         model.toggleFavorite(asset)
                     }
+                    iconButton("trash", help: "Move to Trash", role: .destructive) {
+                        model.moveToTrash(asset)
+                    }
                     actionMenu
                 } else {
                     Button {
@@ -551,10 +554,6 @@ private struct CaptureCard: View {
             Button("Show in Finder", systemImage: "folder") {
                 model.reveal(asset)
             }
-            Divider()
-            Button("Move to Trash", systemImage: "trash", role: .destructive) {
-                model.moveToTrash(asset)
-            }
         } label: {
             Image(systemName: "ellipsis")
                 .frame(width: 18, height: 18)
@@ -569,9 +568,10 @@ private struct CaptureCard: View {
     private func iconButton(
         _ systemName: String,
         help: String,
+        role: ButtonRole? = nil,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        Button(role: role, action: action) {
             Image(systemName: systemName)
         }
         .buttonStyle(.borderless)
