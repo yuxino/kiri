@@ -8,6 +8,25 @@ enum CaptureSessionAction {
     case edit
 }
 
+private final class CaptureOverlayWindow: NSWindow {
+    var onEscape: (() -> Void)?
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, event.keyCode == 53 {
+            onEscape?()
+            return
+        }
+        super.sendEvent(event)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        onEscape?()
+    }
+}
+
 @MainActor
 final class SelectionOverlayController {
     private let capture: CapturedDisplay
@@ -21,7 +40,7 @@ final class SelectionOverlayController {
         onComplete: @escaping (CGImage, CaptureSessionAction) -> Void,
         onCancel: @escaping () -> Void
     ) {
-        let window = NSWindow(
+        let window = CaptureOverlayWindow(
             contentRect: capture.screenFrame,
             styleMask: .borderless,
             backing: .buffered,
@@ -47,9 +66,13 @@ final class SelectionOverlayController {
             self?.close()
             onComplete(image, action)
         }
+        window.onEscape = { [weak sessionView] in
+            sessionView?.onCancel?()
+        }
 
         window.contentView = sessionView
         self.window = window
+        NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(sessionView)
         NSCursor.crosshair.set()
@@ -57,6 +80,7 @@ final class SelectionOverlayController {
 
     private func close() {
         NSCursor.arrow.set()
+        (window as? CaptureOverlayWindow)?.onEscape = nil
         window?.orderOut(nil)
         window?.close()
         window = nil
