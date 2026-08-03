@@ -34,6 +34,7 @@ private final class KiriAppDelegate: NSObject, NSApplicationDelegate {
     private var duplicateScanTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        _ = NSApplication.shared.setActivationPolicy(.regular)
         closeOtherKiriInstances()
         launchObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didLaunchApplicationNotification,

@@ -24,8 +24,6 @@
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
-    <key>LSUIElement</key>
-    <true/>
     <key>NSScreenCaptureUsageDescription</key>
     <string>kiri needs screen access to capture the region you choose.</string>
     <key>NSInputMonitoringUsageDescription</key>
