@@ -24,3 +24,18 @@ func recordingElapsedLabelsRemainCompact() throws {
     try expect(RecordingPolicy.elapsedLabel(65.9) == "01:05", "Minutes should be formatted")
     try expect(RecordingPolicy.elapsedLabel(3_661) == "1:01:01", "Hours should be formatted")
 }
+
+func recordingOptionsUsePrivacyFriendlyDefaults() throws {
+    let options = RecordingOptions()
+    try expect(options.usesCountdown, "Countdown should be enabled by default")
+    try expect(!options.capturesSystemAudio, "System audio should be opt-in")
+    try expect(!options.capturesMicrophone, "Microphone should be opt-in")
+    try expect(options.showsCursor, "Pointer should be visible by default")
+    try expect(!options.highlightsClicks, "Click highlights should be opt-in")
+}
+
+func recordingOptionsKeepClickFeedbackConsistent() throws {
+    let options = RecordingOptions(showsCursor: false, highlightsClicks: true).normalized
+    try expect(!options.showsCursor, "Pointer preference should remain off")
+    try expect(!options.highlightsClicks, "Click highlights require a visible pointer")
+}

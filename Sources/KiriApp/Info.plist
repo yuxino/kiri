@@ -28,5 +28,7 @@
     <string>kiri needs screen access to capture the region you choose.</string>
     <key>NSInputMonitoringUsageDescription</key>
     <string>Kiri uses keyboard access only to reserve ⇧⌘A as its exclusive capture shortcut.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Kiri records microphone audio only when you enable the Microphone switch before recording.</string>
 </dict>
 </plist>

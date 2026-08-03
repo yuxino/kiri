@@ -1,7 +1,38 @@
 import Foundation
 
+public struct RecordingOptions: Codable, Equatable, Sendable {
+    public var usesCountdown: Bool
+    public var capturesSystemAudio: Bool
+    public var capturesMicrophone: Bool
+    public var showsCursor: Bool
+    public var highlightsClicks: Bool
+
+    public init(
+        usesCountdown: Bool = true,
+        capturesSystemAudio: Bool = false,
+        capturesMicrophone: Bool = false,
+        showsCursor: Bool = true,
+        highlightsClicks: Bool = false
+    ) {
+        self.usesCountdown = usesCountdown
+        self.capturesSystemAudio = capturesSystemAudio
+        self.capturesMicrophone = capturesMicrophone
+        self.showsCursor = showsCursor
+        self.highlightsClicks = highlightsClicks
+    }
+
+    public var normalized: RecordingOptions {
+        var result = self
+        if !result.showsCursor {
+            result.highlightsClicks = false
+        }
+        return result
+    }
+}
+
 public enum RecordingPolicy {
     public static let framesPerSecond = 30
+    public static let countdownSeconds = 3
     public static let maximumGIFDuration: TimeInterval = 15
     public static let gifFramesPerSecond = 12
     public static let maximumGIFLongEdge = 720

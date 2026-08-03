@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+@preconcurrency import AVFoundation
 import Carbon.HIToolbox
 import Combine
 import KiriCore
@@ -36,6 +37,7 @@ final class AppModel: ObservableObject {
     private var editorController: EditorWindowController?
     private var pinnedControllers: [UUID: PinnedImageController] = [:]
     private var regionRecorder: RegionRecorder?
+    private var recordingCountdownController: RecordingCountdownController?
     private var recordingClockTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
     private var recordingSourceApplication: String?
@@ -78,6 +80,8 @@ final class AppModel: ObservableObject {
             "Open Accessibility Settings"
         case .openInputMonitoringSettings:
             "Open Input Monitoring Settings"
+        case .openMicrophoneSettings:
+            "Open Microphone Settings"
         case nil:
             nil
         }
@@ -131,12 +135,13 @@ final class AppModel: ObservableObject {
                             sourceApplication: sourceApplication
                         )
                     },
-                    onRecord: { [weak self] region in
+                    onRecord: { [weak self] region, options in
                         self?.overlayController = nil
                         self?.restoreCaptureOriginWindows(hiddenWindows)
                         self?.beginRegionRecording(
                             capture: capture,
                             region: region,
+                            options: options,
                             sourceApplication: sourceApplication
                         )
                     },
@@ -158,20 +163,47 @@ final class AppModel: ObservableObject {
     private func beginRegionRecording(
         capture: CapturedDisplay,
         region: CGRect,
+        options: RecordingOptions,
         sourceApplication: String?
     ) {
         guard regionRecorder == nil, !captureIsUnavailable else { return }
-        let recorder = RegionRecorder()
-        regionRecorder = recorder
         recordingSourceApplication = sourceApplication
         isRecordingStarting = true
         errorMessage = nil
         Task {
             do {
+                var effectiveOptions = options.normalized
+                if #unavailable(macOS 15.0) {
+                    effectiveOptions.capturesMicrophone = false
+                    effectiveOptions.highlightsClicks = false
+                }
+                if effectiveOptions.capturesMicrophone {
+                    try await ensureMicrophonePermission()
+                }
+                if effectiveOptions.usesCountdown {
+                    let countdown = RecordingCountdownController()
+                    recordingCountdownController = countdown
+                    let shouldStart = await countdown.run(
+                        screenFrame: capture.screenFrame,
+                        region: region
+                    )
+                    if recordingCountdownController === countdown {
+                        recordingCountdownController = nil
+                    }
+                    guard shouldStart else {
+                        isRecordingStarting = false
+                        recordingSourceApplication = nil
+                        return
+                    }
+                }
+
+                let recorder = RegionRecorder()
+                regionRecorder = recorder
                 try await recorder.start(
                     displayID: capture.displayID,
                     sourceRect: region,
-                    backingScale: capture.backingScale
+                    backingScale: capture.backingScale,
+                    options: effectiveOptions
                 )
                 guard regionRecorder === recorder else { return }
                 isRecordingStarting = false
@@ -180,14 +212,35 @@ final class AppModel: ObservableObject {
                 recordingStartedAt = Date()
                 startRecordingClock()
                 showNotice(title: "Recording Started", symbol: "record.circle.fill")
+            } catch let error as RecordingAccessError {
+                regionRecorder = nil
+                recordingCountdownController = nil
+                recordingSourceApplication = nil
+                isRecordingStarting = false
+                errorMessage = error.localizedDescription
+                capturePermissionRecoveryAction = .openMicrophoneSettings
             } catch {
-                if regionRecorder === recorder {
-                    regionRecorder = nil
-                }
+                regionRecorder = nil
+                recordingCountdownController = nil
                 recordingSourceApplication = nil
                 isRecordingStarting = false
                 errorMessage = error.localizedDescription
             }
+        }
+    }
+
+    private func ensureMicrophonePermission() async throws {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return
+        case .notDetermined:
+            guard await AVCaptureDevice.requestAccess(for: .audio) else {
+                throw RecordingAccessError.microphonePermissionDenied
+            }
+        case .denied, .restricted:
+            throw RecordingAccessError.microphonePermissionDenied
+        @unknown default:
+            throw RecordingAccessError.microphonePermissionDenied
         }
     }
 
@@ -280,6 +333,13 @@ final class AppModel: ObservableObject {
         case .openInputMonitoringSettings:
             guard let url = URL(
                 string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+            ) else {
+                return
+            }
+            NSWorkspace.shared.open(url)
+        case .openMicrophoneSettings:
+            guard let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
             ) else {
                 return
             }
@@ -611,6 +671,15 @@ enum CapturePermissionRecoveryAction {
     case quitKiri
     case openAccessibilitySettings
     case openInputMonitoringSettings
+    case openMicrophoneSettings
+}
+
+enum RecordingAccessError: LocalizedError {
+    case microphonePermissionDenied
+
+    var errorDescription: String? {
+        "Microphone access is off. Enable it in System Settings to record your voice."
+    }
 }
 
 struct AppNotice: Identifiable, Equatable {

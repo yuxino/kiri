@@ -38,7 +38,7 @@ final class SelectionOverlayController {
 
     func present(
         onComplete: @escaping (CGImage, CaptureSessionAction) -> Void,
-        onRecord: @escaping (CGRect) -> Void,
+        onRecord: @escaping (CGRect, RecordingOptions) -> Void,
         onCancel: @escaping () -> Void
     ) {
         let window = CaptureOverlayWindow(
@@ -67,9 +67,9 @@ final class SelectionOverlayController {
             self?.close()
             onComplete(image, action)
         }
-        sessionView.onRecord = { [weak self] region in
+        sessionView.onRecord = { [weak self] region, options in
             self?.close()
-            onRecord(region)
+            onRecord(region, options)
         }
         window.onEscape = { [weak sessionView] in
             sessionView?.onCancel?()
@@ -94,7 +94,7 @@ final class SelectionOverlayController {
 
 private final class CaptureSessionView: NSView {
     var onComplete: ((CGImage, CaptureSessionAction) -> Void)?
-    var onRecord: ((CGRect) -> Void)?
+    var onRecord: ((CGRect, RecordingOptions) -> Void)?
     var onCancel: (() -> Void)?
 
     private let image: CGImage
@@ -126,6 +126,7 @@ private final class CaptureSessionView: NSView {
     private var undoButton: CaptureActionButton?
     private var redoButton: CaptureActionButton?
     private var clearAnnotationsItem: NSMenuItem?
+    private var recordingOptionsController: RecordingOptionsPopoverController?
     private var isCompleting = false
 
     init(
@@ -528,6 +529,8 @@ private final class CaptureSessionView: NSView {
         undoButton = nil
         redoButton = nil
         clearAnnotationsItem = nil
+        recordingOptionsController?.close()
+        recordingOptionsController = nil
     }
 
     private func croppedSelection() -> CGImage? {
@@ -691,6 +694,17 @@ private final class CaptureSessionView: NSView {
         self.redoButton = redoButton
         actions.addArrangedSubview(redoButton)
         actions.addArrangedSubview(separator())
+
+        let recordButton = CaptureActionButton(
+            symbol: "record.circle",
+            label: "Record Region",
+            style: .tool,
+            hoverHint: "Record region — countdown, audio, and pointer options",
+            target: self,
+            action: #selector(showRecordingOptions(_:))
+        )
+        actions.addArrangedSubview(recordButton)
+
         let doneButton = CaptureActionButton(
             symbol: "checkmark",
             label: "Done (Return)",
@@ -1106,9 +1120,6 @@ private final class CaptureSessionView: NSView {
         )
         menu.addItem(.separator())
         menu.addItem(
-            menuItem("Record Region", symbol: "record.circle", action: #selector(recordRegion))
-        )
-        menu.addItem(
             menuItem("Save As…", symbol: "square.and.arrow.down", action: #selector(saveCapture))
         )
         menu.addItem(
@@ -1151,11 +1162,30 @@ private final class CaptureSessionView: NSView {
         complete(.save)
     }
 
-    @objc private func recordRegion() {
+    @objc private func showRecordingOptions(_ sender: NSButton) {
+        guard !isCompleting, SelectionGeometry.isValid(selection) else { return }
+        recordingOptionsController?.close()
+        let controller = RecordingOptionsPopoverController(
+            options: RecordingPreferences.load(),
+            onChange: { options in
+                RecordingPreferences.save(options)
+            },
+            onStart: { [weak self] options in
+                self?.recordRegion(options: options)
+            }
+        )
+        recordingOptionsController = controller
+        controller.show(relativeTo: sender)
+    }
+
+    private func recordRegion(options: RecordingOptions) {
         guard !isCompleting, SelectionGeometry.isValid(selection) else { return }
         isCompleting = true
+        RecordingPreferences.save(options)
+        recordingOptionsController?.close()
+        recordingOptionsController = nil
         window?.orderOut(nil)
-        onRecord?(selection.standardized)
+        onRecord?(selection.standardized, options.normalized)
     }
 
     @objc private func pinCapture() {

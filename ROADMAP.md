@@ -30,8 +30,10 @@ Before a stable v0.1 release:
 ## v0.2 — video and GIF
 
 - [x] Region recording with ScreenCaptureKit
+- [x] Cancellable 3-2-1 recording countdown
 - [ ] Full-display recording
-- [ ] Optional microphone and system audio
+- [x] Optional microphone and system audio
+- [x] Optional pointer and native click highlights
 - [ ] Pause and resume
 - [x] H.264 MP4 export and local library import
 - [ ] MP4 trimming

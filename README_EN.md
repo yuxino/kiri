@@ -29,16 +29,17 @@ does not disappear just because the clipboard changed.
   and Transparent (default), Dark, or Light backgrounds
 - Press Escape to cancel at any capture stage and Return once a region exists to copy immediately
 - Save, pin, or open the full editor when needed
-- Record a silent region to MP4 and convert library videos up to 15 seconds to looping GIF
+- Record a region from a visible toolbar action with remembered countdown, system audio, microphone, pointer, and click-highlight switches
+- Cancel the 3-2-1 countdown with Escape, save H.264 MP4, and convert library videos up to 15 seconds to looping GIF
 - Persist each completed result once and add it to local History
 - Search, favorite, reveal, and copy captures from the local library
 - Move captures directly from each library card to recoverable Trash, restore them, or delete permanently
 - Keep source application, dimensions, type, and creation time as metadata
 - Keep both a Dock icon and a menu bar shortcut while Kiri is running
 
-> kiri is an early source preview. Silent region recording and short-video GIF
-> export are available in the v0.2 preview; audio, pause, trimming, and scrolling
-> capture are still in development.
+> kiri is an early source preview. Region recording with audio and pointer
+> feedback plus short-video GIF export are available in the v0.2 preview;
+> pause, trimming, and scrolling capture are still in development.
 
 ## Download
 
@@ -95,12 +96,15 @@ uploaded automatically.
 ## Region recording and GIF (v0.2 preview)
 
 1. Press **⇧⌘A** and select a region.
-2. Open More Actions and choose **Record Region**.
-3. Stop from Kiri's menu bar or Capture menu; the MP4 enters the library.
-4. Open More Actions on a video up to 15 seconds and choose **Convert to GIF**.
+2. Choose the visible **Record Region** tool and set countdown, system audio,
+   microphone, pointer, and click-highlight switches.
+3. Choose **Start Recording**; press Escape during 3-2-1 to cancel.
+4. Stop from Kiri's menu bar or Capture menu; the MP4 enters the library.
+5. Open More Actions on a video up to 15 seconds and choose **Convert to GIF**.
 
-The first preview records the pointer without audio. Audio, pause/resume, and
-trimming will follow in later v0.2 iterations.
+Audio is off by default and Kiri asks for microphone permission only when that
+switch is enabled. Microphone capture and native click highlighting require
+macOS 15 or later.
 
 See [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
 [SECURITY.md](SECURITY.md).

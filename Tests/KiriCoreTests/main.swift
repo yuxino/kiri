@@ -61,6 +61,12 @@ let tests = [
     KiriTest(name: "recording elapsed labels remain compact") {
         try recordingElapsedLabelsRemainCompact()
     },
+    KiriTest(name: "recording options use privacy-friendly defaults") {
+        try recordingOptionsUsePrivacyFriendlyDefaults()
+    },
+    KiriTest(name: "recording click feedback stays consistent") {
+        try recordingOptionsKeepClickFeedbackConsistent()
+    },
     KiriTest(name: "selection reverse drag") {
         try normalizesReverseDrag()
     },

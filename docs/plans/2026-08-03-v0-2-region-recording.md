@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add a native silent region-recording flow that creates MP4 library assets and converts bounded short videos to GIF.
+**Goal:** Add a native region-recording flow with countdown, audio and pointer controls that creates MP4 library assets and converts bounded short videos to GIF.
 
 **Architecture:** Reuse the existing selection overlay to return a region, stream that region through ScreenCaptureKit into an AVAssetWriter, then import the finalized file through AssetLibrary. Convert video assets with AVAssetImageGenerator and ImageIO so release builds have no FFmpeg dependency.
 
@@ -85,3 +85,20 @@ Run `swift build -Xswiftc -warnings-as-errors`, `swift run kiri-core-tests`,
 package/install Kiri, record a short fixture region, stop it, play the MP4, and
 convert it to GIF. Confirm both assets appear with correct dimensions and
 duration before committing.
+
+### Task 8: First-line recording setup
+
+**Files:**
+- Create: `Sources/KiriApp/RecordingOptionsPopoverController.swift`
+- Create: `Sources/KiriApp/RecordingCountdownController.swift`
+- Modify: `Sources/KiriApp/SelectionOverlayController.swift`
+- Modify: `Sources/KiriApp/AppModel.swift`
+- Modify: `Sources/KiriApp/RegionRecorder.swift`
+- Modify: `Sources/KiriApp/Info.plist`
+
+Promote Record Region to the main selection toolbar. Present remembered switch
+controls for countdown, system audio, microphone, pointer, and click feedback.
+Request microphone permission on demand, run a cancellable 3-2-1 overlay, and
+use ScreenCaptureKit's native multi-media recording output on macOS 15 and
+later. Verify silent, system-audio, and microphone-enabled recordings plus
+countdown cancellation.
