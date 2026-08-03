@@ -100,6 +100,15 @@ let tests = [
     KiriTest(name: "selection offset display conversion") {
         try convertsSelectionsOnOffsetDisplays()
     },
+    KiriTest(name: "window click selects topmost candidate") {
+        try windowClickChoosesTopmostCandidate()
+    },
+    KiriTest(name: "window click clips to display") {
+        try windowClickClipsCandidateToDisplay()
+    },
+    KiriTest(name: "window click filters invalid candidates") {
+        try windowClickFiltersInvalidCandidates()
+    },
     KiriTest(name: "screen permission authorized") {
         try screenCapturePermissionSkipsRequestWhenAuthorized()
     },

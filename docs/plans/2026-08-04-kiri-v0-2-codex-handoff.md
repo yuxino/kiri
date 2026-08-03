@@ -20,17 +20,17 @@ ScreenCaptureKit, AVFoundation, CoreMedia, CoreVideo, Carbon, ImageIO.
 ## Repository snapshot
 
 - Date: 2026-08-04 (Asia/Shanghai)
-- Branch: `codex/v0-2-region-recording`
-- HEAD: `a43e357` (`fix: keep capture workflows in background`)
-- Base remote branch: `origin/main` at `0985032`
-- Worktree: intentionally dirty; localization and the latest recording/selection
-  refinements are not committed.
+- Original feature branch: `codex/v0-2-region-recording`
+- Localized v0.2 baseline commit: `5af1287`
+- The user authorized merging this work after silent click-to-select-window was
+  restored. Inspect `git status -sb` and `git log` for the final merged state;
+  do not assume the worktree is dirty or clean from this historical snapshot.
 - Installed QA app: `/Applications/Kiri.app`, signed with the stable local Kiri
   development identity during the current session.
 - User library: one original video was preserved. Agent-created QA recordings
   were moved to Kiri Trash and must not be permanently deleted without consent.
 
-## Completed but uncommitted behavior
+## Completed v0.2 behavior
 
 - English and Simplified Chinese localization with macOS language selection.
 - First-level Screenshot/Record switch in the selection overlay.
@@ -45,17 +45,18 @@ ScreenCaptureKit, AVFoundation, CoreMedia, CoreVideo, Carbon, ImageIO.
 - Pause/resume implemented as MP4 segments merged into one final asset.
 - Clipboard-first capture completion and background recording save behavior.
 - Direct library-card move to recoverable Trash.
-- Manual-only region selection: no hover-following window boxes, no window snap,
-  and no click-to-select-window behavior. Move and eight-handle resize remain.
+- Window clicks silently select the frontmost eligible window, while pointer
+  movement shows no hover-following boxes. Manual drag, move, and eight-handle
+  resize remain.
 - README updates describing recording quality, countdown, and click feedback.
 
 ## Verified state
 
-The following checks passed after manual selection replaced window snapping:
+The following checks passed after the silent window-click refinement:
 
 ```text
 swift run kiri-core-tests
-37 tests passed
+40 tests passed
 
 swift build --product kiri -Xswiftc -warnings-as-errors
 Build of product 'kiri' complete
@@ -83,8 +84,9 @@ Rerun the full verification block in `AGENTS.md` after future implementation.
   automation. Automated clicks can accidentally create recordings. Re-query UI
   state after every action and prefer careful visual/manual acceptance for the
   overlay itself.
-- Historical capture plans and ADR 0001 still mention window snapping. ADR 0003
-  explicitly supersedes that part of the design.
+- Historical capture plans and ADR 0001 still mention hover window previews.
+  ADR 0003 explicitly supersedes that visual behavior while preserving click
+  selection.
 - `README_JA.md` has not been updated/localized for the full v0.2 feature set.
 - MP4 trimming, full-display recording, inline playback, and recording safety
   limits remain roadmap items, not completed features.
@@ -115,7 +117,7 @@ smallest files and tests that cover it.
 
 **Step 1:** Run `swift run kiri-core-tests`.
 
-Expected: 37 tests pass before additional tests are introduced.
+Expected: 40 tests pass before additional tests are introduced.
 
 **Step 2:** Run `swift build --product kiri -Xswiftc -warnings-as-errors`.
 

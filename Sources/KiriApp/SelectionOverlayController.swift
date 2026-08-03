@@ -71,7 +71,10 @@ final class SelectionOverlayController {
         window.acceptsMouseMovedEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let sessionView = CaptureSessionView(image: capture.image)
+        let sessionView = CaptureSessionView(
+            image: capture.image,
+            windowRectsFrontToBack: capture.windowRectsFrontToBack
+        )
         sessionView.onCancel = { [weak self] in
             self?.close()
             onCancel()
@@ -111,6 +114,7 @@ private final class CaptureSessionView: NSView {
     var onCancel: (() -> Void)?
 
     private let image: CGImage
+    private let windowRectsFrontToBack: [CGRect]
     private var captureMode: CaptureMode = .preferred
     private var phase: CapturePhase = .selecting
     private var dragStart: CGPoint?
@@ -118,6 +122,7 @@ private final class CaptureSessionView: NSView {
     private var interactionMoved = false
     private var selection: CGRect = .null
     private var hoverPoint: CGPoint?
+    private var pendingWindowSelection: CGRect?
     private var annotationCanvas: AnnotationCanvasView?
     private var toolbar: NSVisualEffectView?
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
@@ -142,8 +147,9 @@ private final class CaptureSessionView: NSView {
     private var captureModeSelector: NSSegmentedControl?
     private var isCompleting = false
 
-    init(image: CGImage) {
+    init(image: CGImage, windowRectsFrontToBack: [CGRect]) {
         self.image = image
+        self.windowRectsFrontToBack = windowRectsFrontToBack
         super.init(frame: .zero)
         wantsLayer = true
     }
@@ -234,16 +240,28 @@ private final class CaptureSessionView: NSView {
         if SelectionGeometry.isValid(selection) {
             if let handle = SelectionGeometry.hitTest(point, selection: selection, radius: 10) {
                 selectionInteraction = .resizing(handle: handle, original: selection)
+                pendingWindowSelection = nil
             } else if selection.contains(point) {
                 selectionInteraction = .moving(original: selection)
+                pendingWindowSelection = nil
             } else {
                 selectionInteraction = .creating
                 tearDownAnnotationUI()
+                pendingWindowSelection = WindowSelectionGeometry.candidate(
+                    at: point,
+                    windowsFrontToBack: windowRectsFrontToBack,
+                    within: bounds
+                )
                 selection = .null
             }
         } else {
             selectionInteraction = .creating
             tearDownAnnotationUI()
+            pendingWindowSelection = WindowSelectionGeometry.candidate(
+                at: point,
+                windowsFrontToBack: windowRectsFrontToBack,
+                within: bounds
+            )
             selection = .null
         }
         hoverPoint = point
@@ -266,6 +284,7 @@ private final class CaptureSessionView: NSView {
         }
         switch interaction {
         case .creating:
+            pendingWindowSelection = nil
             selection = SelectionGeometry.clamped(
                 SelectionGeometry.normalized(from: dragStart, to: current),
                 to: bounds
@@ -295,6 +314,12 @@ private final class CaptureSessionView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard phase == .selecting else { return }
         mouseDragged(with: event)
+        let interaction = selectionInteraction
+        if interaction == .creating,
+           !SelectionGeometry.isValid(selection),
+           let pendingWindowSelection {
+            selection = pendingWindowSelection
+        }
         if !SelectionGeometry.isValid(selection) {
             selection = .null
             captureModeControl?.isHidden = false
@@ -303,6 +328,7 @@ private final class CaptureSessionView: NSView {
         dragStart = nil
         selectionInteraction = nil
         interactionMoved = false
+        pendingWindowSelection = nil
         if SelectionGeometry.isValid(selection) {
             switch captureMode {
             case .screenshot:
@@ -1391,9 +1417,9 @@ private final class CaptureSessionView: NSView {
     private func drawInitialHint() {
         let textKey = switch captureMode {
         case .screenshot:
-            "Drag to choose a capture area   ·   Esc to cancel"
+            "Drag to choose a capture area   ·   Click a window   ·   Esc to cancel"
         case .recording:
-            "Drag to choose a recording area   ·   Esc to cancel"
+            "Drag to choose a recording area   ·   Click a window   ·   Esc to cancel"
         }
         let text = L10n.text(textKey) as NSString
         let attributes: [NSAttributedString.Key: Any] = [

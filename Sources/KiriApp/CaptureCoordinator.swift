@@ -7,6 +7,7 @@ import KiriCore
 struct CapturedDisplay {
     let image: CGImage
     let screenFrame: CGRect
+    let windowRectsFrontToBack: [CGRect]
     let displayID: CGDirectDisplayID
     let backingScale: CGFloat
 }
@@ -71,6 +72,26 @@ final class CaptureCoordinator {
             throw CaptureCoordinatorError.displayUnavailable
         }
 
+        let displayBounds = CGDisplayBounds(displayID)
+        let currentProcessID = ProcessInfo.processInfo.processIdentifier
+        let windowRects = content.windows.compactMap { window -> CGRect? in
+            guard window.isOnScreen,
+                  window.windowLayer == 0,
+                  window.owningApplication?.processID != currentProcessID else {
+                return nil
+            }
+            let visible = window.frame.standardized.intersection(displayBounds)
+            guard !visible.isNull, visible.width >= 8, visible.height >= 8 else {
+                return nil
+            }
+            return CGRect(
+                x: visible.minX - displayBounds.minX,
+                y: visible.minY - displayBounds.minY,
+                width: visible.width,
+                height: visible.height
+            )
+        }
+
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let configuration = SCStreamConfiguration()
         // SCDisplay dimensions are measured in points, while the stream output
@@ -94,6 +115,7 @@ final class CaptureCoordinator {
         return CapturedDisplay(
             image: image,
             screenFrame: screen.frame,
+            windowRectsFrontToBack: windowRects,
             displayID: displayID,
             backingScale: backingScale
         )
@@ -136,6 +158,7 @@ final class CaptureCoordinator {
         return CapturedDisplay(
             image: image,
             screenFrame: screen.frame,
+            windowRectsFrontToBack: windows,
             displayID: 0,
             backingScale: max(screen.backingScaleFactor, 1)
         )
