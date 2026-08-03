@@ -98,19 +98,19 @@ private struct KiriCommands: Commands {
     @FocusedValue(\.focusLibrarySearch) private var focusLibrarySearch
 
     var body: some Commands {
-        CommandMenu("Capture") {
+        CommandMenu(L10n.text("Capture")) {
             if model.hasRecordingSession {
-                Button(model.isRecordingPaused ? "Resume Recording" : "Pause Recording") {
+                Button(L10n.text(model.isRecordingPaused ? "Resume Recording" : "Pause Recording")) {
                     model.toggleRecordingPause()
                 }
                 .disabled(model.isRecordingTransitioning)
 
-                Button("Stop and Save  \(model.recordingElapsedLabel)") {
+                Button(L10n.format("Stop and Save  %@", model.recordingElapsedLabel)) {
                     model.stopRecording()
                 }
                 .disabled(model.isRecordingTransitioning)
             } else {
-                Button("Capture") {
+                Button(L10n.text("Capture")) {
                     model.startCapture()
                 }
                 .disabled(model.captureIsUnavailable)
@@ -118,7 +118,7 @@ private struct KiriCommands: Commands {
         }
 
         CommandGroup(after: .textEditing) {
-            Button("Find in Library") {
+            Button(L10n.text("Find in Library")) {
                 focusLibrarySearch?()
             }
             .keyboardShortcut("f", modifiers: .command)
@@ -137,7 +137,7 @@ private struct MenuBarView: View {
                 model.toggleRecordingPause()
             } label: {
                 Label(
-                    model.isRecordingPaused ? "Resume Recording" : "Pause Recording",
+                    L10n.text(model.isRecordingPaused ? "Resume Recording" : "Pause Recording"),
                     systemImage: model.isRecordingPaused ? "play.circle.fill" : "pause.circle.fill"
                 )
             }
@@ -147,7 +147,7 @@ private struct MenuBarView: View {
                 model.stopRecording()
             } label: {
                 Label(
-                    "Stop and Save  \(model.recordingElapsedLabel)",
+                    L10n.format("Stop and Save  %@", model.recordingElapsedLabel),
                     systemImage: "stop.circle.fill"
                 )
             }
@@ -157,17 +157,17 @@ private struct MenuBarView: View {
                 model.startCapture()
             } label: {
                 if model.isRecordingFinalizing {
-                    Label("Finalizing Recording…", systemImage: "hourglass")
+                    Label(L10n.text("Finalizing Recording…"), systemImage: "hourglass")
                 } else if model.isRecordingStarting || model.isCaptureStarting {
-                    Label("Preparing Capture…", systemImage: "hourglass")
+                    Label(L10n.text("Preparing Capture…"), systemImage: "hourglass")
                 } else {
-                    Text("Capture  \(model.captureShortcutLabel)")
+                    Text(L10n.format("Capture  %@", model.captureShortcutLabel))
                 }
             }
             .disabled(model.captureIsUnavailable)
         }
         Divider()
-        Button("Open Library") {
+        Button(L10n.text("Open Library")) {
             openWindow(id: "library")
             NSApplication.shared.activate(ignoringOtherApps: true)
         }
@@ -182,7 +182,7 @@ private struct MenuBarView: View {
             }
             Divider()
         }
-        Button("Quit kiri") {
+        Button(L10n.text("Quit Kiri")) {
             NSApplication.shared.terminate(nil)
         }
         .task {

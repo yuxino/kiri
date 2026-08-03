@@ -19,20 +19,33 @@ swiftc \
     -parse-as-library \
     -D DEBUG \
     -warnings-as-errors \
+    -target "$(uname -m)-apple-macosx14.0" \
     -I "$swift_bin_path/Modules" \
     Sources/KiriApp/AnnotationCanvasView.swift \
     Sources/KiriApp/AppModel.swift \
     Sources/KiriApp/CaptureCoordinator.swift \
     Sources/KiriApp/CaptureUIStyle.swift \
     Sources/KiriApp/EditorWindowController.swift \
+    Sources/KiriApp/GIFExporter.swift \
     Sources/KiriApp/KiriDesignSystem.swift \
+    Sources/KiriApp/L10n.swift \
     Sources/KiriApp/LibraryView.swift \
     Sources/KiriApp/PinnedImageController.swift \
+    Sources/KiriApp/RecordingClickHighlighterController.swift \
+    Sources/KiriApp/RecordingControlPanelController.swift \
+    Sources/KiriApp/RecordingCountdownController.swift \
+    Sources/KiriApp/RecordingOptionsPopoverController.swift \
+    Sources/KiriApp/RecordingPreferences.swift \
+    Sources/KiriApp/RecordingSegmentMerger.swift \
+    Sources/KiriApp/RegionRecorder.swift \
     Sources/KiriApp/SelectionOverlayController.swift \
     scripts/qa/LibrarySnapshotMain.swift \
     "$swift_bin_path"/KiriCore.build/*.o \
     -framework AppKit \
+    -framework AVFoundation \
     -framework Carbon \
+    -framework CoreMedia \
+    -framework CoreVideo \
     -framework ImageIO \
     -framework ScreenCaptureKit \
     -framework SwiftUI \

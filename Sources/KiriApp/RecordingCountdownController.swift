@@ -74,48 +74,52 @@ final class RecordingCountdownController {
 
         let root = NSView(frame: CGRect(origin: .zero, size: frame.size))
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.18).cgColor
-        root.layer?.borderWidth = 3
-        root.layer?.borderColor = CaptureUIColors.blossom.cgColor
+        root.layer?.backgroundColor = NSColor.clear.cgColor
 
-        let badge = NSVisualEffectView()
-        badge.material = .hudWindow
-        badge.blendingMode = .withinWindow
-        badge.state = .active
+        let badge = NSView()
         badge.wantsLayer = true
-        badge.layer?.cornerRadius = 28
+        let badgeSize = min(96, max(68, min(frame.width, frame.height) - 16))
+        badge.layer?.cornerRadius = badgeSize / 2
         badge.layer?.cornerCurve = .continuous
-        badge.layer?.borderWidth = 1
-        badge.layer?.borderColor = NSColor.white.withAlphaComponent(0.18).cgColor
+        badge.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.78).cgColor
+        badge.layer?.borderWidth = 2
+        badge.layer?.borderColor = CaptureUIColors.blossom.withAlphaComponent(0.9).cgColor
+        badge.layer?.shadowColor = NSColor.black.cgColor
+        badge.layer?.shadowOpacity = 0.28
+        badge.layer?.shadowRadius = 18
+        badge.layer?.shadowOffset = CGSize(width: 0, height: -5)
         badge.translatesAutoresizingMaskIntoConstraints = false
         badge.identifier = NSUserInterfaceItemIdentifier("recording-countdown-badge")
 
         let label = NSTextField(labelWithString: "3")
-        label.font = .monospacedDigitSystemFont(ofSize: 54, weight: .bold)
+        label.font = .monospacedDigitSystemFont(
+            ofSize: min(46, badgeSize * 0.48),
+            weight: .semibold
+        )
         label.textColor = .white
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
         label.identifier = NSUserInterfaceItemIdentifier("recording-countdown-label")
 
-        let hint = NSTextField(labelWithString: "Esc to cancel")
-        hint.font = .systemFont(ofSize: 10, weight: .medium)
-        hint.textColor = NSColor.white.withAlphaComponent(0.72)
+        let hint = NSTextField(labelWithString: L10n.text("Esc to cancel"))
+        hint.font = .systemFont(ofSize: 9, weight: .medium)
+        hint.textColor = NSColor.white.withAlphaComponent(0.68)
         hint.alignment = .center
         hint.translatesAutoresizingMaskIntoConstraints = false
+        hint.isHidden = badgeSize < 80
 
         root.addSubview(badge)
         badge.addSubview(label)
         badge.addSubview(hint)
-        let badgeSize = min(132, max(88, min(frame.width, frame.height) - 20))
         NSLayoutConstraint.activate([
             badge.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             badge.centerYAnchor.constraint(equalTo: root.centerYAnchor),
             badge.widthAnchor.constraint(equalToConstant: badgeSize),
-            badge.heightAnchor.constraint(equalToConstant: min(128, badgeSize)),
+            badge.heightAnchor.constraint(equalToConstant: badgeSize),
             label.centerXAnchor.constraint(equalTo: badge.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: badge.centerYAnchor, constant: -8),
+            label.centerYAnchor.constraint(equalTo: badge.centerYAnchor, constant: 6),
             hint.centerXAnchor.constraint(equalTo: badge.centerXAnchor),
-            hint.bottomAnchor.constraint(equalTo: badge.bottomAnchor, constant: -13)
+            hint.bottomAnchor.constraint(equalTo: badge.bottomAnchor, constant: -12)
         ])
 
         window.contentView = root
@@ -135,9 +139,10 @@ final class RecordingCountdownController {
         }
         label.stringValue = String(value)
         label.alphaValue = 0
-        label.layer?.transform = CATransform3DMakeScale(1.22, 1.22, 1)
+        label.layer?.transform = CATransform3DMakeScale(0.76, 0.76, 1)
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.16
+            context.duration = 0.22
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             label.animator().alphaValue = 1
             label.layer?.transform = CATransform3DIdentity
         }

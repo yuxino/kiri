@@ -23,17 +23,17 @@ enum GIFExporterError: LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .videoTrackUnavailable:
-            "The video track could not be read."
+            L10n.text("The video track could not be read.")
         case .durationUnavailable:
-            "The video duration is unavailable."
+            L10n.text("The video duration is unavailable.")
         case .durationTooLong:
-            "GIF conversion currently supports videos up to 15 seconds."
+            L10n.text("GIF conversion currently supports videos up to 15 seconds.")
         case .destinationUnavailable:
-            "Kiri could not create the GIF file."
+            L10n.text("Kiri could not create the GIF file.")
         case .frameGenerationFailed:
-            "Kiri could not extract a video frame."
+            L10n.text("Kiri could not extract a video frame.")
         case .finalizeFailed:
-            "The GIF could not be finalized."
+            L10n.text("The GIF could not be finalized.")
         }
     }
 }

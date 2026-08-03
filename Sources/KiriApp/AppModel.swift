@@ -41,6 +41,7 @@ final class AppModel: ObservableObject {
     private var regionRecorder: RegionRecorder?
     private var recordingCountdownController: RecordingCountdownController?
     private var recordingControlPanelController: RecordingControlPanelController?
+    private var recordingClickHighlighterController: RecordingClickHighlighterController?
     private var recordingClockTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
     private var recordingElapsedBeforeCurrentSegment: TimeInterval = 0
@@ -89,15 +90,15 @@ final class AppModel: ObservableObject {
     var capturePermissionRecoveryLabel: String? {
         switch capturePermissionRecoveryAction {
         case .openSettings:
-            "Open Settings"
+            L10n.text("Open Settings")
         case .quitKiri:
-            "Quit Kiri"
+            L10n.text("Quit Kiri")
         case .openAccessibilitySettings:
-            "Open Accessibility Settings"
+            L10n.text("Open Accessibility Settings")
         case .openInputMonitoringSettings:
-            "Open Input Monitoring Settings"
+            L10n.text("Open Input Monitoring Settings")
         case .openMicrophoneSettings:
-            "Open Microphone Settings"
+            L10n.text("Open Microphone Settings")
         case nil:
             nil
         }
@@ -215,7 +216,6 @@ final class AppModel: ObservableObject {
                 var effectiveOptions = options.normalized
                 if #unavailable(macOS 15.0) {
                     effectiveOptions.capturesMicrophone = false
-                    effectiveOptions.highlightsClicks = false
                 }
                 if effectiveOptions.capturesMicrophone {
                     try await ensureMicrophonePermission()
@@ -247,13 +247,19 @@ final class AppModel: ObservableObject {
                 )
                 recordingSegments = []
                 recordingElapsedBeforeCurrentSegment = 0
+                prepareRecordingClickHighlighter(
+                    screenFrame: capture.screenFrame,
+                    region: region,
+                    enabled: effectiveOptions.highlightsClicks
+                )
                 prepareRecordingControlPanel(screenFrame: capture.screenFrame)
                 regionRecorder = recorder
                 try await recorder.start(
                     displayID: capture.displayID,
                     sourceRect: region,
                     backingScale: capture.backingScale,
-                    options: effectiveOptions
+                    options: effectiveOptions,
+                    exceptedWindowIDs: recordingClickHighlighterController?.exceptedWindowIDs ?? []
                 )
                 guard regionRecorder === recorder else { return }
                 isRecordingStarting = false
@@ -264,8 +270,9 @@ final class AppModel: ObservableObject {
                 recordingStartedAt = Date()
                 startRecordingClock()
                 updateRecordingControlPanel()
+                recordingClickHighlighterController?.setActive(true)
                 activate(recordingReturnApplication)
-                showNotice(title: "Recording Started", symbol: "record.circle.fill")
+                showNotice(title: L10n.text("Recording Started"), symbol: "record.circle.fill")
             } catch let error as RecordingAccessError {
                 resetRecordingSession()
                 errorMessage = error.localizedDescription
@@ -306,6 +313,7 @@ final class AppModel: ObservableObject {
               let recorder = regionRecorder else { return }
         isRecording = false
         isRecordingTransitioning = true
+        recordingClickHighlighterController?.setActive(false)
         stopRecordingClock()
         updateRecordingControlPanel()
         Task {
@@ -323,7 +331,7 @@ final class AppModel: ObservableObject {
                 isRecordingPaused = true
                 isRecordingTransitioning = false
                 updateRecordingControlPanel()
-                showNotice(title: "Recording Paused", symbol: "pause.circle.fill")
+                showNotice(title: L10n.text("Recording Paused"), symbol: "pause.circle.fill")
             } catch {
                 failRecordingSession(with: error)
             }
@@ -344,7 +352,8 @@ final class AppModel: ObservableObject {
                     displayID: configuration.displayID,
                     sourceRect: configuration.sourceRect,
                     backingScale: configuration.backingScale,
-                    options: configuration.options
+                    options: configuration.options,
+                    exceptedWindowIDs: recordingClickHighlighterController?.exceptedWindowIDs ?? []
                 )
                 guard regionRecorder === recorder else { return }
                 isRecordingPaused = false
@@ -353,8 +362,9 @@ final class AppModel: ObservableObject {
                 recordingStartedAt = Date()
                 startRecordingClock()
                 updateRecordingControlPanel()
+                recordingClickHighlighterController?.setActive(true)
                 activate(recordingReturnApplication)
-                showNotice(title: "Recording Resumed", symbol: "play.circle.fill")
+                showNotice(title: L10n.text("Recording Resumed"), symbol: "play.circle.fill")
             } catch {
                 if regionRecorder === recorder {
                     regionRecorder = nil
@@ -373,6 +383,7 @@ final class AppModel: ObservableObject {
         isRecording = false
         isRecordingPaused = false
         isRecordingFinalizing = true
+        recordingClickHighlighterController?.setActive(false)
         stopRecordingClock()
         updateRecordingControlPanel()
         activate(recordingReturnApplication)
@@ -399,7 +410,7 @@ final class AppModel: ObservableObject {
                     sourceApplication: recordingSourceApplication
                 )
                 await refresh()
-                showNotice(title: "Recording Saved", symbol: "video.fill")
+                showNotice(title: L10n.text("Recording Saved"), symbol: "video.fill")
             } catch {
                 segments.forEach { try? FileManager.default.removeItem(at: $0.fileURL) }
                 errorMessage = error.localizedDescription
@@ -450,6 +461,29 @@ final class AppModel: ObservableObject {
         recordingControlPanelController = nil
     }
 
+    private func prepareRecordingClickHighlighter(
+        screenFrame: CGRect,
+        region: CGRect,
+        enabled: Bool
+    ) {
+        closeRecordingClickHighlighter()
+        guard enabled else { return }
+        let selectedFrame = CGRect(
+            x: screenFrame.minX + region.minX,
+            y: screenFrame.maxY - region.maxY,
+            width: region.width,
+            height: region.height
+        ).standardized
+        recordingClickHighlighterController = RecordingClickHighlighterController(
+            anchorPoint: CGPoint(x: selectedFrame.midX, y: selectedFrame.midY)
+        )
+    }
+
+    private func closeRecordingClickHighlighter() {
+        recordingClickHighlighterController?.close()
+        recordingClickHighlighterController = nil
+    }
+
     private func failRecordingSession(with error: Error) {
         recordingSegments.forEach { try? FileManager.default.removeItem(at: $0.fileURL) }
         errorMessage = error.localizedDescription
@@ -461,6 +495,7 @@ final class AppModel: ObservableObject {
         regionRecorder = nil
         recordingCountdownController = nil
         closeRecordingControlPanel()
+        closeRecordingClickHighlighter()
         isRecordingStarting = false
         isRecording = false
         isRecordingPaused = false
@@ -593,7 +628,7 @@ final class AppModel: ObservableObject {
             do {
                 try await library.moveToTrash(id: asset.id)
                 await refresh()
-                showNotice(title: "Moved to Trash", symbol: "trash")
+                showNotice(title: L10n.text("Moved to Trash"), symbol: "trash")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -605,7 +640,7 @@ final class AppModel: ObservableObject {
             do {
                 try await library.restore(id: asset.id)
                 await refresh()
-                showNotice(title: "Restored to Library", symbol: "arrow.uturn.backward")
+                showNotice(title: L10n.text("Restored to Library"), symbol: "arrow.uturn.backward")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -617,7 +652,7 @@ final class AppModel: ObservableObject {
             do {
                 try await library.permanentlyDelete(id: asset.id)
                 await refresh()
-                showNotice(title: "Deleted Permanently", symbol: "trash.fill")
+                showNotice(title: L10n.text("Deleted Permanently"), symbol: "trash.fill")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -626,13 +661,13 @@ final class AppModel: ObservableObject {
 
     func copy(_ asset: CaptureAsset) {
         guard let image = NSImage(contentsOf: assetFileURL(asset)) else {
-            errorMessage = "The capture file is unavailable."
+            errorMessage = L10n.text("The capture file is unavailable.")
             return
         }
         if !writeToClipboard(image) {
-            errorMessage = "Could not copy the capture."
+            errorMessage = L10n.text("Could not copy the capture.")
         } else {
-            showNotice(title: "Copied to Clipboard", symbol: "checkmark.circle.fill")
+            showNotice(title: L10n.text("Copied to Clipboard"), symbol: "checkmark.circle.fill")
         }
     }
 
@@ -670,7 +705,7 @@ final class AppModel: ObservableObject {
                     sourceApplication: asset.sourceApplication
                 )
                 await refresh()
-                showNotice(title: "GIF Created", symbol: "sparkles.rectangle.stack")
+                showNotice(title: L10n.text("GIF Created"), symbol: "sparkles.rectangle.stack")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -694,7 +729,7 @@ final class AppModel: ObservableObject {
             if !writeToClipboard(imageObject) {
                 errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
             } else {
-                showNotice(title: "Copied to Clipboard", symbol: "checkmark.circle.fill")
+                showNotice(title: L10n.text("Copied to Clipboard"), symbol: "checkmark.circle.fill")
             }
         }
 
@@ -702,7 +737,7 @@ final class AppModel: ObservableObject {
             guard let data = await Task.detached(priority: .utility, operation: {
                 Self.pngData(for: image)
             }).value else {
-                errorMessage = "Could not encode the capture as PNG."
+                errorMessage = L10n.text("Could not encode the capture as PNG.")
                 return
             }
             do {
@@ -782,7 +817,7 @@ final class AppModel: ObservableObject {
             guard let data = await Task.detached(priority: .utility, operation: {
                 Self.pngData(for: image)
             }).value else {
-                errorMessage = "Could not encode the capture as PNG."
+                errorMessage = L10n.text("Could not encode the capture as PNG.")
                 return
             }
             do {
@@ -795,7 +830,7 @@ final class AppModel: ObservableObject {
                     if !writeToClipboard(imageObject) {
                         errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
                     } else {
-                        showNotice(title: "Copied to Clipboard", symbol: "checkmark.circle.fill")
+                        showNotice(title: L10n.text("Copied to Clipboard"), symbol: "checkmark.circle.fill")
                     }
                 }
                 await refresh()
@@ -813,7 +848,7 @@ final class AppModel: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try data.write(to: url, options: [.atomic])
-            showNotice(title: "Saved", symbol: "checkmark.circle.fill")
+            showNotice(title: L10n.text("Saved"), symbol: "checkmark.circle.fill")
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -882,7 +917,11 @@ final class AppModel: ObservableObject {
             guard let library = try? AssetLibrary(rootURL: fallback) else {
                 preconditionFailure("kiri could not create its local capture library")
             }
-            return (fallback, library, "Using a temporary library: \(error.localizedDescription)")
+            return (
+                fallback,
+                library,
+                L10n.format("Using a temporary library: %@", error.localizedDescription)
+            )
         }
     }
 
@@ -900,7 +939,7 @@ enum RecordingAccessError: LocalizedError {
     case microphonePermissionDenied
 
     var errorDescription: String? {
-        "Microphone access is off. Enable it in System Settings to record your voice."
+        L10n.text("Microphone access is off. Enable it in System Settings to record your voice.")
     }
 }
 
@@ -935,7 +974,7 @@ private enum CaptureExportError: LocalizedError {
     case clipboardWriteFailed
 
     var errorDescription: String? {
-        "Could not copy the capture to the clipboard."
+        L10n.text("Could not copy the capture to the clipboard.")
     }
 }
 
@@ -1049,11 +1088,11 @@ private enum GlobalShortcutError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .accessibilityPermissionRequired:
-            "Enable Kiri in Accessibility settings, then quit and reopen it to reserve ⇧⌘A exclusively."
+            L10n.text("Enable Kiri in Accessibility settings, then quit and reopen it to reserve ⇧⌘A exclusively.")
         case .inputMonitoringPermissionRequired:
-            "Enable Kiri in Input Monitoring settings, then quit and reopen it to reserve ⇧⌘A exclusively."
+            L10n.text("Enable Kiri in Input Monitoring settings, then quit and reopen it to reserve ⇧⌘A exclusively.")
         case .eventTapCreationFailed:
-            "Kiri could not create the exclusive ⇧⌘A keyboard filter. Check Input Monitoring and Accessibility, then quit and reopen Kiri."
+            L10n.text("Kiri could not create the exclusive ⇧⌘A keyboard filter. Check Input Monitoring and Accessibility, then quit and reopen Kiri.")
         }
     }
 }

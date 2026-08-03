@@ -42,6 +42,15 @@ public enum RecordingPolicy {
         return positive.isMultiple(of: 2) ? positive : positive - 1
     }
 
+    public static func pixelDimension(points: Double, backingScale: Double) -> Int {
+        evenDimension(Int((points * max(1, backingScale)).rounded()))
+    }
+
+    public static func highQualityBitRate(width: Int, height: Int) -> Int {
+        let pixelBasedRate = max(1, width) * max(1, height) * 8
+        return min(40_000_000, max(4_000_000, pixelBasedRate))
+    }
+
     public static func isGIFEligible(duration: TimeInterval?) -> Bool {
         guard let duration else { return false }
         return duration > 0 && duration <= maximumGIFDuration

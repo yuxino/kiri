@@ -6,6 +6,32 @@ func recordingDimensionsArePositiveAndEven() throws {
     try expect(RecordingPolicy.evenDimension(101) == 100, "Odd dimensions should round down")
 }
 
+func recordingDimensionsHonorRetinaScale() throws {
+    try expect(
+        RecordingPolicy.pixelDimension(points: 640, backingScale: 2) == 1_280,
+        "Retina capture should preserve two physical pixels per point"
+    )
+    try expect(
+        RecordingPolicy.pixelDimension(points: 321.5, backingScale: 2) == 642,
+        "Scaled dimensions should remain encoder-safe"
+    )
+}
+
+func recordingBitRateUsesHighQualityBounds() throws {
+    try expect(
+        RecordingPolicy.highQualityBitRate(width: 320, height: 240) == 4_000_000,
+        "Small captures should retain a quality floor"
+    )
+    try expect(
+        RecordingPolicy.highQualityBitRate(width: 1_920, height: 1_080) == 16_588_800,
+        "HD captures should scale bitrate with pixel count"
+    )
+    try expect(
+        RecordingPolicy.highQualityBitRate(width: 8_000, height: 8_000) == 40_000_000,
+        "Very large captures should respect the encoder ceiling"
+    )
+}
+
 func gifEligibilityIsBounded() throws {
     try expect(!RecordingPolicy.isGIFEligible(duration: nil), "Unknown duration should be rejected")
     try expect(!RecordingPolicy.isGIFEligible(duration: 0), "Empty video should be rejected")

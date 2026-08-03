@@ -21,7 +21,7 @@ let package = Package(
             name: "KiriApp",
             dependencies: ["KiriCore"],
             path: "Sources/KiriApp",
-            exclude: ["Info.plist"],
+            exclude: ["Info.plist", "Resources"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("AVFoundation"),

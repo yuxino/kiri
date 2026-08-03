@@ -7,7 +7,6 @@ import KiriCore
 struct CapturedDisplay {
     let image: CGImage
     let screenFrame: CGRect
-    let windowRectsFrontToBack: [CGRect]
     let displayID: CGDirectDisplayID
     let backingScale: CGFloat
 }
@@ -20,11 +19,11 @@ enum CaptureCoordinatorError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .permissionRestartRequired:
-            "Screen Recording access was granted. Quit and reopen kiri once to finish enabling capture."
+            L10n.text("Screen Recording access was granted. Quit and reopen Kiri once to finish enabling capture.")
         case .permissionSettingsRequired:
-            "Screen Recording is off. Enable kiri in System Settings, then quit and reopen it once."
+            L10n.text("Screen Recording is off. Enable Kiri in System Settings, then quit and reopen it once.")
         case .displayUnavailable:
-            "The active display could not be captured."
+            L10n.text("The active display could not be captured.")
         }
     }
 }
@@ -72,26 +71,6 @@ final class CaptureCoordinator {
             throw CaptureCoordinatorError.displayUnavailable
         }
 
-        let displayBounds = CGDisplayBounds(displayID)
-        let currentProcessID = ProcessInfo.processInfo.processIdentifier
-        let windowRects = content.windows.compactMap { window -> CGRect? in
-            guard window.isOnScreen,
-                  window.windowLayer == 0,
-                  window.owningApplication?.processID != currentProcessID else {
-                return nil
-            }
-            let visible = window.frame.standardized.intersection(displayBounds)
-            guard !visible.isNull, visible.width >= 8, visible.height >= 8 else {
-                return nil
-            }
-            return CGRect(
-                x: visible.minX - displayBounds.minX,
-                y: visible.minY - displayBounds.minY,
-                width: visible.width,
-                height: visible.height
-            )
-        }
-
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let configuration = SCStreamConfiguration()
         // SCDisplay dimensions are measured in points, while the stream output
@@ -115,7 +94,6 @@ final class CaptureCoordinator {
         return CapturedDisplay(
             image: image,
             screenFrame: screen.frame,
-            windowRectsFrontToBack: windowRects,
             displayID: displayID,
             backingScale: backingScale
         )
@@ -158,7 +136,6 @@ final class CaptureCoordinator {
         return CapturedDisplay(
             image: image,
             screenFrame: screen.frame,
-            windowRectsFrontToBack: windows,
             displayID: 0,
             backingScale: max(screen.backingScaleFactor, 1)
         )

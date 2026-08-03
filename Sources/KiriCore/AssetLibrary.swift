@@ -7,9 +7,9 @@ public enum AssetLibraryError: LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .assetNotFound:
-            "The capture could not be found."
+            KiriCoreL10n.text("The capture could not be found.")
         case .invalidFilename:
-            "The capture filename is invalid."
+            KiriCoreL10n.text("The capture filename is invalid.")
         }
     }
 }

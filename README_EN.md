@@ -18,7 +18,8 @@ does not disappear just because the clipboard changed.
 ## Available today
 
 - Start capture with **⇧⌘A**, which Kiri filters before other apps can act on it
-- Freeze the active display, snap to the frontmost window, or drag, move, and resize a free region
+- Use a Simplified Chinese or English interface that follows the preferred macOS language
+- Freeze the active display, then manually drag, move, and resize an exact region with eight handles
 - See the full toolbar as soon as the region is drawn, while it remains movable and resizable until a tool is chosen
 - Use pen, rectangle, line, arrow, text, and continuous brush mosaic tools with undo and redo
 - Use the default pointer to select and move existing text, then double-click it to edit again
@@ -32,8 +33,10 @@ does not disappear just because the clipboard changed.
 - Save, pin, or open the full editor when needed
 - Choose Screenshot or Record in the capture overlay's first-level mode switch instead of finding recording inside screenshot tools
 - Configure remembered countdown, system audio, microphone, pointer, and click-highlight switches before recording
-- Cancel the 3-2-1 countdown with Escape, save H.264 MP4, and convert library videos up to 15 seconds to looping GIF
-- Pause, resume, or stop from a visible recording control bar; paused time is omitted from the final video
+- Use a centered 3-2-1 countdown that does not dim the selected region, and cancel it with Escape
+- Record high-quality MP4 at the display's Retina scale instead of upscaling a low-resolution capture
+- Pause, resume, or stop from a visible control bar; Kiri controls and paused time are omitted from the final video
+- Show a violet click ripple live while recording and preserve the same feedback in the exported video
 - Recordings save in the background and restore the original app; the library opens only when requested
 - Persist each completed result once and add it to local History
 - Search, favorite, reveal, and copy captures from the local library
@@ -43,7 +46,7 @@ does not disappear just because the clipboard changed.
 
 > kiri is an early source preview. Region recording with audio and pointer
 > feedback plus short-video GIF export are available in the v0.2 preview;
-> pause, trimming, and scrolling capture are still in development.
+> trimming and scrolling capture are still in development.
 
 ## Download
 
@@ -108,8 +111,8 @@ uploaded automatically.
 6. The MP4 enters the library; videos up to 15 seconds can use **Convert to GIF**.
 
 Audio is off by default and Kiri asks for microphone permission only when that
-switch is enabled. Microphone capture and native click highlighting require
-macOS 15 or later.
+switch is enabled. Kiri draws click highlights itself; microphone capture
+requires macOS 15 or later.
 
 See [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
 [SECURITY.md](SECURITY.md).

@@ -34,7 +34,7 @@ Before a stable v0.1 release:
 - [x] Cancellable 3-2-1 recording countdown
 - [ ] Full-display recording
 - [x] Optional microphone and system audio
-- [x] Optional pointer and native click highlights
+- [x] Optional pointer and live Kiri click highlights
 - [x] Visible pause, resume, and stop controls
 - [x] Pause-aware MP4 segment merging
 - [x] H.264 MP4 export and local library import

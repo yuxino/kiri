@@ -75,9 +75,9 @@ private struct RecordingOptionsView: View {
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(Color(nsColor: CaptureUIColors.blossom))
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Record Region")
+                    Text(L10n.text("Record Region"))
                         .font(.system(size: 14, weight: .semibold))
-                    Text("MP4 · 30 fps · Saved locally")
+                    Text(L10n.text("MP4 · 30 fps · Saved locally"))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -86,37 +86,36 @@ private struct RecordingOptionsView: View {
 
             VStack(spacing: 0) {
                 optionRow(
-                    title: "3-second countdown",
+                    title: L10n.text("3-second countdown"),
                     symbol: "timer",
                     value: $options.usesCountdown
                 )
                 Divider().padding(.leading, 31)
                 optionRow(
-                    title: "System audio",
+                    title: L10n.text("System audio"),
                     symbol: "speaker.wave.2.fill",
                     value: $options.capturesSystemAudio
                 )
                 Divider().padding(.leading, 31)
                 optionRow(
-                    title: "Microphone",
+                    title: L10n.text("Microphone"),
                     symbol: "mic.fill",
-                    detail: supportsModernCapture ? nil : "Requires macOS 15",
+                    detail: supportsModernCapture ? nil : L10n.text("Requires macOS 15"),
                     value: $options.capturesMicrophone,
                     enabled: supportsModernCapture
                 )
                 Divider().padding(.leading, 31)
                 optionRow(
-                    title: "Show pointer",
+                    title: L10n.text("Show pointer"),
                     symbol: "cursorarrow",
                     value: cursorBinding
                 )
                 Divider().padding(.leading, 31)
                 optionRow(
-                    title: "Highlight clicks",
+                    title: L10n.text("Highlight clicks"),
                     symbol: "cursorarrow.click.2",
-                    detail: supportsModernCapture ? nil : "Requires macOS 15",
                     value: $options.highlightsClicks,
-                    enabled: supportsModernCapture && options.showsCursor
+                    enabled: options.showsCursor
                 )
             }
             .padding(.horizontal, 10)
@@ -125,7 +124,7 @@ private struct RecordingOptionsView: View {
             Button {
                 onStart(options.normalized)
             } label: {
-                Label("Start Recording", systemImage: "record.circle")
+                Label(L10n.text("Start Recording"), systemImage: "record.circle")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 3)

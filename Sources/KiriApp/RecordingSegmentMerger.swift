@@ -11,13 +11,13 @@ enum RecordingSegmentMergerError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noSegments:
-            "No recording segments are available."
+            L10n.text("No recording segments are available.")
         case .cannotCreateTrack:
-            "Kiri could not prepare the paused recording for export."
+            L10n.text("Kiri could not prepare the paused recording for export.")
         case .cannotCreateExporter:
-            "Kiri could not prepare the final MP4 export."
+            L10n.text("Kiri could not prepare the final MP4 export.")
         case let .exportFailed(message):
-            "The paused recording could not be merged: \(message)"
+            L10n.format("The paused recording could not be merged: %@", message)
         }
     }
 }
@@ -120,7 +120,7 @@ enum RecordingSegmentMerger {
         await exporter.export()
         guard exporter.status == .completed else {
             throw RecordingSegmentMergerError.exportFailed(
-                exporter.error?.localizedDescription ?? "Unknown export error"
+                exporter.error?.localizedDescription ?? L10n.text("Unknown export error")
             )
         }
     }

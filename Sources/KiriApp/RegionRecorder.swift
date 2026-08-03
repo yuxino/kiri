@@ -22,15 +22,15 @@ enum RegionRecorderError: LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .displayUnavailable:
-            "The selected display is no longer available."
+            L10n.text("The selected display is no longer available.")
         case .invalidRegion:
-            "The recording region is too small."
+            L10n.text("The recording region is too small.")
         case .writerSetupFailed:
-            "Kiri could not prepare the MP4 encoder."
+            L10n.text("Kiri could not prepare the MP4 encoder.")
         case .noFrames:
-            "The recording ended before a complete frame arrived."
+            L10n.text("The recording ended before a complete frame arrived.")
         case let .writerFailed(message):
-            "The MP4 could not be finalized: \(message)"
+            L10n.format("The MP4 could not be finalized: %@", message)
         }
     }
 }
@@ -40,7 +40,8 @@ private protocol RegionRecordingBackend: AnyObject, Sendable {
         displayID: CGDirectDisplayID,
         sourceRect: CGRect,
         backingScale: CGFloat,
-        options: RecordingOptions
+        options: RecordingOptions,
+        exceptedWindowIDs: Set<CGWindowID>
     ) async throws
 
     func stop() async throws -> RecordedMedia
@@ -53,10 +54,11 @@ final class RegionRecorder: @unchecked Sendable {
         displayID: CGDirectDisplayID,
         sourceRect: CGRect,
         backingScale: CGFloat,
-        options: RecordingOptions
+        options: RecordingOptions,
+        exceptedWindowIDs: Set<CGWindowID> = []
     ) async throws {
         let backend: any RegionRecordingBackend
-        if #available(macOS 15.0, *) {
+        if #available(macOS 15.0, *), options.capturesMicrophone {
             backend = ModernRegionRecordingBackend()
         } else {
             backend = LegacyRegionRecordingBackend()
@@ -67,7 +69,8 @@ final class RegionRecorder: @unchecked Sendable {
                 displayID: displayID,
                 sourceRect: sourceRect,
                 backingScale: backingScale,
-                options: options.normalized
+                options: options.normalized,
+                exceptedWindowIDs: exceptedWindowIDs
             )
         } catch {
             self.backend = nil
@@ -101,29 +104,32 @@ private final class ModernRegionRecordingBackend: NSObject,
         displayID: CGDirectDisplayID,
         sourceRect: CGRect,
         backingScale: CGFloat,
-        options: RecordingOptions
+        options: RecordingOptions,
+        exceptedWindowIDs: Set<CGWindowID>
     ) async throws {
         guard sourceRect.width >= 2, sourceRect.height >= 2 else {
             throw RegionRecorderError.invalidRegion
         }
         let content = try await SCShareableContent.excludingDesktopWindows(
             false,
-            onScreenWindowsOnly: true
+            onScreenWindowsOnly: false
         )
         guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
             throw RegionRecorderError.displayUnavailable
         }
 
-        let currentProcessID = ProcessInfo.processInfo.processIdentifier
-        let excludedWindows = content.windows.filter {
-            $0.owningApplication?.processID == currentProcessID
-        }
-        let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
-        let width = RecordingPolicy.evenDimension(
-            Int((sourceRect.width * max(1, backingScale)).rounded())
+        let filter = Self.makeFilter(
+            content: content,
+            display: display,
+            exceptedWindowIDs: exceptedWindowIDs
         )
-        let height = RecordingPolicy.evenDimension(
-            Int((sourceRect.height * max(1, backingScale)).rounded())
+        let width = RecordingPolicy.pixelDimension(
+            points: sourceRect.width,
+            backingScale: backingScale
+        )
+        let height = RecordingPolicy.pixelDimension(
+            points: sourceRect.height,
+            backingScale: backingScale
         )
         let configuration = SCStreamConfiguration()
         configuration.sourceRect = sourceRect.standardized
@@ -135,8 +141,10 @@ private final class ModernRegionRecordingBackend: NSObject,
         )
         configuration.queueDepth = 6
         configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.captureResolution = .best
+        configuration.scalesToFit = false
         configuration.showsCursor = options.showsCursor
-        configuration.showMouseClicks = options.highlightsClicks
+        configuration.showMouseClicks = false
         configuration.capturesAudio = options.capturesSystemAudio
         configuration.excludesCurrentProcessAudio = true
         configuration.sampleRate = 48_000
@@ -147,7 +155,9 @@ private final class ModernRegionRecordingBackend: NSObject,
         let outputConfiguration = SCRecordingOutputConfiguration()
         outputConfiguration.outputURL = temporaryURL
         outputConfiguration.outputFileType = .mp4
-        outputConfiguration.videoCodecType = .h264
+        outputConfiguration.videoCodecType = outputConfiguration.availableVideoCodecTypes.contains(.hevc)
+            ? .hevc
+            : .h264
         let recordingOutput = SCRecordingOutput(
             configuration: outputConfiguration,
             delegate: self
@@ -258,6 +268,31 @@ private final class ModernRegionRecordingBackend: NSObject,
         FileManager.default.temporaryDirectory
             .appendingPathComponent("kiri-recording-\(UUID().uuidString.lowercased()).mp4")
     }
+
+    private static func makeFilter(
+        content: SCShareableContent,
+        display: SCDisplay,
+        exceptedWindowIDs: Set<CGWindowID>
+    ) -> SCContentFilter {
+        let currentProcessID = ProcessInfo.processInfo.processIdentifier
+        let exceptedWindows = content.windows.filter {
+            exceptedWindowIDs.contains($0.windowID)
+        }
+        if let application = content.applications.first(where: {
+            $0.processID == currentProcessID
+        }) {
+            return SCContentFilter(
+                display: display,
+                excludingApplications: [application],
+                exceptingWindows: exceptedWindows
+            )
+        }
+        let excludedWindows = content.windows.filter {
+            $0.owningApplication?.processID == currentProcessID
+                && !exceptedWindowIDs.contains($0.windowID)
+        }
+        return SCContentFilter(display: display, excludingWindows: excludedWindows)
+    }
 }
 
 private final class LegacyRegionRecordingBackend: NSObject,
@@ -281,29 +316,32 @@ private final class LegacyRegionRecordingBackend: NSObject,
         displayID: CGDirectDisplayID,
         sourceRect: CGRect,
         backingScale: CGFloat,
-        options: RecordingOptions
+        options: RecordingOptions,
+        exceptedWindowIDs: Set<CGWindowID>
     ) async throws {
         guard sourceRect.width >= 2, sourceRect.height >= 2 else {
             throw RegionRecorderError.invalidRegion
         }
         let content = try await SCShareableContent.excludingDesktopWindows(
             false,
-            onScreenWindowsOnly: true
+            onScreenWindowsOnly: false
         )
         guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
             throw RegionRecorderError.displayUnavailable
         }
 
-        let currentProcessID = ProcessInfo.processInfo.processIdentifier
-        let excludedWindows = content.windows.filter {
-            $0.owningApplication?.processID == currentProcessID
-        }
-        let filter = SCContentFilter(display: display, excludingWindows: excludedWindows)
-        let width = RecordingPolicy.evenDimension(
-            Int((sourceRect.width * max(1, backingScale)).rounded())
+        let filter = Self.makeFilter(
+            content: content,
+            display: display,
+            exceptedWindowIDs: exceptedWindowIDs
         )
-        let height = RecordingPolicy.evenDimension(
-            Int((sourceRect.height * max(1, backingScale)).rounded())
+        let width = RecordingPolicy.pixelDimension(
+            points: sourceRect.width,
+            backingScale: backingScale
+        )
+        let height = RecordingPolicy.pixelDimension(
+            points: sourceRect.height,
+            backingScale: backingScale
         )
         let configuration = SCStreamConfiguration()
         configuration.sourceRect = sourceRect.standardized
@@ -314,6 +352,9 @@ private final class LegacyRegionRecordingBackend: NSObject,
             timescale: CMTimeScale(RecordingPolicy.framesPerSecond)
         )
         configuration.queueDepth = 6
+        configuration.pixelFormat = kCVPixelFormatType_32BGRA
+        configuration.captureResolution = .best
+        configuration.scalesToFit = false
         configuration.showsCursor = options.showsCursor
         configuration.capturesAudio = options.capturesSystemAudio
         configuration.excludesCurrentProcessAudio = true
@@ -330,9 +371,14 @@ private final class LegacyRegionRecordingBackend: NSObject,
                 AVVideoWidthKey: width,
                 AVVideoHeightKey: height,
                 AVVideoCompressionPropertiesKey: [
-                    AVVideoAverageBitRateKey: max(1_000_000, width * height * 4),
+                    AVVideoAverageBitRateKey: RecordingPolicy.highQualityBitRate(
+                        width: width,
+                        height: height
+                    ),
                     AVVideoExpectedSourceFrameRateKey: RecordingPolicy.framesPerSecond,
-                    AVVideoMaxKeyFrameIntervalKey: RecordingPolicy.framesPerSecond * 2
+                    AVVideoMaxKeyFrameIntervalKey: RecordingPolicy.framesPerSecond * 2,
+                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                    AVVideoAllowFrameReorderingKey: false
                 ]
             ]
         )
@@ -414,7 +460,7 @@ private final class LegacyRegionRecordingBackend: NSObject,
                         guard let completedWriter = self.writer,
                               completedWriter.status == .completed else {
                             let message = self.writer?.error?.localizedDescription
-                                ?? "Unknown encoder error"
+                                ?? L10n.text("Unknown encoder error")
                             resetAndRemoveTemporaryFile()
                             continuation.resume(
                                 throwing: RegionRecorderError.writerFailed(message)
@@ -464,7 +510,7 @@ private final class LegacyRegionRecordingBackend: NSObject,
                 lastTimestamp = timestamp
             } else {
                 streamFailure = writer.error
-                    ?? RegionRecorderError.writerFailed("Frame append failed")
+                    ?? RegionRecorderError.writerFailed(L10n.text("Frame append failed"))
             }
         case .audio:
             guard firstTimestamp != nil,
@@ -472,7 +518,7 @@ private final class LegacyRegionRecordingBackend: NSObject,
                   audioInput.isReadyForMoreMediaData else { return }
             if !audioInput.append(sampleBuffer) {
                 streamFailure = writer.error
-                    ?? RegionRecorderError.writerFailed("Audio append failed")
+                    ?? RegionRecorderError.writerFailed(L10n.text("Audio append failed"))
             }
         case .microphone:
             break
@@ -505,5 +551,30 @@ private final class LegacyRegionRecordingBackend: NSObject,
         pixelWidth = 0
         pixelHeight = 0
         streamFailure = nil
+    }
+
+    private static func makeFilter(
+        content: SCShareableContent,
+        display: SCDisplay,
+        exceptedWindowIDs: Set<CGWindowID>
+    ) -> SCContentFilter {
+        let currentProcessID = ProcessInfo.processInfo.processIdentifier
+        let exceptedWindows = content.windows.filter {
+            exceptedWindowIDs.contains($0.windowID)
+        }
+        if let application = content.applications.first(where: {
+            $0.processID == currentProcessID
+        }) {
+            return SCContentFilter(
+                display: display,
+                excludingApplications: [application],
+                exceptingWindows: exceptedWindows
+            )
+        }
+        let excludedWindows = content.windows.filter {
+            $0.owningApplication?.processID == currentProcessID
+                && !exceptedWindowIDs.contains($0.windowID)
+        }
+        return SCContentFilter(display: display, excludingWindows: excludedWindows)
     }
 }

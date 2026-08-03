@@ -18,8 +18,8 @@ final class RecordingControlPanelController {
             defer: false
         )
         panel.level = .statusBar
-        panel.title = "Recording Controls"
-        panel.setAccessibilityLabel("Recording Controls")
+        panel.title = L10n.text("Recording Controls")
+        panel.setAccessibilityLabel(L10n.text("Recording Controls"))
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.isOpaque = false
@@ -80,7 +80,7 @@ private struct RecordingControlBar: View {
                 }
             }
 
-            Text(state.isPaused ? "Paused" : state.elapsed)
+            Text(state.isPaused ? L10n.text("Paused") : state.elapsed)
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .frame(minWidth: 54, alignment: .leading)
 
@@ -90,7 +90,7 @@ private struct RecordingControlBar: View {
                 ProgressView()
                     .controlSize(.small)
                     .frame(width: 32, height: 30)
-                    .help("Preparing recording")
+                    .help(L10n.text("Preparing recording"))
             } else {
                 Button {
                     state.onPauseResume?()
@@ -100,8 +100,8 @@ private struct RecordingControlBar: View {
                 }
                 .buttonStyle(.plain)
                 .background(.primary.opacity(0.075), in: RoundedRectangle(cornerRadius: 8))
-                .help(state.isPaused ? "Resume Recording" : "Pause Recording")
-                .accessibilityLabel(state.isPaused ? "Resume Recording" : "Pause Recording")
+                .help(L10n.text(state.isPaused ? "Resume Recording" : "Pause Recording"))
+                .accessibilityLabel(L10n.text(state.isPaused ? "Resume Recording" : "Pause Recording"))
             }
 
             Button {
@@ -115,8 +115,8 @@ private struct RecordingControlBar: View {
             .buttonStyle(.plain)
             .background(Color.red, in: RoundedRectangle(cornerRadius: 8))
             .disabled(state.isBusy)
-            .help("Stop and Save Recording")
-            .accessibilityLabel("Stop Recording")
+            .help(L10n.text("Stop and Save Recording"))
+            .accessibilityLabel(L10n.text("Stop Recording"))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 9)

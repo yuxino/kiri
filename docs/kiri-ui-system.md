@@ -14,6 +14,14 @@ one gesture.
 Kiri hides its own visible windows before taking a frame, restores them after
 completion or cancellation, and never shows a post-capture image preview.
 
+Region selection is deliberately manual. Before a drag, the pointer does not
+produce window-following outlines and a click does not select a whole window.
+After a drag, the region remains movable and resizable from eight handles.
+
+Recording controls stay visible to the user but are excluded from exported
+frames. The optional violet click ripple is the sole Kiri overlay intentionally
+included in a recording.
+
 ## Visual tokens
 
 - Typography: San Francisco system text; title3 semibold for page titles,

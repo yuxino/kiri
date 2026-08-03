@@ -90,7 +90,7 @@ struct LibraryView: View {
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(model.showingTrash ? "Trash" : "Library")
+            Text(L10n.text(model.showingTrash ? "Trash" : "Library"))
                 .font(.title3.weight(.semibold))
             Text(sectionSummary)
                 .font(.caption)
@@ -101,10 +101,10 @@ struct LibraryView: View {
     }
 
     private var sectionPicker: some View {
-        Picker("Section", selection: $model.showingTrash) {
-            Label("Library", systemImage: "photo.on.rectangle")
+        Picker(L10n.text("Section"), selection: $model.showingTrash) {
+            Label(L10n.text("Library"), systemImage: "photo.on.rectangle")
                 .tag(false)
-            Label("Trash", systemImage: "trash")
+            Label(L10n.text("Trash"), systemImage: "trash")
                 .tag(true)
         }
         .pickerStyle(.segmented)
@@ -113,7 +113,7 @@ struct LibraryView: View {
         .onChange(of: model.showingTrash) {
             model.searchQuery = ""
         }
-        .accessibilityLabel("Library section")
+        .accessibilityLabel(L10n.text("Library section"))
     }
 
     private var captureActions: some View {
@@ -127,7 +127,7 @@ struct LibraryView: View {
                 } else {
                     Image(systemName: "viewfinder")
                 }
-                Text(model.isCaptureStarting ? "Preparing…" : "Capture")
+                Text(L10n.text(model.isCaptureStarting ? "Preparing…" : "Capture"))
                 if !model.isCaptureStarting {
                     Text(model.captureShortcutLabel)
                         .font(.caption.monospacedDigit())
@@ -138,7 +138,7 @@ struct LibraryView: View {
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
         .disabled(model.captureIsUnavailable)
-        .help("Capture or record a region, with optional annotation tools")
+        .help(L10n.text("Capture or record a region, with optional annotation tools"))
     }
 
     @ViewBuilder
@@ -163,7 +163,7 @@ struct LibraryView: View {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.plain)
-                .help("Dismiss")
+                .help(L10n.text("Dismiss"))
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 9)
@@ -176,7 +176,7 @@ struct LibraryView: View {
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
                 .foregroundStyle(.secondary)
-            TextField("Search captures", text: $model.searchQuery)
+            TextField(L10n.text("Search captures"), text: $model.searchQuery)
                 .textFieldStyle(.plain)
                 .focused($searchIsFocused)
                 .onSubmit {
@@ -190,7 +190,7 @@ struct LibraryView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help("Clear Search")
+                .help(L10n.text("Clear Search"))
             }
         }
         .padding(.horizontal, 10)
@@ -202,14 +202,14 @@ struct LibraryView: View {
                 .stroke(Color.primary.opacity(0.1))
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Search captures")
+        .accessibilityLabel(L10n.text("Search captures"))
     }
 
     private var loadingState: some View {
         VStack(spacing: 10) {
             ProgressView()
                 .controlSize(.small)
-            Text("Loading Library…")
+            Text(L10n.text("Loading Library…"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -220,18 +220,18 @@ struct LibraryView: View {
         if hasSearchQuery {
             LibraryStatusView(
                 systemImage: "magnifyingglass",
-                title: "No matching captures",
-                message: "Try a different search, or clear the current one."
+                title: L10n.text("No matching captures"),
+                message: L10n.text("Try a different search, or clear the current one.")
             ) {
-                Button("Clear Search") {
+                Button(L10n.text("Clear Search")) {
                     model.searchQuery = ""
                 }
             }
         } else if model.showingTrash {
             LibraryStatusView(
                 systemImage: "trash",
-                title: "Trash is empty",
-                message: "Captures you delete stay recoverable here."
+                title: L10n.text("Trash is empty"),
+                message: L10n.text("Captures you delete stay recoverable here.")
             )
         } else {
             onboardingState
@@ -254,9 +254,9 @@ struct LibraryView: View {
             .frame(width: 68, height: 68)
 
             VStack(spacing: 7) {
-                Text("Ready for your first capture")
+                Text(L10n.text("Ready for your first capture"))
                     .font(.title2.weight(.semibold))
-                Text("Choose Screenshot or Record, then select the region you need.")
+                Text(L10n.text("Choose Screenshot or Record, then select the region you need."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -264,13 +264,13 @@ struct LibraryView: View {
             Button {
                 model.startCapture()
             } label: {
-                Label("Capture", systemImage: "viewfinder")
+                Label(L10n.text("Capture"), systemImage: "viewfinder")
                     .frame(minWidth: 150)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
 
-            Text("or press  \(model.captureShortcutLabel)")
+            Text(L10n.format("or press  %@", model.captureShortcutLabel))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
 
@@ -278,15 +278,15 @@ struct LibraryView: View {
                 .frame(width: 400)
 
             HStack(spacing: 18) {
-                OnboardingStep(number: "1", title: "Mode", detail: "Screenshot or Record")
+                OnboardingStep(number: "1", title: L10n.text("Mode"), detail: L10n.text("Screenshot or Record"))
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                OnboardingStep(number: "2", title: "Select", detail: "Choose a region")
+                OnboardingStep(number: "2", title: L10n.text("Select"), detail: L10n.text("Choose a region"))
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                OnboardingStep(number: "3", title: "Finish", detail: "Copy or save")
+                OnboardingStep(number: "3", title: L10n.text("Finish"), detail: L10n.text("Copy or save"))
             }
         }
         .padding(.horizontal, 40)
@@ -308,7 +308,7 @@ struct LibraryView: View {
 
     private var sectionSummary: String {
         let count = sectionAssets.count
-        return count == 1 ? "1 capture" : "\(count) captures"
+        return L10n.format(count == 1 ? "%d capture" : "%d captures", count)
     }
 
     private var hasSearchQuery: Bool {
@@ -414,7 +414,7 @@ private struct CaptureCard: View {
             .onTapGesture(count: 2) {
                 model.open(asset)
             }
-            .help("Double-click to open")
+            .help(L10n.text("Double-click to open"))
 
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
@@ -446,11 +446,11 @@ private struct CaptureCard: View {
                     Spacer()
                     iconButton(
                         asset.isFavorite ? "star.slash" : "star",
-                        help: asset.isFavorite ? "Remove Favorite" : "Favorite"
+                        help: L10n.text(asset.isFavorite ? "Remove Favorite" : "Favorite")
                     ) {
                         model.toggleFavorite(asset)
                     }
-                    iconButton("trash", help: "Move to Trash", role: .destructive) {
+                    iconButton("trash", help: L10n.text("Move to Trash"), role: .destructive) {
                         model.moveToTrash(asset)
                     }
                     actionMenu
@@ -458,7 +458,7 @@ private struct CaptureCard: View {
                     Button {
                         model.restore(asset)
                     } label: {
-                        Label("Restore", systemImage: "arrow.uturn.backward")
+                        Label(L10n.text("Restore"), systemImage: "arrow.uturn.backward")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -469,8 +469,8 @@ private struct CaptureCard: View {
                         Image(systemName: "trash.fill")
                     }
                     .buttonStyle(.borderless)
-                    .help("Delete Permanently")
-                    .accessibilityLabel("Delete Permanently")
+                    .help(L10n.text("Delete Permanently"))
+                    .accessibilityLabel(L10n.text("Delete Permanently"))
                 }
             }
         }
@@ -494,47 +494,47 @@ private struct CaptureCard: View {
         .contextMenu {
             if asset.trashedAt == nil {
                 if asset.kind == .image || asset.kind == .longImage {
-                    Button("Copy", systemImage: "doc.on.doc") { model.copy(asset) }
+                    Button(L10n.text("Copy"), systemImage: "doc.on.doc") { model.copy(asset) }
                 }
-                Button("Open", systemImage: "arrow.up.right.square") { model.open(asset) }
-                Button("Show in Finder", systemImage: "folder") { model.reveal(asset) }
+                Button(L10n.text("Open"), systemImage: "arrow.up.right.square") { model.open(asset) }
+                Button(L10n.text("Show in Finder"), systemImage: "folder") { model.reveal(asset) }
                 if asset.kind == .video {
-                    Button("Convert to GIF", systemImage: "sparkles.rectangle.stack") {
+                    Button(L10n.text("Convert to GIF"), systemImage: "sparkles.rectangle.stack") {
                         model.convertToGIF(asset)
                     }
                     .disabled(!model.canConvertToGIF(asset) || model.isConvertingToGIF(asset))
                 }
                 Button(
-                    asset.isFavorite ? "Remove Favorite" : "Favorite",
+                    L10n.text(asset.isFavorite ? "Remove Favorite" : "Favorite"),
                     systemImage: asset.isFavorite ? "star.slash" : "star"
                 ) {
                     model.toggleFavorite(asset)
                 }
                 Divider()
-                Button("Move to Trash", systemImage: "trash", role: .destructive) {
+                Button(L10n.text("Move to Trash"), systemImage: "trash", role: .destructive) {
                     model.moveToTrash(asset)
                 }
             } else {
-                Button("Restore", systemImage: "arrow.uturn.backward") {
+                Button(L10n.text("Restore"), systemImage: "arrow.uturn.backward") {
                     model.restore(asset)
                 }
                 Divider()
-                Button("Delete Permanently", systemImage: "trash.fill", role: .destructive) {
+                Button(L10n.text("Delete Permanently"), systemImage: "trash.fill", role: .destructive) {
                     confirmsPermanentDelete = true
                 }
             }
         }
         .confirmationDialog(
-            "Delete this capture permanently?",
+            L10n.text("Delete this capture permanently?"),
             isPresented: $confirmsPermanentDelete,
             titleVisibility: .visible
         ) {
-            Button("Delete Permanently", role: .destructive) {
+            Button(L10n.text("Delete Permanently"), role: .destructive) {
                 model.permanentlyDelete(asset)
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L10n.text("Cancel"), role: .cancel) {}
         } message: {
-            Text("This cannot be undone.")
+            Text(L10n.text("This cannot be undone."))
         }
     }
 
@@ -564,7 +564,7 @@ private struct CaptureCard: View {
         Menu {
             if asset.kind == .video {
                 Button(
-                    model.isConvertingToGIF(asset) ? "Converting to GIF…" : "Convert to GIF",
+                    L10n.text(model.isConvertingToGIF(asset) ? "Converting to GIF…" : "Convert to GIF"),
                     systemImage: "sparkles.rectangle.stack"
                 ) {
                     model.convertToGIF(asset)
@@ -572,10 +572,10 @@ private struct CaptureCard: View {
                 .disabled(!model.canConvertToGIF(asset) || model.isConvertingToGIF(asset))
                 Divider()
             }
-            Button("Open", systemImage: "arrow.up.right.square") {
+            Button(L10n.text("Open"), systemImage: "arrow.up.right.square") {
                 model.open(asset)
             }
-            Button("Show in Finder", systemImage: "folder") {
+            Button(L10n.text("Show in Finder"), systemImage: "folder") {
                 model.reveal(asset)
             }
         } label: {
@@ -585,12 +585,12 @@ private struct CaptureCard: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("More Actions")
-        .accessibilityLabel("More Actions")
+        .help(L10n.text("More Actions"))
+        .accessibilityLabel(L10n.text("More Actions"))
     }
 
     private var primaryActionTitle: String {
-        asset.kind == .image || asset.kind == .longImage ? "Copy" : "Open"
+        L10n.text(asset.kind == .image || asset.kind == .longImage ? "Copy" : "Open")
     }
 
     private var primaryActionSymbol: String {
@@ -698,7 +698,7 @@ private struct LibraryNoticeView: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help("Dismiss")
+            .help(L10n.text("Dismiss"))
         }
         .padding(.horizontal, 12)
         .frame(height: 36)

@@ -71,10 +71,7 @@ final class SelectionOverlayController {
         window.acceptsMouseMovedEvents = true
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let sessionView = CaptureSessionView(
-            image: capture.image,
-            windowRectsFrontToBack: capture.windowRectsFrontToBack
-        )
+        let sessionView = CaptureSessionView(image: capture.image)
         sessionView.onCancel = { [weak self] in
             self?.close()
             onCancel()
@@ -114,7 +111,6 @@ private final class CaptureSessionView: NSView {
     var onCancel: (() -> Void)?
 
     private let image: CGImage
-    private let windowRectsFrontToBack: [CGRect]
     private var captureMode: CaptureMode = .preferred
     private var phase: CapturePhase = .selecting
     private var dragStart: CGPoint?
@@ -122,8 +118,6 @@ private final class CaptureSessionView: NSView {
     private var interactionMoved = false
     private var selection: CGRect = .null
     private var hoverPoint: CGPoint?
-    private var snapCandidate: CGRect?
-    private var pendingWindowSelection: CGRect?
     private var annotationCanvas: AnnotationCanvasView?
     private var toolbar: NSVisualEffectView?
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
@@ -148,12 +142,8 @@ private final class CaptureSessionView: NSView {
     private var captureModeSelector: NSSegmentedControl?
     private var isCompleting = false
 
-    init(
-        image: CGImage,
-        windowRectsFrontToBack: [CGRect]
-    ) {
+    init(image: CGImage) {
         self.image = image
-        self.windowRectsFrontToBack = windowRectsFrontToBack
         super.init(frame: .zero)
         wantsLayer = true
     }
@@ -176,9 +166,10 @@ private final class CaptureSessionView: NSView {
         super.draw(dirtyRect)
         NSImage(cgImage: image, size: bounds.size).draw(in: bounds)
 
-        let activeRect = SelectionGeometry.isValid(selection) ? selection : snapCandidate
-        NSColor.black.withAlphaComponent(activeRect == nil ? 0.25 : 0.48).setFill()
-        if let activeRect {
+        let hasSelection = SelectionGeometry.isValid(selection)
+        NSColor.black.withAlphaComponent(hasSelection ? 0.48 : 0.25).setFill()
+        if hasSelection {
+            let activeRect = selection.standardized
             dimOutside(activeRect)
             let border = NSBezierPath(rect: activeRect)
             border.lineWidth = phase == .annotating ? 4 : 3
@@ -194,8 +185,6 @@ private final class CaptureSessionView: NSView {
                 if toolbar == nil {
                     drawHint()
                 }
-            } else if phase == .selecting, snapCandidate != nil {
-                drawWindowHint(for: activeRect)
             }
         } else {
             bounds.fill()
@@ -205,7 +194,7 @@ private final class CaptureSessionView: NSView {
             if !SelectionGeometry.isValid(selection) || selectionInteraction == .creating {
                 drawLoupe()
             }
-            if !SelectionGeometry.isValid(selection), snapCandidate == nil {
+            if !SelectionGeometry.isValid(selection) {
                 drawInitialHint()
             }
         }
@@ -245,24 +234,16 @@ private final class CaptureSessionView: NSView {
         if SelectionGeometry.isValid(selection) {
             if let handle = SelectionGeometry.hitTest(point, selection: selection, radius: 10) {
                 selectionInteraction = .resizing(handle: handle, original: selection)
-                pendingWindowSelection = nil
             } else if selection.contains(point) {
                 selectionInteraction = .moving(original: selection)
-                pendingWindowSelection = nil
             } else {
                 selectionInteraction = .creating
                 tearDownAnnotationUI()
-                pendingWindowSelection = WindowSnapGeometry.candidate(
-                    at: point,
-                    windowsFrontToBack: windowRectsFrontToBack,
-                    within: bounds
-                )
                 selection = .null
             }
         } else {
             selectionInteraction = .creating
             tearDownAnnotationUI()
-            pendingWindowSelection = snapCandidate
             selection = .null
         }
         hoverPoint = point
@@ -285,8 +266,6 @@ private final class CaptureSessionView: NSView {
         }
         switch interaction {
         case .creating:
-            pendingWindowSelection = nil
-            snapCandidate = nil
             selection = SelectionGeometry.clamped(
                 SelectionGeometry.normalized(from: dragStart, to: current),
                 to: bounds
@@ -316,12 +295,6 @@ private final class CaptureSessionView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard phase == .selecting else { return }
         mouseDragged(with: event)
-        let interaction = selectionInteraction
-        if interaction == .creating,
-           !SelectionGeometry.isValid(selection),
-           let pendingWindowSelection {
-            selection = pendingWindowSelection
-        }
         if !SelectionGeometry.isValid(selection) {
             selection = .null
             captureModeControl?.isHidden = false
@@ -330,8 +303,6 @@ private final class CaptureSessionView: NSView {
         dragStart = nil
         selectionInteraction = nil
         interactionMoved = false
-        pendingWindowSelection = nil
-        snapCandidate = nil
         if SelectionGeometry.isValid(selection) {
             switch captureMode {
             case .screenshot:
@@ -354,13 +325,6 @@ private final class CaptureSessionView: NSView {
         guard phase == .selecting else { return }
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
         hoverPoint = point
-        if !SelectionGeometry.isValid(selection), selectionInteraction == nil {
-            snapCandidate = WindowSnapGeometry.candidate(
-                at: point,
-                windowsFrontToBack: windowRectsFrontToBack,
-                within: bounds
-            )
-        }
         updateCursor(at: point)
         needsDisplay = true
     }
@@ -368,9 +332,6 @@ private final class CaptureSessionView: NSView {
     override func mouseExited(with event: NSEvent) {
         guard phase == .selecting else { return }
         hoverPoint = nil
-        if !SelectionGeometry.isValid(selection) {
-            snapCandidate = nil
-        }
         needsDisplay = true
     }
 
@@ -474,7 +435,7 @@ private final class CaptureSessionView: NSView {
         effect.layer?.shadowOffset = CGSize(width: 0, height: 3)
 
         let selector = NSSegmentedControl(
-            labels: ["Screenshot", "Record"],
+            labels: [L10n.text("Screenshot"), L10n.text("Record")],
             trackingMode: .selectOne,
             target: self,
             action: #selector(changeCaptureMode(_:))
@@ -484,18 +445,24 @@ private final class CaptureSessionView: NSView {
         selector.font = .systemFont(ofSize: 12, weight: .semibold)
         selector.selectedSegment = captureMode == .screenshot ? 0 : 1
         selector.setImage(
-            NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "Screenshot"),
+            NSImage(
+                systemSymbolName: "camera.viewfinder",
+                accessibilityDescription: L10n.text("Screenshot")
+            ),
             forSegment: 0
         )
         selector.setImage(
-            NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Record"),
+            NSImage(
+                systemSymbolName: "record.circle",
+                accessibilityDescription: L10n.text("Record")
+            ),
             forSegment: 1
         )
         selector.setWidth(112, forSegment: 0)
         selector.setWidth(96, forSegment: 1)
-        selector.setToolTip("Screenshot", forSegment: 0)
-        selector.setToolTip("Record Region", forSegment: 1)
-        selector.setAccessibilityLabel("Capture mode")
+        selector.setToolTip(L10n.text("Screenshot"), forSegment: 0)
+        selector.setToolTip(L10n.text("Record Region"), forSegment: 1)
+        selector.setAccessibilityLabel(L10n.text("Capture mode"))
         selector.translatesAutoresizingMaskIntoConstraints = false
 
         effect.addSubview(selector)
@@ -608,7 +575,6 @@ private final class CaptureSessionView: NSView {
         guard let canvas = annotationCanvas else { return }
         phase = .annotating
         hoverPoint = nil
-        snapCandidate = nil
         canvas.isHidden = false
         canvas.tool = tool
         NSCursor.arrow.set()
@@ -715,8 +681,8 @@ private final class CaptureSessionView: NSView {
 
         let cancelButton = actionButton(
             symbol: "xmark",
-            label: "Cancel (Esc)",
-            hoverHint: "Cancel capture · Esc",
+            label: L10n.text("Cancel (Esc)"),
+            hoverHint: L10n.text("Cancel capture · Esc"),
             action: #selector(cancelCapture)
         )
         actions.addArrangedSubview(cancelButton)
@@ -728,25 +694,25 @@ private final class CaptureSessionView: NSView {
         toolGroup.spacing = 1
 
         let tools: [(AnnotationTool, String, String, String, Selector)] = [
-            (.select, "cursorarrow", "Select (V)", "Select and edit annotations (V)", #selector(useSelect)),
-            (.pen, "pencil.tip", "Pen (P)", "Pen (P) — Draw freehand", #selector(usePen)),
+            (.select, "cursorarrow", L10n.text("Select (V)"), L10n.text("Select and edit annotations (V)"), #selector(useSelect)),
+            (.pen, "pencil.tip", L10n.text("Pen (P)"), L10n.text("Pen (P) — Draw freehand"), #selector(usePen)),
             (
                 .rectangle,
                 "rectangle.dashed",
-                "Rectangle (R)",
-                "Rectangle (R) — Draw a box",
+                L10n.text("Rectangle (R)"),
+                L10n.text("Rectangle (R) — Draw a box"),
                 #selector(useRectangle)
             ),
-            (.line, "line.diagonal", "Line (L)", "Line (L) — Connect two points", #selector(useLine)),
-            (.arrow, "arrow.up.right", "Arrow (A)", "Arrow (A) — Point something out", #selector(useArrow)),
+            (.line, "line.diagonal", L10n.text("Line (L)"), L10n.text("Line (L) — Connect two points"), #selector(useLine)),
+            (.arrow, "arrow.up.right", L10n.text("Arrow (A)"), L10n.text("Arrow (A) — Point something out"), #selector(useArrow)),
             (
                 .text,
                 "textformat",
-                "Text (T)",
-                "Text (T) — Click the image, type, then press Return",
+                L10n.text("Text (T)"),
+                L10n.text("Text (T) — Click the image, type, then press Return"),
                 #selector(useText)
             ),
-            (.mosaic, "square.grid.3x3.fill", "Mosaic (M)", "Mosaic (M) — Hide sensitive content", #selector(useMosaic))
+            (.mosaic, "square.grid.3x3.fill", L10n.text("Mosaic (M)"), L10n.text("Mosaic (M) — Hide sensitive content"), #selector(useMosaic))
         ]
         for (tool, symbol, help, hoverHint, action) in tools {
             let button = CaptureActionButton(
@@ -807,8 +773,8 @@ private final class CaptureSessionView: NSView {
 
         let undoButton = actionButton(
             symbol: "arrow.uturn.backward",
-            label: "Undo (⌘Z)",
-            hoverHint: "Undo the last annotation · ⌘Z",
+            label: L10n.text("Undo (⌘Z)"),
+            hoverHint: L10n.text("Undo the last annotation · ⌘Z"),
             action: #selector(undo)
         )
         undoButton.setActionEnabled(false)
@@ -817,8 +783,8 @@ private final class CaptureSessionView: NSView {
 
         let redoButton = actionButton(
             symbol: "arrow.uturn.forward",
-            label: "Redo (⇧⌘Z)",
-            hoverHint: "Redo the last annotation · ⇧⌘Z",
+            label: L10n.text("Redo (⇧⌘Z)"),
+            hoverHint: L10n.text("Redo the last annotation · ⇧⌘Z"),
             action: #selector(redo)
         )
         redoButton.setActionEnabled(false)
@@ -828,9 +794,9 @@ private final class CaptureSessionView: NSView {
 
         let doneButton = CaptureActionButton(
             symbol: "checkmark",
-            label: "Done (Return)",
+            label: L10n.text("Done (Return)"),
             style: .primary,
-            hoverHint: "Done — Copy to clipboard · Return",
+            hoverHint: L10n.text("Done — Copy to clipboard · Return"),
             target: self,
             action: #selector(finishCapture)
         )
@@ -838,8 +804,8 @@ private final class CaptureSessionView: NSView {
 
         let moreButton = actionButton(
             symbol: "ellipsis.circle",
-            label: "More Actions",
-            hoverHint: "More — Save, pin, edit, or clear",
+            label: L10n.text("More Actions"),
+            hoverHint: L10n.text("More — Save, pin, edit, or clear"),
             action: #selector(showMoreActions(_:))
         )
         actions.addArrangedSubview(moreButton)
@@ -868,9 +834,9 @@ private final class CaptureSessionView: NSView {
             minimum: 1,
             maximum: 16,
             action: #selector(changeStrokeSize(_:)),
-            accessibilityLabel: "Annotation line width"
+            accessibilityLabel: L10n.text("Annotation line width")
         )
-        row.addArrangedSubview(contextIcon("lineweight", label: "Stroke size"))
+        row.addArrangedSubview(contextIcon("lineweight", label: L10n.text("Stroke size")))
         row.addArrangedSubview(size.slider)
         row.addArrangedSubview(size.valueLabel)
         return (row, size.slider, size.valueLabel)
@@ -891,7 +857,7 @@ private final class CaptureSessionView: NSView {
             minimum: 12,
             maximum: 64,
             action: #selector(changeTextFontSize(_:)),
-            accessibilityLabel: "Text font size"
+            accessibilityLabel: L10n.text("Text font size")
         )
         size.slider.onTrackingBegan = { [weak self] in
             self?.annotationCanvas?.beginTextFontSizeAdjustment()
@@ -901,9 +867,9 @@ private final class CaptureSessionView: NSView {
         }
         let backgroundControl = NSSegmentedControl(
             images: [
-                compactSymbol("square.dashed", label: "Transparent background"),
-                compactSymbol("moon.fill", label: "Dark background"),
-                compactSymbol("sun.max.fill", label: "Light background")
+                compactSymbol("square.dashed", label: L10n.text("Transparent background")),
+                compactSymbol("moon.fill", label: L10n.text("Dark background")),
+                compactSymbol("sun.max.fill", label: L10n.text("Light background"))
             ],
             trackingMode: .selectOne,
             target: self,
@@ -912,13 +878,13 @@ private final class CaptureSessionView: NSView {
         configureContextControl(
             backgroundControl,
             widths: [26, 26, 26],
-            label: "Text background"
+            label: L10n.text("Text background")
         )
-        backgroundControl.setToolTip("Transparent", forSegment: 0)
-        backgroundControl.setToolTip("Dark", forSegment: 1)
-        backgroundControl.setToolTip("Light", forSegment: 2)
+        backgroundControl.setToolTip(L10n.text("Transparent"), forSegment: 0)
+        backgroundControl.setToolTip(L10n.text("Dark"), forSegment: 1)
+        backgroundControl.setToolTip(L10n.text("Light"), forSegment: 2)
 
-        row.addArrangedSubview(contextIcon("character.textbox", label: "Text options"))
+        row.addArrangedSubview(contextIcon("character.textbox", label: L10n.text("Text options")))
         row.addArrangedSubview(size.slider)
         row.addArrangedSubview(size.valueLabel)
         row.addArrangedSubview(backgroundControl)
@@ -941,7 +907,7 @@ private final class CaptureSessionView: NSView {
             minimum: 12,
             maximum: 120,
             action: #selector(changeMosaicBrushSize(_:)),
-            accessibilityLabel: "Mosaic brush size"
+            accessibilityLabel: L10n.text("Mosaic brush size")
         )
 
         let intensityControl = NSSegmentedControl(
@@ -950,12 +916,16 @@ private final class CaptureSessionView: NSView {
             target: self,
             action: #selector(selectMosaicIntensity(_:))
         )
-        configureContextControl(intensityControl, widths: [24, 24, 24], label: "Mosaic strength")
+        configureContextControl(
+            intensityControl,
+            widths: [24, 24, 24],
+            label: L10n.text("Mosaic strength")
+        )
         for (index, preset) in MosaicIntensityPreset.allCases.enumerated() {
             intensityControl.setToolTip(preset.name, forSegment: index)
         }
 
-        row.addArrangedSubview(contextIcon("square.grid.3x3.fill", label: "Mosaic brush"))
+        row.addArrangedSubview(contextIcon("square.grid.3x3.fill", label: L10n.text("Mosaic brush")))
         row.addArrangedSubview(size.slider)
         row.addArrangedSubview(size.valueLabel)
         row.addArrangedSubview(intensityControl)
@@ -1237,21 +1207,21 @@ private final class CaptureSessionView: NSView {
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.addItem(
-            menuItem("Reselect Region", symbol: "crop", action: #selector(returnToSelection))
+            menuItem(L10n.text("Reselect Region"), symbol: "crop", action: #selector(returnToSelection))
         )
         menu.addItem(.separator())
         menu.addItem(
-            menuItem("Save As…", symbol: "square.and.arrow.down", action: #selector(saveCapture))
+            menuItem(L10n.text("Save As…"), symbol: "square.and.arrow.down", action: #selector(saveCapture))
         )
         menu.addItem(
-            menuItem("Pin on Screen", symbol: "pin", action: #selector(pinCapture))
+            menuItem(L10n.text("Pin on Screen"), symbol: "pin", action: #selector(pinCapture))
         )
         menu.addItem(
-            menuItem("Open in Editor", symbol: "slider.horizontal.3", action: #selector(editCapture))
+            menuItem(L10n.text("Open in Editor"), symbol: "slider.horizontal.3", action: #selector(editCapture))
         )
         menu.addItem(.separator())
         let clearItem = menuItem(
-            "Clear Annotations",
+            L10n.text("Clear Annotations"),
             symbol: "trash",
             action: #selector(clearAnnotations)
         )
@@ -1402,30 +1372,30 @@ private final class CaptureSessionView: NSView {
     private func drawHint() {
         let text: String
         if selectionInteraction == .creating {
-            text = captureMode == .recording
-                ? "Release for recording settings"
-                : "Release to show tools"
+            text = L10n.text(
+                captureMode == .recording
+                    ? "Release for recording settings"
+                    : "Release to show tools"
+            )
         } else {
-            text = captureMode == .recording
-                ? "Adjust the region · Recording settings below"
-                : "Drag handles to resize · Drag inside to move"
+            text = L10n.text(
+                captureMode == .recording
+                    ? "Adjust the region · Recording settings below"
+                    : "Drag handles to resize · Drag inside to move"
+            )
         }
         let textValue = text as NSString
         drawHint(textValue, near: selection)
     }
 
-    private func drawWindowHint(for rect: CGRect) {
-        let text = "Click to select window · Drag for a region" as NSString
-        drawHint(text, near: rect)
-    }
-
     private func drawInitialHint() {
-        let text = switch captureMode {
+        let textKey = switch captureMode {
         case .screenshot:
-            "Drag to capture   ·   Click a window   ·   Esc to cancel"
+            "Drag to choose a capture area   ·   Esc to cancel"
         case .recording:
             "Drag to choose a recording area   ·   Esc to cancel"
-        } as NSString
+        }
+        let text = L10n.text(textKey) as NSString
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white

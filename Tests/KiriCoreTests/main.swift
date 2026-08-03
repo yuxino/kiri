@@ -52,6 +52,12 @@ let tests = [
     KiriTest(name: "recording dimensions are positive and even") {
         try recordingDimensionsArePositiveAndEven()
     },
+    KiriTest(name: "recording dimensions honor Retina scale") {
+        try recordingDimensionsHonorRetinaScale()
+    },
+    KiriTest(name: "recording bitrate uses high-quality bounds") {
+        try recordingBitRateUsesHighQualityBounds()
+    },
     KiriTest(name: "GIF eligibility is bounded") {
         try gifEligibilityIsBounded()
     },
@@ -93,15 +99,6 @@ let tests = [
     },
     KiriTest(name: "selection offset display conversion") {
         try convertsSelectionsOnOffsetDisplays()
-    },
-    KiriTest(name: "window snap topmost hit") {
-        try windowSnapChoosesTopmostCandidate()
-    },
-    KiriTest(name: "window snap display clipping") {
-        try windowSnapClipsToDisplay()
-    },
-    KiriTest(name: "window snap candidate filtering") {
-        try windowSnapFiltersInvalidCandidates()
     },
     KiriTest(name: "screen permission authorized") {
         try screenCapturePermissionSkipsRequestWhenAuthorized()

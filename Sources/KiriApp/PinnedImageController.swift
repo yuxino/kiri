@@ -83,7 +83,10 @@ private final class PinnedImageView: NSView {
         imageView.translatesAutoresizingMaskIntoConstraints = false
 
         let closeButton = NSButton(
-            image: NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close")
+            image: NSImage(
+                systemSymbolName: "xmark.circle.fill",
+                accessibilityDescription: L10n.text("Close")
+            )
                 ?? NSImage(),
             target: self,
             action: #selector(close)
