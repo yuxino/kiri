@@ -8,6 +8,22 @@ enum CaptureSessionAction {
     case edit
 }
 
+private enum CaptureMode: String {
+    case screenshot
+    case recording
+
+    static var preferred: CaptureMode {
+        guard let rawValue = UserDefaults.standard.string(forKey: "capture.mode.v1") else {
+            return .screenshot
+        }
+        return CaptureMode(rawValue: rawValue) ?? .screenshot
+    }
+
+    func saveAsPreferred() {
+        UserDefaults.standard.set(rawValue, forKey: "capture.mode.v1")
+    }
+}
+
 private final class CaptureOverlayWindow: NSWindow {
     var onEscape: (() -> Void)?
 
@@ -99,6 +115,7 @@ private final class CaptureSessionView: NSView {
 
     private let image: CGImage
     private let windowRectsFrontToBack: [CGRect]
+    private var captureMode: CaptureMode = .preferred
     private var phase: CapturePhase = .selecting
     private var dragStart: CGPoint?
     private var selectionInteraction: SelectionInteraction?
@@ -127,6 +144,8 @@ private final class CaptureSessionView: NSView {
     private var redoButton: CaptureActionButton?
     private var clearAnnotationsItem: NSMenuItem?
     private var recordingOptionsController: RecordingOptionsPopoverController?
+    private var captureModeControl: NSVisualEffectView?
+    private var captureModeSelector: NSSegmentedControl?
     private var isCompleting = false
 
     init(
@@ -149,6 +168,7 @@ private final class CaptureSessionView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        prepareCaptureModeControl()
         window?.makeFirstResponder(self)
     }
 
@@ -193,6 +213,7 @@ private final class CaptureSessionView: NSView {
 
     override func layout() {
         super.layout()
+        layoutCaptureModeControl()
         if toolbar != nil {
             layoutAnnotationUI()
         }
@@ -303,6 +324,8 @@ private final class CaptureSessionView: NSView {
         }
         if !SelectionGeometry.isValid(selection) {
             selection = .null
+            captureModeControl?.isHidden = false
+            layoutCaptureModeControl()
         }
         dragStart = nil
         selectionInteraction = nil
@@ -310,7 +333,16 @@ private final class CaptureSessionView: NSView {
         pendingWindowSelection = nil
         snapCandidate = nil
         if SelectionGeometry.isValid(selection) {
-            prepareSelectionToolbar()
+            switch captureMode {
+            case .screenshot:
+                captureModeControl?.isHidden = true
+                prepareSelectionToolbar()
+            case .recording:
+                tearDownAnnotationUI()
+                captureModeControl?.isHidden = false
+                layoutCaptureModeControl()
+                presentRecordingOptions()
+            }
         }
         if let hoverPoint {
             updateCursor(at: hoverPoint)
@@ -370,7 +402,11 @@ private final class CaptureSessionView: NSView {
         }
 
         if phase == .selecting, isReturn, SelectionGeometry.isValid(selection) {
-            complete(.copy)
+            if captureMode == .screenshot {
+                complete(.copy)
+            } else {
+                presentRecordingOptions()
+            }
             return
         }
 
@@ -403,7 +439,7 @@ private final class CaptureSessionView: NSView {
                 }
             }
         }
-        if SelectionGeometry.isValid(selection) {
+        if captureMode == .screenshot, SelectionGeometry.isValid(selection) {
             let commandModifiers: NSEvent.ModifierFlags = [.command, .control, .option]
             if event.modifierFlags.intersection(commandModifiers).isEmpty {
                 switch event.charactersIgnoringModifiers?.lowercased() {
@@ -421,8 +457,101 @@ private final class CaptureSessionView: NSView {
         super.keyDown(with: event)
     }
 
+    private func prepareCaptureModeControl() {
+        guard captureModeControl == nil else { return }
+        let effect = NSVisualEffectView()
+        effect.material = .popover
+        effect.blendingMode = .withinWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 13
+        effect.layer?.cornerCurve = .continuous
+        effect.layer?.borderWidth = 1
+        effect.layer?.borderColor = CaptureUIColors.surfaceBorder.cgColor
+        effect.layer?.shadowColor = NSColor.black.cgColor
+        effect.layer?.shadowOpacity = 0.2
+        effect.layer?.shadowRadius = 8
+        effect.layer?.shadowOffset = CGSize(width: 0, height: 3)
+
+        let selector = NSSegmentedControl(
+            labels: ["Screenshot", "Record"],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(changeCaptureMode(_:))
+        )
+        selector.segmentStyle = .capsule
+        selector.controlSize = .large
+        selector.font = .systemFont(ofSize: 12, weight: .semibold)
+        selector.selectedSegment = captureMode == .screenshot ? 0 : 1
+        selector.setImage(
+            NSImage(systemSymbolName: "camera.viewfinder", accessibilityDescription: "Screenshot"),
+            forSegment: 0
+        )
+        selector.setImage(
+            NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Record"),
+            forSegment: 1
+        )
+        selector.setWidth(112, forSegment: 0)
+        selector.setWidth(96, forSegment: 1)
+        selector.setToolTip("Screenshot", forSegment: 0)
+        selector.setToolTip("Record Region", forSegment: 1)
+        selector.setAccessibilityLabel("Capture mode")
+        selector.translatesAutoresizingMaskIntoConstraints = false
+
+        effect.addSubview(selector)
+        NSLayoutConstraint.activate([
+            selector.topAnchor.constraint(equalTo: effect.topAnchor, constant: 6),
+            selector.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 6),
+            selector.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -6),
+            selector.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -6)
+        ])
+        addSubview(effect)
+        captureModeControl = effect
+        captureModeSelector = selector
+        layoutCaptureModeControl()
+    }
+
+    private func layoutCaptureModeControl() {
+        guard let control = captureModeControl, !control.isHidden else { return }
+        let fittingSize = control.fittingSize
+        let size = CGSize(width: max(220, fittingSize.width), height: max(44, fittingSize.height))
+        control.frame = CGRect(
+            x: bounds.midX - size.width / 2,
+            y: bounds.maxY - size.height - 88,
+            width: size.width,
+            height: size.height
+        )
+    }
+
+    @objc private func changeCaptureMode(_ sender: NSSegmentedControl) {
+        let nextMode: CaptureMode = sender.selectedSegment == 1 ? .recording : .screenshot
+        guard nextMode != captureMode else { return }
+        captureMode = nextMode
+        captureMode.saveAsPreferred()
+        phase = .selecting
+        tearDownAnnotationUI()
+
+        if SelectionGeometry.isValid(selection) {
+            switch captureMode {
+            case .screenshot:
+                captureModeControl?.isHidden = true
+                prepareSelectionToolbar()
+            case .recording:
+                captureModeControl?.isHidden = false
+                layoutCaptureModeControl()
+                presentRecordingOptions()
+            }
+        } else {
+            captureModeControl?.isHidden = false
+            layoutCaptureModeControl()
+        }
+        window?.makeFirstResponder(self)
+        needsDisplay = true
+    }
+
     private func prepareSelectionToolbar() {
-        guard phase == .selecting,
+        guard captureMode == .screenshot,
+              phase == .selecting,
               let cropped = croppedSelection() else {
             return
         }
@@ -502,6 +631,8 @@ private final class CaptureSessionView: NSView {
         phase = .selecting
         selection = .null
         tearDownAnnotationUI()
+        captureModeControl?.isHidden = false
+        layoutCaptureModeControl()
         NSCursor.crosshair.set()
         window?.makeFirstResponder(self)
         needsDisplay = true
@@ -695,16 +826,6 @@ private final class CaptureSessionView: NSView {
         actions.addArrangedSubview(redoButton)
         actions.addArrangedSubview(separator())
 
-        let recordButton = CaptureActionButton(
-            symbol: "record.circle",
-            label: "Record Region",
-            style: .tool,
-            hoverHint: "Record region — countdown, audio, and pointer options",
-            target: self,
-            action: #selector(showRecordingOptions(_:))
-        )
-        actions.addArrangedSubview(recordButton)
-
         let doneButton = CaptureActionButton(
             symbol: "checkmark",
             label: "Done (Return)",
@@ -718,7 +839,7 @@ private final class CaptureSessionView: NSView {
         let moreButton = actionButton(
             symbol: "ellipsis.circle",
             label: "More Actions",
-            hoverHint: "More — Record, save, pin, edit, or clear",
+            hoverHint: "More — Save, pin, edit, or clear",
             action: #selector(showMoreActions(_:))
         )
         actions.addArrangedSubview(moreButton)
@@ -1162,8 +1283,11 @@ private final class CaptureSessionView: NSView {
         complete(.save)
     }
 
-    @objc private func showRecordingOptions(_ sender: NSButton) {
-        guard !isCompleting, SelectionGeometry.isValid(selection) else { return }
+    private func presentRecordingOptions() {
+        guard captureMode == .recording,
+              !isCompleting,
+              SelectionGeometry.isValid(selection),
+              let anchor = captureModeControl else { return }
         recordingOptionsController?.close()
         let controller = RecordingOptionsPopoverController(
             options: RecordingPreferences.load(),
@@ -1175,7 +1299,7 @@ private final class CaptureSessionView: NSView {
             }
         )
         recordingOptionsController = controller
-        controller.show(relativeTo: sender)
+        controller.show(relativeTo: anchor)
     }
 
     private func recordRegion(options: RecordingOptions) {
@@ -1276,9 +1400,16 @@ private final class CaptureSessionView: NSView {
     }
 
     private func drawHint() {
-        let text = selectionInteraction == .creating
-            ? "Release to show tools"
-            : "Drag handles to resize · Drag inside to move"
+        let text: String
+        if selectionInteraction == .creating {
+            text = captureMode == .recording
+                ? "Release for recording settings"
+                : "Release to show tools"
+        } else {
+            text = captureMode == .recording
+                ? "Adjust the region · Recording settings below"
+                : "Drag handles to resize · Drag inside to move"
+        }
         let textValue = text as NSString
         drawHint(textValue, near: selection)
     }
@@ -1289,16 +1420,25 @@ private final class CaptureSessionView: NSView {
     }
 
     private func drawInitialHint() {
-        let text = "Drag to capture   ·   Click a window   ·   Esc to cancel" as NSString
+        let text = switch captureMode {
+        case .screenshot:
+            "Drag to capture   ·   Click a window   ·   Esc to cancel"
+        case .recording:
+            "Drag to choose a recording area   ·   Esc to cancel"
+        } as NSString
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white
         ]
         let textSize = text.size(withAttributes: attributes)
         let padding = CGSize(width: 15, height: 9)
+        let fallbackY = bounds.maxY - textSize.height - padding.height * 2 - 82
+        let desiredY = captureModeControl.map {
+            $0.frame.minY - textSize.height - padding.height * 2 - 10
+        } ?? fallbackY
         let pill = CGRect(
             x: bounds.midX - (textSize.width + padding.width * 2) / 2,
-            y: bounds.maxY - textSize.height - padding.height * 2 - 28,
+            y: max(12, desiredY),
             width: textSize.width + padding.width * 2,
             height: textSize.height + padding.height * 2
         )

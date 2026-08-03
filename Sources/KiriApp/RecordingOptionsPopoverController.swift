@@ -37,10 +37,10 @@ final class RecordingOptionsPopoverController {
         popover.contentViewController = NSHostingController(rootView: view)
     }
 
-    func show(relativeTo button: NSButton) {
+    func show(relativeTo view: NSView) {
         popover.show(
-            relativeTo: button.bounds,
-            of: button,
+            relativeTo: view.bounds,
+            of: view,
             preferredEdge: .maxY
         )
     }

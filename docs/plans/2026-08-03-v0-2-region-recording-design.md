@@ -10,15 +10,20 @@ Pause/resume, trimming, and full-display recording remain follow-up work.
 ## User flow
 
 1. Start the existing capture flow with Shift-Command-A.
-2. Select, move, or resize a region using the current selection experience.
-3. Choose the visible Record tool and adjust five remembered switches in a
-   compact setup card.
+2. Choose Screenshot or Record from the first-level mode switch.
+3. In Record mode, select, move, or resize a region. Kiri automatically shows
+   five remembered switches in a compact setup card.
 4. Start recording. Kiri requests microphone access only when required, shows
    a cancellable 3-2-1 countdown, removes its overlay, starts a visible timer,
    and exposes Stop Recording in the menu bar.
 5. Stopping finalizes an MP4 and imports it into the local library.
 6. A video card offers Convert to GIF when the duration is within the safe
    short-video limit.
+
+While recording, a compact excluded Kiri panel shows elapsed time, pause or
+resume, and stop. Pausing finalizes the current safe segment. Resuming starts a
+new segment with identical capture settings; stopping concatenates the segments
+without including paused wall-clock time.
 
 ## Architecture
 
@@ -37,6 +42,10 @@ that dependency exists.
 `AppModel` is the single recording state owner. It prevents concurrent capture
 or recording sessions, publishes elapsed time for the menu bar, and imports
 completed files with the existing `.video` and `.gif` asset kinds.
+
+`RecordingSegmentMerger` concatenates video and all available audio tracks with
+`AVMutableComposition`, then exports a single MP4. Partial segments stay in the
+temporary directory and are removed after import or on failure.
 
 ## Non-functional requirements
 

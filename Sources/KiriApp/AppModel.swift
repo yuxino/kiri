@@ -13,6 +13,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var isCaptureStarting = false
     @Published private(set) var isRecordingStarting = false
     @Published private(set) var isRecording = false
+    @Published private(set) var isRecordingPaused = false
+    @Published private(set) var isRecordingTransitioning = false
     @Published private(set) var isRecordingFinalizing = false
     @Published private(set) var recordingElapsed: TimeInterval = 0
     @Published private(set) var gifConversionAssetIDs: Set<UUID> = []
@@ -38,8 +40,12 @@ final class AppModel: ObservableObject {
     private var pinnedControllers: [UUID: PinnedImageController] = [:]
     private var regionRecorder: RegionRecorder?
     private var recordingCountdownController: RecordingCountdownController?
+    private var recordingControlPanelController: RecordingControlPanelController?
     private var recordingClockTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
+    private var recordingElapsedBeforeCurrentSegment: TimeInterval = 0
+    private var recordingConfiguration: RegionRecordingConfiguration?
+    private var recordingSegments: [RecordedMedia] = []
     private var recordingSourceApplication: String?
     private var hasStarted = false
 
@@ -66,8 +72,17 @@ final class AppModel: ObservableObject {
         RecordingPolicy.elapsedLabel(recordingElapsed)
     }
 
+    var hasRecordingSession: Bool {
+        isRecording || isRecordingPaused || isRecordingTransitioning
+    }
+
     var captureIsUnavailable: Bool {
-        isCaptureStarting || isRecordingStarting || isRecording || isRecordingFinalizing
+        isCaptureStarting
+            || isRecordingStarting
+            || isRecording
+            || isRecordingPaused
+            || isRecordingTransitioning
+            || isRecordingFinalizing
     }
 
     var capturePermissionRecoveryLabel: String? {
@@ -198,6 +213,16 @@ final class AppModel: ObservableObject {
                 }
 
                 let recorder = RegionRecorder()
+                recordingConfiguration = RegionRecordingConfiguration(
+                    displayID: capture.displayID,
+                    sourceRect: region,
+                    backingScale: capture.backingScale,
+                    options: effectiveOptions,
+                    screenFrame: capture.screenFrame
+                )
+                recordingSegments = []
+                recordingElapsedBeforeCurrentSegment = 0
+                prepareRecordingControlPanel(screenFrame: capture.screenFrame)
                 regionRecorder = recorder
                 try await recorder.start(
                     displayID: capture.displayID,
@@ -208,22 +233,19 @@ final class AppModel: ObservableObject {
                 guard regionRecorder === recorder else { return }
                 isRecordingStarting = false
                 isRecording = true
+                isRecordingPaused = false
+                isRecordingTransitioning = false
                 recordingElapsed = 0
                 recordingStartedAt = Date()
                 startRecordingClock()
+                updateRecordingControlPanel()
                 showNotice(title: "Recording Started", symbol: "record.circle.fill")
             } catch let error as RecordingAccessError {
-                regionRecorder = nil
-                recordingCountdownController = nil
-                recordingSourceApplication = nil
-                isRecordingStarting = false
+                resetRecordingSession()
                 errorMessage = error.localizedDescription
                 capturePermissionRecoveryAction = .openMicrophoneSettings
             } catch {
-                regionRecorder = nil
-                recordingCountdownController = nil
-                recordingSourceApplication = nil
-                isRecordingStarting = false
+                resetRecordingSession()
                 errorMessage = error.localizedDescription
             }
         }
@@ -244,36 +266,117 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func stopRecording() {
-        guard isRecording, let recorder = regionRecorder else { return }
+    func toggleRecordingPause() {
+        if isRecordingPaused {
+            resumeRecording()
+        } else {
+            pauseRecording()
+        }
+    }
+
+    func pauseRecording() {
+        guard isRecording,
+              !isRecordingTransitioning,
+              let recorder = regionRecorder else { return }
         isRecording = false
-        isRecordingFinalizing = true
+        isRecordingTransitioning = true
         stopRecordingClock()
+        updateRecordingControlPanel()
         Task {
             do {
                 let media = try await recorder.stop()
-                defer { try? FileManager.default.removeItem(at: media.fileURL) }
+                recordingSegments.append(media)
+                recordingElapsedBeforeCurrentSegment = recordingSegments.reduce(0) {
+                    $0 + $1.duration
+                }
+                recordingElapsed = recordingElapsedBeforeCurrentSegment
+                if regionRecorder === recorder {
+                    regionRecorder = nil
+                }
+                recordingStartedAt = nil
+                isRecordingPaused = true
+                isRecordingTransitioning = false
+                updateRecordingControlPanel()
+                showNotice(title: "Recording Paused", symbol: "pause.circle.fill")
+            } catch {
+                failRecordingSession(with: error)
+            }
+        }
+    }
+
+    func resumeRecording() {
+        guard isRecordingPaused,
+              !isRecordingTransitioning,
+              let configuration = recordingConfiguration else { return }
+        isRecordingTransitioning = true
+        updateRecordingControlPanel()
+        let recorder = RegionRecorder()
+        regionRecorder = recorder
+        Task {
+            do {
+                try await recorder.start(
+                    displayID: configuration.displayID,
+                    sourceRect: configuration.sourceRect,
+                    backingScale: configuration.backingScale,
+                    options: configuration.options
+                )
+                guard regionRecorder === recorder else { return }
+                isRecordingPaused = false
+                isRecordingTransitioning = false
+                isRecording = true
+                recordingStartedAt = Date()
+                startRecordingClock()
+                updateRecordingControlPanel()
+                showNotice(title: "Recording Resumed", symbol: "play.circle.fill")
+            } catch {
+                if regionRecorder === recorder {
+                    regionRecorder = nil
+                }
+                isRecordingTransitioning = false
+                isRecordingPaused = true
+                updateRecordingControlPanel()
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func stopRecording() {
+        guard (isRecording || isRecordingPaused), !isRecordingTransitioning else { return }
+        let activeRecorder = isRecording ? regionRecorder : nil
+        isRecording = false
+        isRecordingPaused = false
+        isRecordingFinalizing = true
+        stopRecordingClock()
+        updateRecordingControlPanel()
+        Task {
+            var segments = recordingSegments
+            do {
+                if let activeRecorder {
+                    let media = try await activeRecorder.stop()
+                    segments.append(media)
+                }
+                regionRecorder = nil
+                let finalMedia = try await RecordingSegmentMerger.merge(segments)
+                defer {
+                    let temporaryURLs = Set(segments.map(\.fileURL) + [finalMedia.fileURL])
+                    temporaryURLs.forEach { try? FileManager.default.removeItem(at: $0) }
+                }
                 _ = try await library.importFile(
-                    at: media.fileURL,
+                    at: finalMedia.fileURL,
                     kind: .video,
                     fileExtension: "mp4",
-                    pixelWidth: media.pixelWidth,
-                    pixelHeight: media.pixelHeight,
-                    duration: media.duration,
+                    pixelWidth: finalMedia.pixelWidth,
+                    pixelHeight: finalMedia.pixelHeight,
+                    duration: finalMedia.duration,
                     sourceApplication: recordingSourceApplication
                 )
                 await refresh()
                 showNotice(title: "Recording Saved", symbol: "video.fill")
             } catch {
+                segments.forEach { try? FileManager.default.removeItem(at: $0.fileURL) }
                 errorMessage = error.localizedDescription
             }
-            if regionRecorder === recorder {
-                regionRecorder = nil
-            }
-            isRecordingFinalizing = false
-            recordingElapsed = 0
-            recordingStartedAt = nil
-            recordingSourceApplication = nil
+            resetRecordingSession()
         }
     }
 
@@ -283,7 +386,9 @@ final class AppModel: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard let self, let recordingStartedAt = self.recordingStartedAt else { return }
-                self.recordingElapsed = Date().timeIntervalSince(recordingStartedAt)
+                self.recordingElapsed = self.recordingElapsedBeforeCurrentSegment
+                    + Date().timeIntervalSince(recordingStartedAt)
+                self.updateRecordingControlPanel()
             }
         }
     }
@@ -291,6 +396,54 @@ final class AppModel: ObservableObject {
     private func stopRecordingClock() {
         recordingClockTask?.cancel()
         recordingClockTask = nil
+    }
+
+    private func prepareRecordingControlPanel(screenFrame: CGRect) {
+        closeRecordingControlPanel()
+        let controller = RecordingControlPanelController(
+            onPauseResume: { [weak self] in self?.toggleRecordingPause() },
+            onStop: { [weak self] in self?.stopRecording() }
+        )
+        recordingControlPanelController = controller
+        controller.show(screenFrame: screenFrame)
+        updateRecordingControlPanel()
+    }
+
+    private func updateRecordingControlPanel() {
+        recordingControlPanelController?.update(
+            elapsed: recordingElapsedLabel,
+            isPaused: isRecordingPaused,
+            isBusy: isRecordingStarting || isRecordingTransitioning || isRecordingFinalizing
+        )
+    }
+
+    private func closeRecordingControlPanel() {
+        recordingControlPanelController?.close()
+        recordingControlPanelController = nil
+    }
+
+    private func failRecordingSession(with error: Error) {
+        recordingSegments.forEach { try? FileManager.default.removeItem(at: $0.fileURL) }
+        errorMessage = error.localizedDescription
+        resetRecordingSession()
+    }
+
+    private func resetRecordingSession() {
+        stopRecordingClock()
+        regionRecorder = nil
+        recordingCountdownController = nil
+        closeRecordingControlPanel()
+        isRecordingStarting = false
+        isRecording = false
+        isRecordingPaused = false
+        isRecordingTransitioning = false
+        isRecordingFinalizing = false
+        recordingElapsed = 0
+        recordingElapsedBeforeCurrentSegment = 0
+        recordingStartedAt = nil
+        recordingConfiguration = nil
+        recordingSegments = []
+        recordingSourceApplication = nil
     }
 
     private func hideCaptureOriginWindowsIfNeeded(
@@ -686,6 +839,14 @@ struct AppNotice: Identifiable, Equatable {
     let id = UUID()
     let title: String
     let symbol: String
+}
+
+private struct RegionRecordingConfiguration {
+    let displayID: CGDirectDisplayID
+    let sourceRect: CGRect
+    let backingScale: CGFloat
+    let options: RecordingOptions
+    let screenFrame: CGRect
 }
 
 private struct StoredCapture {

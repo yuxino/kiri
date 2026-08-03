@@ -29,8 +29,10 @@ does not disappear just because the clipboard changed.
   and Transparent (default), Dark, or Light backgrounds
 - Press Escape to cancel at any capture stage and Return once a region exists to copy immediately
 - Save, pin, or open the full editor when needed
-- Record a region from a visible toolbar action with remembered countdown, system audio, microphone, pointer, and click-highlight switches
+- Choose Screenshot or Record in the capture overlay's first-level mode switch instead of finding recording inside screenshot tools
+- Configure remembered countdown, system audio, microphone, pointer, and click-highlight switches before recording
 - Cancel the 3-2-1 countdown with Escape, save H.264 MP4, and convert library videos up to 15 seconds to looping GIF
+- Pause, resume, or stop from a visible recording control bar; paused time is omitted from the final video
 - Persist each completed result once and add it to local History
 - Search, favorite, reveal, and copy captures from the local library
 - Move captures directly from each library card to recoverable Trash, restore them, or delete permanently
@@ -96,11 +98,12 @@ uploaded automatically.
 ## Region recording and GIF (v0.2 preview)
 
 1. Press **⇧⌘A** and select a region.
-2. Choose the visible **Record Region** tool and set countdown, system audio,
-   microphone, pointer, and click-highlight switches.
-3. Choose **Start Recording**; press Escape during 3-2-1 to cancel.
-4. Stop from Kiri's menu bar or Capture menu; the MP4 enters the library.
-5. Open More Actions on a video up to 15 seconds and choose **Convert to GIF**.
+2. Choose **Record** in the first-level mode switch, then select the region.
+3. Set countdown, system audio, microphone, pointer, and click highlights in
+   the setup card that appears automatically.
+4. Choose **Start Recording**; press Escape during 3-2-1 to cancel.
+5. Pause, resume, or stop from the floating control bar, Kiri menu, or Capture menu.
+6. The MP4 enters the library; videos up to 15 seconds can use **Convert to GIF**.
 
 Audio is off by default and Kiri asks for microphone permission only when that
 switch is enabled. Microphone capture and native click highlighting require

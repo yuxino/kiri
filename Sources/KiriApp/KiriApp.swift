@@ -99,10 +99,16 @@ private struct KiriCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Capture") {
-            if model.isRecording {
-                Button("Stop Recording  \(model.recordingElapsedLabel)") {
+            if model.hasRecordingSession {
+                Button(model.isRecordingPaused ? "Resume Recording" : "Pause Recording") {
+                    model.toggleRecordingPause()
+                }
+                .disabled(model.isRecordingTransitioning)
+
+                Button("Stop and Save  \(model.recordingElapsedLabel)") {
                     model.stopRecording()
                 }
+                .disabled(model.isRecordingTransitioning)
             } else {
                 Button("Capture") {
                     model.startCapture()
@@ -126,15 +132,26 @@ private struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        if model.isRecording {
+        if model.hasRecordingSession {
+            Button {
+                model.toggleRecordingPause()
+            } label: {
+                Label(
+                    model.isRecordingPaused ? "Resume Recording" : "Pause Recording",
+                    systemImage: model.isRecordingPaused ? "play.circle.fill" : "pause.circle.fill"
+                )
+            }
+            .disabled(model.isRecordingTransitioning)
+
             Button {
                 model.stopRecording()
             } label: {
                 Label(
-                    "Stop Recording  \(model.recordingElapsedLabel)",
+                    "Stop and Save  \(model.recordingElapsedLabel)",
                     systemImage: "stop.circle.fill"
                 )
             }
+            .disabled(model.isRecordingTransitioning)
         } else {
             Button {
                 model.startCapture()

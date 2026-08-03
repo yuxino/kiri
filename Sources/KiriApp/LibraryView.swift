@@ -256,7 +256,7 @@ struct LibraryView: View {
             VStack(spacing: 7) {
                 Text("Ready for your first capture")
                     .font(.title2.weight(.semibold))
-                Text("Select a region, add markup if needed, then copy it anywhere.")
+                Text("Choose Screenshot or Record, then select the region you need.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -278,15 +278,15 @@ struct LibraryView: View {
                 .frame(width: 400)
 
             HStack(spacing: 18) {
-                OnboardingStep(number: "1", title: "Select", detail: "Choose a region")
+                OnboardingStep(number: "1", title: "Mode", detail: "Screenshot or Record")
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                OnboardingStep(number: "2", title: "Mark up", detail: "Optional tools")
+                OnboardingStep(number: "2", title: "Select", detail: "Choose a region")
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                OnboardingStep(number: "3", title: "Copy", detail: "Press Return")
+                OnboardingStep(number: "3", title: "Finish", detail: "Copy or save")
             }
         }
         .padding(.horizontal, 40)

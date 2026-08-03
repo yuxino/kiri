@@ -47,9 +47,10 @@ idempotent, and remove partial files on failure. Run strict `swift build`.
 - Modify: `Sources/KiriApp/SelectionOverlayController.swift`
 - Modify: `Sources/KiriApp/AppModel.swift`
 
-Add Record Region to More Actions. Return the top-left selection rectangle
-without rendering annotations, close the overlay, and start RegionRecorder for
-the selected display. Verify screenshot actions remain unchanged.
+Return the top-left selection rectangle without rendering annotations, close
+the overlay, and start RegionRecorder for the selected display. The final flow
+promotes Screenshot and Record to the first-level selector while keeping
+screenshot annotation actions unchanged.
 
 ### Task 5: Recording state and stop controls
 
@@ -96,9 +97,23 @@ duration before committing.
 - Modify: `Sources/KiriApp/RegionRecorder.swift`
 - Modify: `Sources/KiriApp/Info.plist`
 
-Promote Record Region to the main selection toolbar. Present remembered switch
-controls for countdown, system audio, microphone, pointer, and click feedback.
+Present Screenshot and Record as the first-level selection modes. In Record
+mode, automatically present remembered controls for countdown, system audio,
+microphone, pointer, and click feedback after region selection.
 Request microphone permission on demand, run a cancellable 3-2-1 overlay, and
 use ScreenCaptureKit's native multi-media recording output on macOS 15 and
 later. Verify silent, system-audio, and microphone-enabled recordings plus
 countdown cancellation.
+
+### Task 9: Discoverable pause and resume
+
+**Files:**
+- Create: `Sources/KiriApp/RecordingControlPanelController.swift`
+- Create: `Sources/KiriApp/RecordingSegmentMerger.swift`
+- Modify: `Sources/KiriApp/AppModel.swift`
+- Modify: `Sources/KiriApp/KiriApp.swift`
+
+Show an excluded floating control bar with elapsed time, pause or resume, and
+stop. Finalize safe segments on pause, restart the same capture configuration on
+resume, and concatenate all video and audio tracks before library import. Mirror
+the actions in the menu bar and Capture menu.
