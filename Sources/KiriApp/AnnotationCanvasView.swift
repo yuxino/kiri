@@ -64,7 +64,37 @@ private enum AnnotationMark {
     case mosaic(CGRect)
 }
 
-final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
+private final class InlineAnnotationTextView: NSTextView {
+    var onCommit: (() -> Void)?
+    var onCancel: (() -> Void)?
+    var placeholder = "Type something…"
+
+    override func doCommand(by selector: Selector) {
+        if selector == #selector(NSResponder.insertNewline(_:)) {
+            onCommit?()
+            return
+        }
+        if selector == #selector(NSResponder.cancelOperation(_:)) {
+            onCancel?()
+            return
+        }
+        super.doCommand(by: selector)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard string.isEmpty, markedRange().location == NSNotFound else { return }
+        (placeholder as NSString).draw(
+            at: CGPoint(x: textContainerInset.width, y: textContainerInset.height),
+            withAttributes: [
+                .font: font ?? NSFont.systemFont(ofSize: 18, weight: .semibold),
+                .foregroundColor: NSColor.placeholderTextColor
+            ]
+        )
+    }
+}
+
+final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     let image: CGImage
     var onToolChange: ((AnnotationTool) -> Void)?
     var onConfirmRequested: (() -> Void)?
@@ -85,6 +115,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     }
     var colorPreset: AnnotationColorPreset = .violet {
         didSet {
+            updateTextEditorStyle()
             needsDisplay = true
         }
     }
@@ -93,8 +124,7 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     private var draftPoints: [CGPoint] = []
     private var dragStart: CGPoint?
     private var dragCurrent: CGPoint?
-    private weak var textEditor: NSTextField?
-    private var textOrigin: CGPoint?
+    private var textEditor: InlineAnnotationTextView?
     private var textColorPreset: AnnotationColorPreset?
 
     init(image: CGImage) {
@@ -194,18 +224,21 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     }
 
     func undo() {
+        commitTextEditing()
         guard history.undo() != nil else { return }
         publishHistoryState()
         needsDisplay = true
     }
 
     func redo() {
+        commitTextEditing()
         guard history.redo() != nil else { return }
         publishHistoryState()
         needsDisplay = true
     }
 
     func clearAnnotations() {
+        discardTextEditing()
         guard history.canUndo || history.canRedo else { return }
         history.clear()
         publishHistoryState()
@@ -421,43 +454,59 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     private func beginTextEditing(at point: CGPoint) {
         commitTextEditing()
 
-        let editor = NSTextField(string: "")
-        editor.placeholderString = "Type something…"
+        let editor = InlineAnnotationTextView(frame: .zero)
+        editor.string = ""
         editor.font = .systemFont(ofSize: 18, weight: .semibold)
-        editor.textColor = colorPreset.color
-        editor.backgroundColor = colorPreset.color.brightnessComponent < 0.36
-            ? NSColor.white.withAlphaComponent(0.9)
-            : NSColor.black.withAlphaComponent(0.74)
-        editor.isBordered = false
-        editor.isBezeled = false
+        editor.isRichText = false
+        editor.importsGraphics = false
+        editor.isAutomaticQuoteSubstitutionEnabled = false
+        editor.isAutomaticDashSubstitutionEnabled = false
+        editor.isAutomaticTextReplacementEnabled = false
+        editor.isHorizontallyResizable = false
+        editor.isVerticallyResizable = false
+        editor.textContainerInset = CGSize(width: 8, height: 5)
+        editor.textContainer?.widthTracksTextView = true
+        editor.textContainer?.heightTracksTextView = false
         editor.drawsBackground = true
-        editor.focusRingType = .exterior
         editor.delegate = self
         editor.wantsLayer = true
         editor.layer?.cornerRadius = 7
         editor.layer?.cornerCurve = .continuous
+        editor.layer?.borderWidth = 1
         editor.setAccessibilityLabel("Annotation text")
+        editor.onCommit = { [weak self] in
+            self?.commitTextEditing()
+            self?.onConfirmRequested?()
+        }
+        editor.onCancel = { [weak self] in
+            self?.discardTextEditing()
+            self?.onCancelRequested?()
+        }
 
-        let width = min(260, max(120, imageRect.maxX - point.x))
+        let width = min(180, max(96, imageRect.width))
         let origin = CGPoint(
             x: min(point.x, imageRect.maxX - width),
-            y: min(point.y, imageRect.maxY - 30)
+            y: min(point.y, imageRect.maxY - 34)
         )
-        editor.frame = CGRect(origin: origin, size: CGSize(width: width, height: 30))
+        editor.frame = CGRect(origin: origin, size: CGSize(width: width, height: 34))
         addSubview(editor)
         textEditor = editor
-        textOrigin = origin
         textColorPreset = colorPreset
+        updateTextEditorStyle()
+        resizeTextEditor()
         window?.makeFirstResponder(editor)
     }
 
     private func commitTextEditing() {
         guard let editor = textEditor else { return }
-        let text = editor.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let origin = textOrigin
+        let text = editor.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        let origin = CGPoint(
+            x: editor.frame.minX + editor.textContainerInset.width,
+            y: editor.frame.minY + editor.textContainerInset.height
+        )
         let colorPreset = textColorPreset
         discardTextEditing()
-        if !text.isEmpty, let origin, let colorPreset {
+        if !text.isEmpty, let colorPreset {
             append(.text(text, origin, colorPreset))
         }
     }
@@ -465,33 +514,52 @@ final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     private func discardTextEditing() {
         guard let editor = textEditor else { return }
         textEditor = nil
-        textOrigin = nil
         textColorPreset = nil
         editor.delegate = nil
+        editor.onCommit = nil
+        editor.onCancel = nil
         editor.removeFromSuperview()
         window?.makeFirstResponder(superview ?? self)
     }
 
-    func controlTextDidEndEditing(_ notification: Notification) {
+    func textDidEndEditing(_ notification: Notification) {
         commitTextEditing()
     }
 
-    func control(
-        _ control: NSControl,
-        textView: NSTextView,
-        doCommandBy commandSelector: Selector
-    ) -> Bool {
-        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-            commitTextEditing()
-            onConfirmRequested?()
-            return true
-        }
-        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
-            discardTextEditing()
-            onCancelRequested?()
-            return true
-        }
-        return false
+    func textDidChange(_ notification: Notification) {
+        resizeTextEditor()
+    }
+
+    private func updateTextEditorStyle() {
+        guard let editor = textEditor else { return }
+        textColorPreset = colorPreset
+        editor.textColor = colorPreset.color
+        editor.insertionPointColor = colorPreset.color
+        editor.backgroundColor = colorPreset.color.brightnessComponent < 0.36
+            ? NSColor.white.withAlphaComponent(0.92)
+            : NSColor.black.withAlphaComponent(0.76)
+        editor.layer?.borderColor = colorPreset.color.withAlphaComponent(0.8).cgColor
+        editor.needsDisplay = true
+    }
+
+    private func resizeTextEditor() {
+        guard let editor = textEditor, let font = editor.font else { return }
+        let horizontalPadding = editor.textContainerInset.width * 2
+        let verticalPadding = editor.textContainerInset.height * 2
+        let maximumWidth = max(96, imageRect.maxX - editor.frame.minX)
+        let measuredText = editor.string.isEmpty ? editor.placeholder : editor.string
+        let textBounds = (measuredText as NSString).boundingRect(
+            with: CGSize(
+                width: max(1, maximumWidth - horizontalPadding),
+                height: .greatestFiniteMagnitude
+            ),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font]
+        )
+        let width = min(maximumWidth, max(120, ceil(textBounds.width) + horizontalPadding + 2))
+        let maximumHeight = max(34, imageRect.maxY - editor.frame.minY)
+        let height = min(maximumHeight, max(34, ceil(textBounds.height) + verticalPadding + 2))
+        editor.setFrameSize(CGSize(width: width, height: height))
     }
 
     private func drawMosaicPreview(in rect: CGRect) {
