@@ -115,6 +115,41 @@ public actor AssetLibrary {
         return asset
     }
 
+    @discardableResult
+    public func importFile(
+        at sourceURL: URL,
+        kind: CaptureKind,
+        fileExtension: String,
+        pixelWidth: Int,
+        pixelHeight: Int,
+        duration: TimeInterval? = nil,
+        sourceApplication: String? = nil,
+        createdAt: Date = Date()
+    ) throws -> CaptureAsset {
+        let safeExtension = try validatedExtension(fileExtension)
+        let persistedCreatedAt = normalizedDate(createdAt)
+        let asset = makeAsset(
+            kind: kind,
+            fileExtension: safeExtension,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            duration: duration,
+            sourceApplication: sourceApplication,
+            createdAt: persistedCreatedAt
+        )
+        let fileURL = assetURL(for: asset)
+        try FileManager.default.copyItem(at: sourceURL, to: fileURL)
+        index.append(asset)
+        do {
+            try persist()
+        } catch {
+            try? FileManager.default.removeItem(at: fileURL)
+            index.removeAll { $0.id == asset.id }
+            throw error
+        }
+        return asset
+    }
+
     public func assetURL(for asset: CaptureAsset) -> URL {
         assetsURL.appendingPathComponent(asset.filename)
     }
@@ -164,6 +199,47 @@ public actor AssetLibrary {
             index[position] = previous
             throw error
         }
+    }
+
+    private func validatedExtension(_ fileExtension: String) throws -> String {
+        let safeExtension = fileExtension
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        guard !safeExtension.isEmpty,
+              safeExtension.allSatisfy({ $0.isLetter || $0.isNumber }) else {
+            throw AssetLibraryError.invalidFilename
+        }
+        return safeExtension
+    }
+
+    private func normalizedDate(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: (date.timeIntervalSince1970 * 1_000).rounded() / 1_000)
+    }
+
+    private func makeAsset(
+        kind: CaptureKind,
+        fileExtension: String,
+        pixelWidth: Int,
+        pixelHeight: Int,
+        duration: TimeInterval?,
+        sourceApplication: String?,
+        createdAt: Date
+    ) -> CaptureAsset {
+        let id = UUID()
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        let filename = "\(formatter.string(from: createdAt))-\(id.uuidString.lowercased()).\(fileExtension)"
+        return CaptureAsset(
+            id: id,
+            kind: kind,
+            createdAt: createdAt,
+            filename: filename,
+            pixelWidth: pixelWidth,
+            pixelHeight: pixelHeight,
+            duration: duration,
+            sourceApplication: sourceApplication
+        )
     }
 
     private func persist() throws {

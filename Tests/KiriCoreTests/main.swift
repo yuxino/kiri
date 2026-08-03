@@ -46,6 +46,21 @@ let tests = [
     KiriTest(name: "library replacement keeps stable URL") {
         try await replacementKeepsStableAssetURL()
     },
+    KiriTest(name: "library imports finalized media files") {
+        try await fileImportCopiesMediaWithoutRemovingTheSource()
+    },
+    KiriTest(name: "recording dimensions are positive and even") {
+        try recordingDimensionsArePositiveAndEven()
+    },
+    KiriTest(name: "GIF eligibility is bounded") {
+        try gifEligibilityIsBounded()
+    },
+    KiriTest(name: "GIF frame count uses configured rate") {
+        try gifFrameCountUsesTheConfiguredRate()
+    },
+    KiriTest(name: "recording elapsed labels remain compact") {
+        try recordingElapsedLabelsRemainCompact()
+    },
     KiriTest(name: "selection reverse drag") {
         try normalizesReverseDrag()
     },
