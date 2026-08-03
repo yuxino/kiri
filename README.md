@@ -18,7 +18,7 @@
 
 - 使用被 Kiri 完整拦截的 **⇧⌘A** 启动截图，避免同时触发其他应用操作
 - 冻结当前屏幕，自动吸附最前方窗口，也可自由拖出选区
-- 通过独立的“截图并标注”入口使用就地编辑，不拖慢普通截图
+- 框选后直接进入就地编辑，需要时添加标注，不再拆成两个截图入口
 - 使用画笔、矩形、箭头、文字和马赛克工具，并支持撤销与重做
 - 在标注模式按 Return 复制，也可保存、贴图或进入完整编辑器
 - 每次完成只保存一份原图，后台自动进入历史记录
@@ -37,17 +37,23 @@
 git clone https://github.com/yuxino/kiri.git
 cd kiri
 swift run kiri-core-tests
-./scripts/package-app.sh
-open dist/kiri.app
+./scripts/install-app.sh
+open /Applications/Kiri.app
 ```
 
-打包脚本会优先选择 Apple Development、Developer ID 或 kiri 已有的稳定本地证书，
+安装脚本会生成统一的 `Kiri.app` 并安装到固定的 `/Applications/Kiri.app`。
+更新时会先关闭正在运行的 Kiri 副本。请只运行这份正式安装版；Kiri 也会自动关闭
+误启动的同 bundle ID 旧副本，避免 macOS
+把快捷键和隐私权限关联到临时构建路径。
+
+底层打包脚本会优先选择 Apple Development、Developer ID 或 Kiri 已有的稳定本地证书，
 并拒绝静默使用会破坏录屏授权的临时签名。也可用
 `KIRI_CODESIGN_IDENTITY="证书名称" ./scripts/package-app.sh` 明确指定证书；只有不需要
 持久录屏权限的临时构建才应设置 `KIRI_ALLOW_ADHOC_SIGNING=1`。
 
-第一次截图时，macOS 会要求授予“屏幕与系统音频录制”权限。授权后如果截图仍不可用，
-请退出并重新打开 kiri。kiri 每次运行最多调用一次系统授权请求；如果权限尚未生效，
+第一次启动快捷键时，macOS 会要求“输入监控”权限；第一次截图时会要求
+“屏幕与系统音频录制”权限。授权后如果截图仍不可用，请退出并重新打开 Kiri。
+Kiri 每次运行最多调用一次系统授权请求；如果权限尚未生效，
 提示条只会提供“打开设置”或“退出 kiri”，不会在每次截图时重复弹出系统窗口。
 
 ## 素材保存在哪里

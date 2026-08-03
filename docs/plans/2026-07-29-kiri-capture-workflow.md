@@ -120,8 +120,8 @@
 1. Update documentation around the new capture-first workflow.
 2. Run `swift run kiri-core-tests`.
 3. Run `swift build --product kiri -Xswiftc -warnings-as-errors`.
-4. Run `./scripts/package-app.sh` and verify the signature with
-   `codesign --verify --deep --strict dist/kiri.app`.
+4. Run `./scripts/install-app.sh` and verify the signature with
+   `codesign --verify --deep --strict /Applications/Kiri.app`.
 5. Launch the packaged app and manually verify window snap, region selection,
    annotation, Return, Escape, Quick Access drag, Copy, Save, Pin, Edit, and
    history.

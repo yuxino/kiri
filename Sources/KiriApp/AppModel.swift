@@ -59,6 +59,8 @@ final class AppModel: ObservableObject {
             "Quit Kiri"
         case .openAccessibilitySettings:
             "Open Accessibility Settings"
+        case .openInputMonitoringSettings:
+            "Open Input Monitoring Settings"
         case nil:
             nil
         }
@@ -71,8 +73,13 @@ final class AppModel: ObservableObject {
             try registerShortcut()
         } catch let error as GlobalShortcutError {
             errorMessage = error.localizedDescription
-            if case .accessibilityPermissionRequired = error {
+            switch error {
+            case .accessibilityPermissionRequired:
                 capturePermissionRecoveryAction = .openAccessibilitySettings
+            case .inputMonitoringPermissionRequired:
+                capturePermissionRecoveryAction = .openInputMonitoringSettings
+            case .eventTapCreationFailed:
+                break
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -155,6 +162,13 @@ final class AppModel: ObservableObject {
         case .openAccessibilitySettings:
             guard let url = URL(
                 string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            ) else {
+                return
+            }
+            NSWorkspace.shared.open(url)
+        case .openInputMonitoringSettings:
+            guard let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
             ) else {
                 return
             }
@@ -451,6 +465,7 @@ enum CapturePermissionRecoveryAction {
     case openSettings
     case quitKiri
     case openAccessibilitySettings
+    case openInputMonitoringSettings
 }
 
 struct AppNotice: Identifiable, Equatable {
@@ -496,21 +511,25 @@ private final class GlobalShortcutMonitor {
             return
         }
 
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        guard AXIsProcessTrustedWithOptions(options) else {
-            throw GlobalShortcutError.accessibilityPermissionRequired
+        guard CGPreflightListenEventAccess() || CGRequestListenEventAccess() else {
+            throw GlobalShortcutError.inputMonitoringPermissionRequired
         }
 
         let mask = (CGEventMask(1) << CGEventType.keyDown.rawValue)
             | (CGEventMask(1) << CGEventType.keyUp.rawValue)
-        guard let eventTap = CGEvent.tapCreate(
+        let eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: mask,
             callback: globalShortcutEventTapCallback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else {
+        )
+        guard let eventTap else {
+            let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+            guard AXIsProcessTrustedWithOptions(options) else {
+                throw GlobalShortcutError.accessibilityPermissionRequired
+            }
             throw GlobalShortcutError.eventTapCreationFailed
         }
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
@@ -580,14 +599,17 @@ private func globalShortcutEventTapCallback(
 
 private enum GlobalShortcutError: LocalizedError {
     case accessibilityPermissionRequired
+    case inputMonitoringPermissionRequired
     case eventTapCreationFailed
 
     var errorDescription: String? {
         switch self {
         case .accessibilityPermissionRequired:
             "Enable Kiri in Accessibility settings, then quit and reopen it to reserve ⇧⌘A exclusively."
+        case .inputMonitoringPermissionRequired:
+            "Enable Kiri in Input Monitoring settings, then quit and reopen it to reserve ⇧⌘A exclusively."
         case .eventTapCreationFailed:
-            "Kiri could not create the exclusive ⇧⌘A keyboard filter. Check Accessibility settings, then quit and reopen Kiri."
+            "Kiri could not create the exclusive ⇧⌘A keyboard filter. Check Input Monitoring and Accessibility, then quit and reopen Kiri."
         }
     }
 }

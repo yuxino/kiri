@@ -38,16 +38,21 @@ macOS 14 以降と Swift 6 が必要です。
 git clone https://github.com/yuxino/kiri.git
 cd kiri
 swift run kiri-core-tests
-./scripts/package-app.sh
-open dist/kiri.app
+./scripts/install-app.sh
+open /Applications/Kiri.app
 ```
 
-パッケージスクリプトは Apple Development、Developer ID、または kiri の安定した
+インストーラは常に `/Applications/Kiri.app` に固定パスで配置します。この正式版だけを
+起動してください。更新時は実行中の Kiri を先に終了し、同じ bundle ID の古いコピーも
+Kiri が自動終了するため、macOS の権限が
+一つのアプリに安定して紐づきます。
+
+パッケージスクリプトは Apple Development、Developer ID、または Kiri の安定した
 ローカル証明書を優先し、画面収録権限を壊す一時署名へ暗黙に切り替えません。
 `KIRI_CODESIGN_IDENTITY="証明書名"` で明示的に指定できます。
 `KIRI_ALLOW_ADHOC_SIGNING=1` は権限を保持しなくてよい使い捨てビルド専用です。
 
-最初のキャプチャ時に macOS の画面収録権限が必要です。kiri は起動ごとに
+排他的ショートカットには入力監視、最初のキャプチャには画面収録権限が必要です。Kiri は起動ごとに
 システムの権限要求を一度だけ行い、それ以降は設定を開く、または kiri を終了する
 操作を表示して、同じダイアログを繰り返しません。データは
 `~/Library/Application Support/kiri/` に保存され、自動で外部へ送信されません。

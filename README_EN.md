@@ -19,7 +19,7 @@ does not disappear just because the clipboard changed.
 
 - Start capture with **⇧⌘A**, which Kiri filters before other apps can act on it
 - Freeze the active display, snap to the frontmost window, or drag a free region
-- Enter inline annotation from a separate action without slowing down quick captures
+- Enter inline annotation immediately after selection without a second capture mode
 - Use pen, rectangle, arrow, text, and mosaic tools with undo and redo
 - Press Return in annotation to copy, or save, pin, or open the full editor
 - Persist each completed capture once and add it to History in the background
@@ -38,17 +38,23 @@ Requires macOS 14+ and Swift 6.
 git clone https://github.com/yuxino/kiri.git
 cd kiri
 swift run kiri-core-tests
-./scripts/package-app.sh
-open dist/kiri.app
+./scripts/install-app.sh
+open /Applications/Kiri.app
 ```
 
-The packaging script prefers Apple Development, Developer ID, or kiri's stable
+The installer always produces `Kiri.app` at `/Applications/Kiri.app`. Run only
+that installed copy. It closes running Kiri copies before an update, and the
+installed app automatically closes older copies with the same
+bundle ID so macOS permissions stay attached to one stable application path.
+
+The underlying packaging script prefers Apple Development, Developer ID, or Kiri's stable
 local certificate and refuses silent ad-hoc signing that would break Screen
 Recording consent. Use `KIRI_CODESIGN_IDENTITY="Certificate Name"` to select a
 certificate explicitly. Set `KIRI_ALLOW_ADHOC_SIGNING=1` only for disposable
 builds that do not need persistent permission.
 
-macOS asks for Screen & System Audio Recording permission on the first capture.
+macOS asks for Input Monitoring permission for the exclusive shortcut and
+Screen & System Audio Recording permission on the first capture.
 If capture remains unavailable after approval, quit and reopen kiri. Kiri calls
 the system permission request at most once per launch; later attempts show an
 Open Settings or Quit Kiri recovery action instead of prompting repeatedly.

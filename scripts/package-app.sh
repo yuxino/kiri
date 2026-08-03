@@ -2,7 +2,7 @@
 set -eu
 
 project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-app_dir=${KIRI_APP_OUTPUT:-"$project_root/dist/kiri.app"}
+app_dir=${KIRI_APP_OUTPUT:-"$project_root/dist/Kiri.app"}
 contents_dir="$app_dir/Contents"
 
 available_identities=$(security find-identity -v -p codesigning 2>/dev/null || true)
@@ -42,6 +42,18 @@ fi
 
 cd "$project_root"
 swift build -c release --product kiri -Xswiftc -warnings-as-errors
+
+if [ -e "$app_dir" ]; then
+    case "$app_dir" in
+        "$project_root/dist/Kiri.app"|"$project_root/dist/kiri.app")
+            rm -rf -- "$app_dir"
+            ;;
+        *)
+            echo "Refusing to replace non-dist app without explicit cleanup: $app_dir" >&2
+            exit 1
+            ;;
+    esac
+fi
 
 mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$project_root/.build/release/kiri" "$contents_dir/MacOS/kiri"
