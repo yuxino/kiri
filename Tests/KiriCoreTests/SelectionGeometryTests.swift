@@ -153,19 +153,19 @@ func convertsSelectionsOnOffsetDisplays() throws {
     )
 }
 
-func windowSnapChoosesTopmostCandidate() throws {
+func windowClickChoosesTopmostCandidate() throws {
     let front = CGRect(x: 40, y: 30, width: 160, height: 120)
     let back = CGRect(x: 10, y: 10, width: 260, height: 180)
-    let result = WindowSnapGeometry.candidate(
+    let result = WindowSelectionGeometry.candidate(
         at: CGPoint(x: 80, y: 70),
         windowsFrontToBack: [front, back],
         within: CGRect(x: 0, y: 0, width: 300, height: 200)
     )
-    try expect(result == front, "The frontmost matching window should win")
+    try expect(result == front, "A click should choose the frontmost matching window")
 }
 
-func windowSnapClipsToDisplay() throws {
-    let result = WindowSnapGeometry.candidate(
+func windowClickClipsCandidateToDisplay() throws {
+    let result = WindowSelectionGeometry.candidate(
         at: CGPoint(x: 10, y: 60),
         windowsFrontToBack: [
             CGRect(x: -40, y: 20, width: 120, height: 100)
@@ -174,13 +174,13 @@ func windowSnapClipsToDisplay() throws {
     )
     try expect(
         result == CGRect(x: 0, y: 20, width: 80, height: 100),
-        "A partially visible window should snap to its visible display portion"
+        "A partially visible window should select only its visible display portion"
     )
 }
 
-func windowSnapFiltersInvalidCandidates() throws {
+func windowClickFiltersInvalidCandidates() throws {
     let bounds = CGRect(x: 0, y: 0, width: 300, height: 200)
-    let result = WindowSnapGeometry.candidate(
+    let result = WindowSelectionGeometry.candidate(
         at: CGPoint(x: 100, y: 100),
         windowsFrontToBack: [
             CGRect(x: 99, y: 99, width: 2, height: 2),
@@ -192,13 +192,13 @@ func windowSnapFiltersInvalidCandidates() throws {
     )
     try expect(
         result == CGRect(x: 60, y: 60, width: 120, height: 90),
-        "Tiny and off-display candidates should be ignored"
+        "Tiny and off-display windows should be ignored"
     )
 
-    let missing = WindowSnapGeometry.candidate(
+    let missing = WindowSelectionGeometry.candidate(
         at: CGPoint(x: 10, y: 10),
         windowsFrontToBack: [CGRect(x: 60, y: 60, width: 120, height: 90)],
         within: bounds
     )
-    try expect(missing == nil, "A point outside every window should not snap")
+    try expect(missing == nil, "A click outside every window should not create a selection")
 }

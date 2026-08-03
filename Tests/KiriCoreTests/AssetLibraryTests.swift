@@ -102,3 +102,29 @@ func replacementKeepsStableAssetURL() async throws {
         "Replacement should atomically update the stored bytes"
     )
 }
+
+func fileImportCopiesMediaWithoutRemovingTheSource() async throws {
+    let temporaryURL = temporaryLibraryURL()
+    defer { try? FileManager.default.removeItem(at: temporaryURL) }
+    try FileManager.default.createDirectory(at: temporaryURL, withIntermediateDirectories: true)
+    let sourceURL = temporaryURL.appendingPathComponent("recording.mp4")
+    let bytes = Data(repeating: 7, count: 1_024)
+    try bytes.write(to: sourceURL)
+    let libraryURL = temporaryURL.appendingPathComponent("Library", isDirectory: true)
+    let library = try AssetLibrary(rootURL: libraryURL)
+
+    let asset = try await library.importFile(
+        at: sourceURL,
+        kind: .video,
+        fileExtension: "mp4",
+        pixelWidth: 640,
+        pixelHeight: 360,
+        duration: 2.5
+    )
+    let importedURL = await library.assetURL(for: asset)
+
+    try expect(asset.kind == .video, "File import should preserve the media kind")
+    try expect(asset.duration == 2.5, "File import should preserve duration")
+    try expect(try Data(contentsOf: importedURL) == bytes, "File import should copy the bytes")
+    try expect(FileManager.default.fileExists(atPath: sourceURL.path), "Source should remain recoverable")
+}

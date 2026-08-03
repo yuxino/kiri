@@ -169,7 +169,7 @@ public enum SelectionGeometry {
     }
 }
 
-public enum WindowSnapGeometry {
+public enum WindowSelectionGeometry {
     public static func candidate(
         at point: CGPoint,
         windowsFrontToBack: [CGRect],

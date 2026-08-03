@@ -41,6 +41,11 @@ if [ "$signing_identity" = "-" ] && [ "${KIRI_ALLOW_ADHOC_SIGNING:-0}" != "1" ];
 fi
 
 cd "$project_root"
+for localization_file in \
+    "$project_root"/Sources/KiriApp/Resources/*.lproj/*.strings
+do
+    plutil -lint "$localization_file" >/dev/null
+done
 swift build -c release --product kiri -Xswiftc -warnings-as-errors
 
 if [ -e "$app_dir" ]; then
@@ -59,6 +64,8 @@ mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$project_root/.build/release/kiri" "$contents_dir/MacOS/kiri"
 cp "$project_root/Sources/KiriApp/Info.plist" "$contents_dir/Info.plist"
 cp "$project_root/Resources/kiri.icns" "$contents_dir/Resources/kiri.icns"
+cp -R "$project_root/Sources/KiriApp/Resources/en.lproj" "$contents_dir/Resources/en.lproj"
+cp -R "$project_root/Sources/KiriApp/Resources/zh-Hans.lproj" "$contents_dir/Resources/zh-Hans.lproj"
 
 echo "Signing kiri with: $signing_identity"
 codesign --force --deep --options runtime --sign "$signing_identity" "$app_dir"

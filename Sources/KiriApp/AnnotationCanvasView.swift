@@ -23,14 +23,14 @@ enum AnnotationColorPreset: CaseIterable, Equatable {
 
     var name: String {
         switch self {
-        case .violet: "Violet"
-        case .cherry: "Cherry"
-        case .orange: "Orange"
-        case .yellow: "Yellow"
-        case .mint: "Mint"
-        case .blue: "Blue"
-        case .white: "White"
-        case .black: "Black"
+        case .violet: L10n.text("Violet")
+        case .cherry: L10n.text("Cherry")
+        case .orange: L10n.text("Orange")
+        case .yellow: L10n.text("Yellow")
+        case .mint: L10n.text("Mint")
+        case .blue: L10n.text("Blue")
+        case .white: L10n.text("White")
+        case .black: L10n.text("Black")
         }
     }
 
@@ -63,9 +63,9 @@ enum AnnotationTextBackgroundStyle: CaseIterable, Equatable {
 
     var name: String {
         switch self {
-        case .transparent: "Transparent"
-        case .dark: "Dark"
-        case .light: "Light"
+        case .transparent: L10n.text("Transparent")
+        case .dark: L10n.text("Dark")
+        case .light: L10n.text("Light")
         }
     }
 
@@ -85,9 +85,9 @@ enum MosaicIntensityPreset: CaseIterable, Equatable {
 
     var name: String {
         switch self {
-        case .soft: "Soft"
-        case .standard: "Standard"
-        case .strong: "Strong"
+        case .soft: L10n.text("Soft")
+        case .standard: L10n.text("Standard")
+        case .strong: L10n.text("Strong")
         }
     }
 
@@ -118,7 +118,7 @@ private enum AnnotationSelectionInteraction {
 private final class InlineAnnotationTextView: NSTextView {
     var onCommit: (() -> Void)?
     var onCancel: (() -> Void)?
-    var placeholder = "Type something…"
+    var placeholder = L10n.text("Type something…")
 
     override func doCommand(by selector: Selector) {
         if selector == #selector(NSResponder.insertNewline(_:)) {
@@ -951,7 +951,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         editor.layer?.cornerRadius = 7
         editor.layer?.cornerCurve = .continuous
         editor.layer?.borderWidth = 1
-        editor.setAccessibilityLabel("Annotation text")
+        editor.setAccessibilityLabel(L10n.text("Annotation text"))
         editor.onCommit = { [weak self] in
             self?.commitTextEditing()
             self?.onConfirmRequested?()

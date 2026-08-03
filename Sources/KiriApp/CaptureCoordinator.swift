@@ -8,6 +8,8 @@ struct CapturedDisplay {
     let image: CGImage
     let screenFrame: CGRect
     let windowRectsFrontToBack: [CGRect]
+    let displayID: CGDirectDisplayID
+    let backingScale: CGFloat
 }
 
 enum CaptureCoordinatorError: LocalizedError {
@@ -18,11 +20,11 @@ enum CaptureCoordinatorError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .permissionRestartRequired:
-            "Screen Recording access was granted. Quit and reopen kiri once to finish enabling capture."
+            L10n.text("Screen Recording access was granted. Quit and reopen Kiri once to finish enabling capture.")
         case .permissionSettingsRequired:
-            "Screen Recording is off. Enable kiri in System Settings, then quit and reopen it once."
+            L10n.text("Screen Recording is off. Enable Kiri in System Settings, then quit and reopen it once.")
         case .displayUnavailable:
-            "The active display could not be captured."
+            L10n.text("The active display could not be captured.")
         }
     }
 }
@@ -113,7 +115,9 @@ final class CaptureCoordinator {
         return CapturedDisplay(
             image: image,
             screenFrame: screen.frame,
-            windowRectsFrontToBack: windowRects
+            windowRectsFrontToBack: windowRects,
+            displayID: displayID,
+            backingScale: backingScale
         )
     }
 
@@ -154,7 +158,9 @@ final class CaptureCoordinator {
         return CapturedDisplay(
             image: image,
             screenFrame: screen.frame,
-            windowRectsFrontToBack: windows
+            windowRectsFrontToBack: windows,
+            displayID: 0,
+            backingScale: max(screen.backingScaleFactor, 1)
         )
     }
 

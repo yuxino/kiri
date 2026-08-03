@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+@preconcurrency import AVFoundation
 import Carbon.HIToolbox
 import Combine
 import KiriCore
@@ -10,6 +11,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var hasLoadedLibrary = false
     @Published private(set) var libraryRevision = 0
     @Published private(set) var isCaptureStarting = false
+    @Published private(set) var isRecordingStarting = false
+    @Published private(set) var isRecording = false
+    @Published private(set) var isRecordingPaused = false
+    @Published private(set) var isRecordingTransitioning = false
+    @Published private(set) var isRecordingFinalizing = false
+    @Published private(set) var recordingElapsed: TimeInterval = 0
+    @Published private(set) var gifConversionAssetIDs: Set<UUID> = []
     @Published private(set) var notice: AppNotice?
     @Published var searchQuery = ""
     @Published var showingTrash = false
@@ -30,6 +38,17 @@ final class AppModel: ObservableObject {
     private var overlayController: SelectionOverlayController?
     private var editorController: EditorWindowController?
     private var pinnedControllers: [UUID: PinnedImageController] = [:]
+    private var regionRecorder: RegionRecorder?
+    private var recordingCountdownController: RecordingCountdownController?
+    private var recordingControlPanelController: RecordingControlPanelController?
+    private var recordingClickHighlighterController: RecordingClickHighlighterController?
+    private var recordingClockTask: Task<Void, Never>?
+    private var recordingStartedAt: Date?
+    private var recordingElapsedBeforeCurrentSegment: TimeInterval = 0
+    private var recordingConfiguration: RegionRecordingConfiguration?
+    private var recordingSegments: [RecordedMedia] = []
+    private var recordingSourceApplication: String?
+    private var recordingReturnApplication: NSRunningApplication?
     private var hasStarted = false
 
     init() {
@@ -51,16 +70,35 @@ final class AppModel: ObservableObject {
         CaptureShortcut.kiriCapture.displayLabel
     }
 
+    var recordingElapsedLabel: String {
+        RecordingPolicy.elapsedLabel(recordingElapsed)
+    }
+
+    var hasRecordingSession: Bool {
+        isRecording || isRecordingPaused || isRecordingTransitioning
+    }
+
+    var captureIsUnavailable: Bool {
+        isCaptureStarting
+            || isRecordingStarting
+            || isRecording
+            || isRecordingPaused
+            || isRecordingTransitioning
+            || isRecordingFinalizing
+    }
+
     var capturePermissionRecoveryLabel: String? {
         switch capturePermissionRecoveryAction {
         case .openSettings:
-            "Open Settings"
+            L10n.text("Open Settings")
         case .quitKiri:
-            "Quit Kiri"
+            L10n.text("Quit Kiri")
         case .openAccessibilitySettings:
-            "Open Accessibility Settings"
+            L10n.text("Open Accessibility Settings")
         case .openInputMonitoringSettings:
-            "Open Input Monitoring Settings"
+            L10n.text("Open Input Monitoring Settings")
+        case .openMicrophoneSettings:
+            L10n.text("Open Microphone Settings")
         case nil:
             nil
         }
@@ -87,17 +125,21 @@ final class AppModel: ObservableObject {
     }
 
     func startCapture() {
-        guard overlayController == nil, !isCaptureStarting else { return }
+        guard overlayController == nil, !captureIsUnavailable else { return }
         isCaptureStarting = true
         errorMessage = nil
-        let frontmostApplication = NSWorkspace.shared.frontmostApplication
-        let isKiriFrontmost = frontmostApplication?.processIdentifier
+        let initialFrontmostApplication = NSWorkspace.shared.frontmostApplication
+        let isKiriFrontmost = initialFrontmostApplication?.processIdentifier
             == ProcessInfo.processInfo.processIdentifier
-        let sourceApplication = isKiriFrontmost ? nil : frontmostApplication?.localizedName
-        let hiddenWindows = hideCaptureOriginWindowsIfNeeded(frontmostApplication)
+        let hiddenWindows = hideKiriLibraryWindows()
         Task {
             defer { isCaptureStarting = false }
             do {
+                let returnApplication = await resolveCaptureReturnApplication(
+                    initialFrontmostApplication,
+                    wasKiriFrontmost: isKiriFrontmost
+                )
+                let sourceApplication = returnApplication?.localizedName
                 if !hiddenWindows.isEmpty {
                     try? await Task.sleep(for: .milliseconds(120))
                 }
@@ -107,34 +149,368 @@ final class AppModel: ObservableObject {
                 controller.present(
                     onComplete: { [weak self] image, action in
                         self?.overlayController = nil
-                        self?.restoreCaptureOriginWindows(hiddenWindows)
+                        self?.finishCapturePresentation(
+                            returnApplication: returnApplication,
+                            hiddenWindows: hiddenWindows,
+                            action: action
+                        )
                         self?.completeCapture(
                             image: image,
                             action: action,
                             sourceApplication: sourceApplication
                         )
                     },
+                    onRecord: { [weak self] region, options in
+                        self?.overlayController = nil
+                        self?.keepKiriLibraryHidden(hiddenWindows)
+                        self?.activate(returnApplication)
+                        self?.beginRegionRecording(
+                            capture: capture,
+                            region: region,
+                            options: options,
+                            sourceApplication: sourceApplication,
+                            returnApplication: returnApplication
+                        )
+                    },
                     onCancel: { [weak self] in
                         self?.overlayController = nil
-                        self?.restoreCaptureOriginWindows(hiddenWindows)
+                        self?.cancelCapturePresentation(
+                            initialApplication: initialFrontmostApplication,
+                            returnApplication: returnApplication,
+                            hiddenWindows: hiddenWindows
+                        )
                     }
                 )
             } catch let error as CaptureCoordinatorError {
-                restoreCaptureOriginWindows(hiddenWindows)
+                cancelCapturePresentation(
+                    initialApplication: initialFrontmostApplication,
+                    returnApplication: initialFrontmostApplication,
+                    hiddenWindows: hiddenWindows
+                )
                 handleCaptureCoordinatorError(error)
             } catch {
-                restoreCaptureOriginWindows(hiddenWindows)
+                cancelCapturePresentation(
+                    initialApplication: initialFrontmostApplication,
+                    returnApplication: initialFrontmostApplication,
+                    hiddenWindows: hiddenWindows
+                )
                 errorMessage = error.localizedDescription
             }
         }
     }
 
-    private func hideCaptureOriginWindowsIfNeeded(
-        _ frontmostApplication: NSRunningApplication?
-    ) -> [NSWindow] {
-        guard frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier else {
-            return []
+    private func beginRegionRecording(
+        capture: CapturedDisplay,
+        region: CGRect,
+        options: RecordingOptions,
+        sourceApplication: String?,
+        returnApplication: NSRunningApplication?
+    ) {
+        guard regionRecorder == nil, !captureIsUnavailable else { return }
+        recordingSourceApplication = sourceApplication
+        recordingReturnApplication = returnApplication
+        isRecordingStarting = true
+        errorMessage = nil
+        Task {
+            do {
+                var effectiveOptions = options.normalized
+                if #unavailable(macOS 15.0) {
+                    effectiveOptions.capturesMicrophone = false
+                }
+                if effectiveOptions.capturesMicrophone {
+                    try await ensureMicrophonePermission()
+                }
+                if effectiveOptions.usesCountdown {
+                    let countdown = RecordingCountdownController()
+                    recordingCountdownController = countdown
+                    let shouldStart = await countdown.run(
+                        screenFrame: capture.screenFrame,
+                        region: region
+                    )
+                    if recordingCountdownController === countdown {
+                        recordingCountdownController = nil
+                    }
+                    guard shouldStart else {
+                        isRecordingStarting = false
+                        recordingSourceApplication = nil
+                        return
+                    }
+                }
+
+                let recorder = RegionRecorder()
+                recordingConfiguration = RegionRecordingConfiguration(
+                    displayID: capture.displayID,
+                    sourceRect: region,
+                    backingScale: capture.backingScale,
+                    options: effectiveOptions,
+                    screenFrame: capture.screenFrame
+                )
+                recordingSegments = []
+                recordingElapsedBeforeCurrentSegment = 0
+                prepareRecordingClickHighlighter(
+                    screenFrame: capture.screenFrame,
+                    region: region,
+                    enabled: effectiveOptions.highlightsClicks
+                )
+                prepareRecordingControlPanel(screenFrame: capture.screenFrame)
+                regionRecorder = recorder
+                try await recorder.start(
+                    displayID: capture.displayID,
+                    sourceRect: region,
+                    backingScale: capture.backingScale,
+                    options: effectiveOptions,
+                    exceptedWindowIDs: recordingClickHighlighterController?.exceptedWindowIDs ?? []
+                )
+                guard regionRecorder === recorder else { return }
+                isRecordingStarting = false
+                isRecording = true
+                isRecordingPaused = false
+                isRecordingTransitioning = false
+                recordingElapsed = 0
+                recordingStartedAt = Date()
+                startRecordingClock()
+                updateRecordingControlPanel()
+                recordingClickHighlighterController?.setActive(true)
+                activate(recordingReturnApplication)
+                showNotice(title: L10n.text("Recording Started"), symbol: "record.circle.fill")
+            } catch let error as RecordingAccessError {
+                resetRecordingSession()
+                errorMessage = error.localizedDescription
+                capturePermissionRecoveryAction = .openMicrophoneSettings
+            } catch {
+                resetRecordingSession()
+                errorMessage = error.localizedDescription
+            }
         }
+    }
+
+    private func ensureMicrophonePermission() async throws {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            return
+        case .notDetermined:
+            guard await AVCaptureDevice.requestAccess(for: .audio) else {
+                throw RecordingAccessError.microphonePermissionDenied
+            }
+        case .denied, .restricted:
+            throw RecordingAccessError.microphonePermissionDenied
+        @unknown default:
+            throw RecordingAccessError.microphonePermissionDenied
+        }
+    }
+
+    func toggleRecordingPause() {
+        if isRecordingPaused {
+            resumeRecording()
+        } else {
+            pauseRecording()
+        }
+    }
+
+    func pauseRecording() {
+        guard isRecording,
+              !isRecordingTransitioning,
+              let recorder = regionRecorder else { return }
+        isRecording = false
+        isRecordingTransitioning = true
+        recordingClickHighlighterController?.setActive(false)
+        stopRecordingClock()
+        updateRecordingControlPanel()
+        Task {
+            do {
+                let media = try await recorder.stop()
+                recordingSegments.append(media)
+                recordingElapsedBeforeCurrentSegment = recordingSegments.reduce(0) {
+                    $0 + $1.duration
+                }
+                recordingElapsed = recordingElapsedBeforeCurrentSegment
+                if regionRecorder === recorder {
+                    regionRecorder = nil
+                }
+                recordingStartedAt = nil
+                isRecordingPaused = true
+                isRecordingTransitioning = false
+                updateRecordingControlPanel()
+                showNotice(title: L10n.text("Recording Paused"), symbol: "pause.circle.fill")
+            } catch {
+                failRecordingSession(with: error)
+            }
+        }
+    }
+
+    func resumeRecording() {
+        guard isRecordingPaused,
+              !isRecordingTransitioning,
+              let configuration = recordingConfiguration else { return }
+        isRecordingTransitioning = true
+        updateRecordingControlPanel()
+        let recorder = RegionRecorder()
+        regionRecorder = recorder
+        Task {
+            do {
+                try await recorder.start(
+                    displayID: configuration.displayID,
+                    sourceRect: configuration.sourceRect,
+                    backingScale: configuration.backingScale,
+                    options: configuration.options,
+                    exceptedWindowIDs: recordingClickHighlighterController?.exceptedWindowIDs ?? []
+                )
+                guard regionRecorder === recorder else { return }
+                isRecordingPaused = false
+                isRecordingTransitioning = false
+                isRecording = true
+                recordingStartedAt = Date()
+                startRecordingClock()
+                updateRecordingControlPanel()
+                recordingClickHighlighterController?.setActive(true)
+                activate(recordingReturnApplication)
+                showNotice(title: L10n.text("Recording Resumed"), symbol: "play.circle.fill")
+            } catch {
+                if regionRecorder === recorder {
+                    regionRecorder = nil
+                }
+                isRecordingTransitioning = false
+                isRecordingPaused = true
+                updateRecordingControlPanel()
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func stopRecording() {
+        guard (isRecording || isRecordingPaused), !isRecordingTransitioning else { return }
+        let activeRecorder = isRecording ? regionRecorder : nil
+        isRecording = false
+        isRecordingPaused = false
+        isRecordingFinalizing = true
+        recordingClickHighlighterController?.setActive(false)
+        stopRecordingClock()
+        updateRecordingControlPanel()
+        activate(recordingReturnApplication)
+        Task {
+            var segments = recordingSegments
+            do {
+                if let activeRecorder {
+                    let media = try await activeRecorder.stop()
+                    segments.append(media)
+                }
+                regionRecorder = nil
+                let finalMedia = try await RecordingSegmentMerger.merge(segments)
+                defer {
+                    let temporaryURLs = Set(segments.map(\.fileURL) + [finalMedia.fileURL])
+                    temporaryURLs.forEach { try? FileManager.default.removeItem(at: $0) }
+                }
+                _ = try await library.importFile(
+                    at: finalMedia.fileURL,
+                    kind: .video,
+                    fileExtension: "mp4",
+                    pixelWidth: finalMedia.pixelWidth,
+                    pixelHeight: finalMedia.pixelHeight,
+                    duration: finalMedia.duration,
+                    sourceApplication: recordingSourceApplication
+                )
+                await refresh()
+                showNotice(title: L10n.text("Recording Saved"), symbol: "video.fill")
+            } catch {
+                segments.forEach { try? FileManager.default.removeItem(at: $0.fileURL) }
+                errorMessage = error.localizedDescription
+            }
+            resetRecordingSession()
+        }
+    }
+
+    private func startRecordingClock() {
+        recordingClockTask?.cancel()
+        recordingClockTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard let self, let recordingStartedAt = self.recordingStartedAt else { return }
+                self.recordingElapsed = self.recordingElapsedBeforeCurrentSegment
+                    + Date().timeIntervalSince(recordingStartedAt)
+                self.updateRecordingControlPanel()
+            }
+        }
+    }
+
+    private func stopRecordingClock() {
+        recordingClockTask?.cancel()
+        recordingClockTask = nil
+    }
+
+    private func prepareRecordingControlPanel(screenFrame: CGRect) {
+        closeRecordingControlPanel()
+        let controller = RecordingControlPanelController(
+            onPauseResume: { [weak self] in self?.toggleRecordingPause() },
+            onStop: { [weak self] in self?.stopRecording() }
+        )
+        recordingControlPanelController = controller
+        controller.show(screenFrame: screenFrame)
+        updateRecordingControlPanel()
+    }
+
+    private func updateRecordingControlPanel() {
+        recordingControlPanelController?.update(
+            elapsed: recordingElapsedLabel,
+            isPaused: isRecordingPaused,
+            isBusy: isRecordingStarting || isRecordingTransitioning || isRecordingFinalizing
+        )
+    }
+
+    private func closeRecordingControlPanel() {
+        recordingControlPanelController?.close()
+        recordingControlPanelController = nil
+    }
+
+    private func prepareRecordingClickHighlighter(
+        screenFrame: CGRect,
+        region: CGRect,
+        enabled: Bool
+    ) {
+        closeRecordingClickHighlighter()
+        guard enabled else { return }
+        let selectedFrame = CGRect(
+            x: screenFrame.minX + region.minX,
+            y: screenFrame.maxY - region.maxY,
+            width: region.width,
+            height: region.height
+        ).standardized
+        recordingClickHighlighterController = RecordingClickHighlighterController(
+            anchorPoint: CGPoint(x: selectedFrame.midX, y: selectedFrame.midY)
+        )
+    }
+
+    private func closeRecordingClickHighlighter() {
+        recordingClickHighlighterController?.close()
+        recordingClickHighlighterController = nil
+    }
+
+    private func failRecordingSession(with error: Error) {
+        recordingSegments.forEach { try? FileManager.default.removeItem(at: $0.fileURL) }
+        errorMessage = error.localizedDescription
+        resetRecordingSession()
+    }
+
+    private func resetRecordingSession() {
+        stopRecordingClock()
+        regionRecorder = nil
+        recordingCountdownController = nil
+        closeRecordingControlPanel()
+        closeRecordingClickHighlighter()
+        isRecordingStarting = false
+        isRecording = false
+        isRecordingPaused = false
+        isRecordingTransitioning = false
+        isRecordingFinalizing = false
+        recordingElapsed = 0
+        recordingElapsedBeforeCurrentSegment = 0
+        recordingStartedAt = nil
+        recordingConfiguration = nil
+        recordingSegments = []
+        recordingSourceApplication = nil
+        recordingReturnApplication = nil
+    }
+
+    private func hideKiriLibraryWindows() -> [NSWindow] {
         let windows = NSApplication.shared.windows.filter { window in
             window.isVisible && window.level == .normal && window.styleMask.contains(.titled)
         }
@@ -142,10 +518,55 @@ final class AppModel: ObservableObject {
         return windows
     }
 
-    private func restoreCaptureOriginWindows(_ windows: [NSWindow]) {
-        guard !windows.isEmpty else { return }
-        windows.forEach { $0.orderFront(nil) }
-        NSApplication.shared.activate(ignoringOtherApps: true)
+    private func resolveCaptureReturnApplication(
+        _ initialApplication: NSRunningApplication?,
+        wasKiriFrontmost: Bool
+    ) async -> NSRunningApplication? {
+        guard wasKiriFrontmost else { return initialApplication }
+        NSApplication.shared.hide(nil)
+        try? await Task.sleep(for: .milliseconds(100))
+        let application = NSWorkspace.shared.frontmostApplication
+        NSApplication.shared.unhideWithoutActivation()
+        guard application?.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            return nil
+        }
+        return application
+    }
+
+    private func finishCapturePresentation(
+        returnApplication: NSRunningApplication?,
+        hiddenWindows: [NSWindow],
+        action: CaptureSessionAction
+    ) {
+        keepKiriLibraryHidden(hiddenWindows)
+        if case .copy = action {
+            activate(returnApplication)
+        }
+    }
+
+    private func cancelCapturePresentation(
+        initialApplication: NSRunningApplication?,
+        returnApplication: NSRunningApplication?,
+        hiddenWindows: [NSWindow]
+    ) {
+        let wasKiriFrontmost = initialApplication?.processIdentifier
+            == ProcessInfo.processInfo.processIdentifier
+        if wasKiriFrontmost {
+            hiddenWindows.forEach { $0.orderFront(nil) }
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        } else {
+            keepKiriLibraryHidden(hiddenWindows)
+            activate(returnApplication)
+        }
+    }
+
+    private func keepKiriLibraryHidden(_ windows: [NSWindow]) {
+        windows.forEach { $0.orderOut(nil) }
+    }
+
+    private func activate(_ application: NSRunningApplication?) {
+        guard let application, !application.isTerminated else { return }
+        application.activate(options: [])
     }
 
     func performCapturePermissionRecovery() {
@@ -169,6 +590,13 @@ final class AppModel: ObservableObject {
         case .openInputMonitoringSettings:
             guard let url = URL(
                 string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+            ) else {
+                return
+            }
+            NSWorkspace.shared.open(url)
+        case .openMicrophoneSettings:
+            guard let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
             ) else {
                 return
             }
@@ -200,7 +628,7 @@ final class AppModel: ObservableObject {
             do {
                 try await library.moveToTrash(id: asset.id)
                 await refresh()
-                showNotice(title: "Moved to Trash", symbol: "trash")
+                showNotice(title: L10n.text("Moved to Trash"), symbol: "trash")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -212,7 +640,7 @@ final class AppModel: ObservableObject {
             do {
                 try await library.restore(id: asset.id)
                 await refresh()
-                showNotice(title: "Restored to Library", symbol: "arrow.uturn.backward")
+                showNotice(title: L10n.text("Restored to Library"), symbol: "arrow.uturn.backward")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -224,7 +652,7 @@ final class AppModel: ObservableObject {
             do {
                 try await library.permanentlyDelete(id: asset.id)
                 await refresh()
-                showNotice(title: "Deleted Permanently", symbol: "trash.fill")
+                showNotice(title: L10n.text("Deleted Permanently"), symbol: "trash.fill")
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -233,13 +661,13 @@ final class AppModel: ObservableObject {
 
     func copy(_ asset: CaptureAsset) {
         guard let image = NSImage(contentsOf: assetFileURL(asset)) else {
-            errorMessage = "The capture file is unavailable."
+            errorMessage = L10n.text("The capture file is unavailable.")
             return
         }
         if !writeToClipboard(image) {
-            errorMessage = "Could not copy the capture."
+            errorMessage = L10n.text("Could not copy the capture.")
         } else {
-            showNotice(title: "Copied to Clipboard", symbol: "checkmark.circle.fill")
+            showNotice(title: L10n.text("Copied to Clipboard"), symbol: "checkmark.circle.fill")
         }
     }
 
@@ -249,6 +677,40 @@ final class AppModel: ObservableObject {
 
     func reveal(_ asset: CaptureAsset) {
         NSWorkspace.shared.activateFileViewerSelecting([assetFileURL(asset)])
+    }
+
+    func canConvertToGIF(_ asset: CaptureAsset) -> Bool {
+        asset.kind == .video && RecordingPolicy.isGIFEligible(duration: asset.duration)
+    }
+
+    func isConvertingToGIF(_ asset: CaptureAsset) -> Bool {
+        gifConversionAssetIDs.contains(asset.id)
+    }
+
+    func convertToGIF(_ asset: CaptureAsset) {
+        guard canConvertToGIF(asset), !gifConversionAssetIDs.contains(asset.id) else { return }
+        gifConversionAssetIDs.insert(asset.id)
+        let sourceURL = assetFileURL(asset)
+        Task {
+            do {
+                let exported = try await GIFExporter.export(videoAt: sourceURL)
+                defer { try? FileManager.default.removeItem(at: exported.fileURL) }
+                _ = try await library.importFile(
+                    at: exported.fileURL,
+                    kind: .gif,
+                    fileExtension: "gif",
+                    pixelWidth: exported.pixelWidth,
+                    pixelHeight: exported.pixelHeight,
+                    duration: exported.duration,
+                    sourceApplication: asset.sourceApplication
+                )
+                await refresh()
+                showNotice(title: L10n.text("GIF Created"), symbol: "sparkles.rectangle.stack")
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            gifConversionAssetIDs.remove(asset.id)
+        }
     }
 
     func assetFileURL(_ asset: CaptureAsset) -> URL {
@@ -267,7 +729,7 @@ final class AppModel: ObservableObject {
             if !writeToClipboard(imageObject) {
                 errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
             } else {
-                showNotice(title: "Copied to Clipboard", symbol: "checkmark.circle.fill")
+                showNotice(title: L10n.text("Copied to Clipboard"), symbol: "checkmark.circle.fill")
             }
         }
 
@@ -275,7 +737,7 @@ final class AppModel: ObservableObject {
             guard let data = await Task.detached(priority: .utility, operation: {
                 Self.pngData(for: image)
             }).value else {
-                errorMessage = "Could not encode the capture as PNG."
+                errorMessage = L10n.text("Could not encode the capture as PNG.")
                 return
             }
             do {
@@ -355,7 +817,7 @@ final class AppModel: ObservableObject {
             guard let data = await Task.detached(priority: .utility, operation: {
                 Self.pngData(for: image)
             }).value else {
-                errorMessage = "Could not encode the capture as PNG."
+                errorMessage = L10n.text("Could not encode the capture as PNG.")
                 return
             }
             do {
@@ -368,7 +830,7 @@ final class AppModel: ObservableObject {
                     if !writeToClipboard(imageObject) {
                         errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
                     } else {
-                        showNotice(title: "Copied to Clipboard", symbol: "checkmark.circle.fill")
+                        showNotice(title: L10n.text("Copied to Clipboard"), symbol: "checkmark.circle.fill")
                     }
                 }
                 await refresh()
@@ -386,7 +848,7 @@ final class AppModel: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try data.write(to: url, options: [.atomic])
-            showNotice(title: "Saved", symbol: "checkmark.circle.fill")
+            showNotice(title: L10n.text("Saved"), symbol: "checkmark.circle.fill")
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -455,7 +917,11 @@ final class AppModel: ObservableObject {
             guard let library = try? AssetLibrary(rootURL: fallback) else {
                 preconditionFailure("kiri could not create its local capture library")
             }
-            return (fallback, library, "Using a temporary library: \(error.localizedDescription)")
+            return (
+                fallback,
+                library,
+                L10n.format("Using a temporary library: %@", error.localizedDescription)
+            )
         }
     }
 
@@ -466,12 +932,29 @@ enum CapturePermissionRecoveryAction {
     case quitKiri
     case openAccessibilitySettings
     case openInputMonitoringSettings
+    case openMicrophoneSettings
+}
+
+enum RecordingAccessError: LocalizedError {
+    case microphonePermissionDenied
+
+    var errorDescription: String? {
+        L10n.text("Microphone access is off. Enable it in System Settings to record your voice.")
+    }
 }
 
 struct AppNotice: Identifiable, Equatable {
     let id = UUID()
     let title: String
     let symbol: String
+}
+
+private struct RegionRecordingConfiguration {
+    let displayID: CGDirectDisplayID
+    let sourceRect: CGRect
+    let backingScale: CGFloat
+    let options: RecordingOptions
+    let screenFrame: CGRect
 }
 
 private struct StoredCapture {
@@ -491,7 +974,7 @@ private enum CaptureExportError: LocalizedError {
     case clipboardWriteFailed
 
     var errorDescription: String? {
-        "Could not copy the capture to the clipboard."
+        L10n.text("Could not copy the capture to the clipboard.")
     }
 }
 
@@ -605,11 +1088,11 @@ private enum GlobalShortcutError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .accessibilityPermissionRequired:
-            "Enable Kiri in Accessibility settings, then quit and reopen it to reserve ⇧⌘A exclusively."
+            L10n.text("Enable Kiri in Accessibility settings, then quit and reopen it to reserve ⇧⌘A exclusively.")
         case .inputMonitoringPermissionRequired:
-            "Enable Kiri in Input Monitoring settings, then quit and reopen it to reserve ⇧⌘A exclusively."
+            L10n.text("Enable Kiri in Input Monitoring settings, then quit and reopen it to reserve ⇧⌘A exclusively.")
         case .eventTapCreationFailed:
-            "Kiri could not create the exclusive ⇧⌘A keyboard filter. Check Input Monitoring and Accessibility, then quit and reopen Kiri."
+            L10n.text("Kiri could not create the exclusive ⇧⌘A keyboard filter. Check Input Monitoring and Accessibility, then quit and reopen Kiri.")
         }
     }
 }

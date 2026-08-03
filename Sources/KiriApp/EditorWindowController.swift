@@ -71,13 +71,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         let tools: [(AnnotationTool, String, String, String, Selector)] = [
-            (.select, "cursorarrow", "Select (V)", "v", #selector(useSelect)),
-            (.pen, "pencil.tip", "Pen (P)", "p", #selector(usePen)),
-            (.rectangle, "rectangle.dashed", "Rectangle (R)", "r", #selector(useRectangle)),
-            (.line, "line.diagonal", "Line (L)", "l", #selector(useLine)),
-            (.arrow, "arrow.up.right", "Arrow (A)", "a", #selector(useArrow)),
-            (.text, "textformat", "Text (T)", "t", #selector(useText)),
-            (.mosaic, "square.grid.3x3.fill", "Mosaic (M)", "m", #selector(useMosaic))
+            (.select, "cursorarrow", L10n.text("Select (V)"), "v", #selector(useSelect)),
+            (.pen, "pencil.tip", L10n.text("Pen (P)"), "p", #selector(usePen)),
+            (.rectangle, "rectangle.dashed", L10n.text("Rectangle (R)"), "r", #selector(useRectangle)),
+            (.line, "line.diagonal", L10n.text("Line (L)"), "l", #selector(useLine)),
+            (.arrow, "arrow.up.right", L10n.text("Arrow (A)"), "a", #selector(useArrow)),
+            (.text, "textformat", L10n.text("Text (T)"), "t", #selector(useText)),
+            (.mosaic, "square.grid.3x3.fill", L10n.text("Mosaic (M)"), "m", #selector(useMosaic))
         ]
         for (tool, symbol, label, keyEquivalent, action) in tools {
             let button = CaptureActionButton(
@@ -118,7 +118,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         toolbar.addArrangedSubview(colorGroupContainer)
         let textBackgroundButton = CaptureActionButton(
             symbol: "character.textbox",
-            label: "Text Background",
+            label: L10n.text("Text Background"),
             style: .tool,
             target: self,
             action: #selector(showTextBackgroundMenu(_:))
@@ -127,7 +127,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         toolbar.addArrangedSubview(textBackgroundButton)
         let mosaicIntensityButton = CaptureActionButton(
             symbol: "square.grid.3x3.fill",
-            label: "Mosaic Strength",
+            label: L10n.text("Mosaic Strength"),
             style: .tool,
             target: self,
             action: #selector(showMosaicIntensityMenu(_:))
@@ -138,7 +138,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
         let undoButton = historyButton(
             symbol: "arrow.uturn.backward",
-            label: "Undo (⌘Z)",
+            label: L10n.text("Undo (⌘Z)"),
             action: #selector(undo),
             keyEquivalent: "z",
             modifiers: [.command]
@@ -148,7 +148,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
         let redoButton = historyButton(
             symbol: "arrow.uturn.forward",
-            label: "Redo (⇧⌘Z)",
+            label: L10n.text("Redo (⇧⌘Z)"),
             action: #selector(redo),
             keyEquivalent: "z",
             modifiers: [.command, .shift]
@@ -158,7 +158,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
         let clearButton = CaptureActionButton(
             symbol: "trash",
-            label: "Clear Annotations",
+            label: L10n.text("Clear Annotations"),
             style: .secondary,
             target: self,
             action: #selector(clearAnnotations)
@@ -170,7 +170,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
         let cancelButton = CaptureActionButton(
             symbol: "xmark.circle",
-            label: "Cancel (Esc)",
+            label: L10n.text("Cancel (Esc)"),
             style: .secondary,
             target: self,
             action: #selector(cancel)
@@ -181,7 +181,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         toolbar.addArrangedSubview(
             CaptureActionButton(
                 symbol: "square.and.arrow.down",
-                label: "Save As…",
+                label: L10n.text("Save As…"),
                 style: .secondary,
                 target: self,
                 action: #selector(save)
@@ -189,7 +189,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         )
         let copyButton = CaptureActionButton(
             symbol: "doc.on.doc",
-            label: "Copy",
+            label: L10n.text("Copy"),
             style: .primary,
             showsTitle: true,
             target: self,
@@ -250,7 +250,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         container.alignment = .centerY
         container.spacing = 5
 
-        let title = NSTextField(labelWithString: "Line")
+        let title = NSTextField(labelWithString: L10n.text("Line"))
         title.font = .systemFont(ofSize: 10, weight: .semibold)
         title.textColor = .secondaryLabelColor
 
@@ -263,7 +263,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         )
         slider.isContinuous = true
         slider.controlSize = .small
-        slider.setAccessibilityLabel("Tool size")
+        slider.setAccessibilityLabel(L10n.text("Tool size"))
         slider.translatesAutoresizingMaskIntoConstraints = false
         slider.widthAnchor.constraint(equalToConstant: 92).isActive = true
         slider.onTrackingBegan = { [weak self] in
@@ -336,7 +336,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     private func updateTextBackgroundControl() {
         let style = canvas.textBackgroundStyle
-        let label = "Text background: \(style.name)"
+        let label = L10n.format("Text background: %@", style.name)
         textBackgroundButton?.setToolSelected(style != .transparent)
         textBackgroundButton?.toolTip = label
         textBackgroundButton?.setAccessibilityLabel(label)
@@ -344,7 +344,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     private func updateMosaicIntensityControl() {
         let intensity = canvas.mosaicIntensity
-        let label = "Mosaic strength: \(intensity.name)"
+        let label = L10n.format("Mosaic strength: %@", intensity.name)
         mosaicIntensityButton?.toolTip = label
         mosaicIntensityButton?.setAccessibilityLabel(label)
     }
@@ -352,15 +352,15 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private func configureSizeControl(for tool: AnnotationTool) {
         let configuration: (String, Double, Double, CGFloat, String) = switch tool {
         case .select:
-            ("Select", 0, 1, 0, "")
+            (L10n.text("Select"), 0, 1, 0, "")
         case .pen:
-            ("Brush", 1, 24, canvas.penWidth, "px")
+            (L10n.text("Brush"), 1, 24, canvas.penWidth, "px")
         case .rectangle, .line, .arrow:
-            ("Line", 1, 16, canvas.shapeWidth, "px")
+            (L10n.text("Line"), 1, 16, canvas.shapeWidth, "px")
         case .text:
-            ("Font", 12, 64, canvas.textFontSize, "pt")
+            (L10n.text("Font"), 12, 64, canvas.textFontSize, "pt")
         case .mosaic:
-            ("Brush", 12, 120, canvas.mosaicBrushDiameter, "px")
+            (L10n.text("Brush"), 12, 120, canvas.mosaicBrushDiameter, "px")
         }
         sizeControlTitle?.stringValue = configuration.0
         sizeSlider?.minValue = configuration.1
@@ -425,9 +425,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             String,
             Selector
         )] = [
-            (.transparent, "Transparent", "circle.slash", #selector(useTransparentTextBackground)),
-            (.dark, "Dark", "moon.fill", #selector(useDarkTextBackground)),
-            (.light, "Light", "sun.max.fill", #selector(useLightTextBackground))
+            (.transparent, L10n.text("Transparent"), "circle.slash", #selector(useTransparentTextBackground)),
+            (.dark, L10n.text("Dark"), "moon.fill", #selector(useDarkTextBackground)),
+            (.light, L10n.text("Light"), "sun.max.fill", #selector(useLightTextBackground))
         ]
         for (option, title, symbol, action) in options {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
@@ -465,9 +465,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         let menu = NSMenu()
         menu.autoenablesItems = false
         let options: [(MosaicIntensityPreset, String, Selector)] = [
-            (.soft, "Soft", #selector(useSoftMosaic)),
-            (.standard, "Standard", #selector(useStandardMosaic)),
-            (.strong, "Strong", #selector(useStrongMosaic))
+            (.soft, L10n.text("Soft"), #selector(useSoftMosaic)),
+            (.standard, L10n.text("Standard"), #selector(useStandardMosaic)),
+            (.strong, L10n.text("Strong"), #selector(useStrongMosaic))
         ]
         for (option, title, action) in options {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")

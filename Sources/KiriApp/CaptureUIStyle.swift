@@ -109,7 +109,7 @@ final class AnnotationColorSwatchButton: NSButton {
         isBordered = false
         focusRingType = .exterior
         toolTip = preset.name
-        setAccessibilityLabel("Annotation color: \(preset.name)")
+        setAccessibilityLabel(L10n.format("Annotation color: %@", preset.name))
         wantsLayer = true
         layer?.cornerRadius = 8
         layer?.cornerCurve = .continuous
