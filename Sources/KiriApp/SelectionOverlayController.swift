@@ -79,6 +79,7 @@ private final class CaptureSessionView: NSView {
     private var annotationCanvas: AnnotationCanvasView?
     private var toolbar: NSVisualEffectView?
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
+    private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
     private var undoButton: CaptureActionButton?
     private var redoButton: CaptureActionButton?
     private var clearAnnotationsItem: NSMenuItem?
@@ -346,6 +347,12 @@ private final class CaptureSessionView: NSView {
         canvas.onHistoryChange = { [weak self] canUndo, canRedo in
             self?.updateHistoryControls(canUndo: canUndo, canRedo: canRedo)
         }
+        canvas.onConfirmRequested = { [weak self] in
+            self?.complete(.copy)
+        }
+        canvas.onCancelRequested = { [weak self] in
+            self?.onCancel?()
+        }
         addSubview(canvas)
         annotationCanvas = canvas
 
@@ -354,6 +361,7 @@ private final class CaptureSessionView: NSView {
         self.toolbar = toolbar
         layoutAnnotationUI()
         updateToolButtons(selected: canvas.tool)
+        updateColorButtons(selected: canvas.colorPreset)
         updateHistoryControls(canUndo: false, canRedo: false)
         window?.makeFirstResponder(self)
         needsDisplay = true
@@ -367,6 +375,7 @@ private final class CaptureSessionView: NSView {
         toolbar?.removeFromSuperview()
         toolbar = nil
         toolButtons.removeAll()
+        colorButtons.removeAll()
         undoButton = nil
         redoButton = nil
         clearAnnotationsItem = nil
@@ -456,7 +465,13 @@ private final class CaptureSessionView: NSView {
             ),
             (.line, "line.diagonal", "Line (L)", "Line (L) — Connect two points", #selector(useLine)),
             (.arrow, "arrow.up.right", "Arrow (A)", "Arrow (A) — Point something out", #selector(useArrow)),
-            (.text, "textformat", "Text (T)", "Text (T) — Add a note", #selector(useText)),
+            (
+                .text,
+                "textformat",
+                "Text (T)",
+                "Text (T) — Click the image, type, then press Return",
+                #selector(useText)
+            ),
             (.mosaic, "square.grid.3x3.fill", "Mosaic (M)", "Mosaic (M) — Hide sensitive content", #selector(useMosaic))
         ]
         for (tool, symbol, help, hoverHint, action) in tools {
@@ -474,6 +489,23 @@ private final class CaptureSessionView: NSView {
         }
         actions.addArrangedSubview(CaptureToolGroupView(content: toolGroup))
         actions.addArrangedSubview(separator())
+
+        let colorGroup = NSStackView()
+        colorGroup.orientation = .horizontal
+        colorGroup.alignment = .centerY
+        colorGroup.spacing = 1
+        for preset in AnnotationColorPreset.allCases {
+            let button = AnnotationColorSwatchButton(
+                preset: preset,
+                target: self,
+                action: #selector(selectAnnotationColor(_:))
+            )
+            colorButtons[preset] = button
+            colorGroup.addArrangedSubview(button)
+        }
+        actions.addArrangedSubview(CaptureToolGroupView(content: colorGroup))
+        actions.addArrangedSubview(separator())
+
         let undoButton = actionButton(
             symbol: "arrow.uturn.backward",
             label: "Undo (⌘Z)",
@@ -587,6 +619,12 @@ private final class CaptureSessionView: NSView {
         }
     }
 
+    private func updateColorButtons(selected: AnnotationColorPreset) {
+        for (preset, button) in colorButtons {
+            button.setColorSelected(preset == selected)
+        }
+    }
+
     private func updateHistoryControls(canUndo: Bool, canRedo: Bool) {
         undoButton?.setActionEnabled(canUndo)
         redoButton?.setActionEnabled(canRedo)
@@ -610,11 +648,13 @@ private final class CaptureSessionView: NSView {
     }
 
     @objc private func useText() {
-        guard let text = AnnotationTextPrompt.requestText() else {
-            window?.makeFirstResponder(self)
-            return
-        }
-        annotationCanvas?.beginTextPlacement(text)
+        annotationCanvas?.beginTextPlacement()
+        window?.makeFirstResponder(self)
+    }
+
+    @objc private func selectAnnotationColor(_ sender: AnnotationColorSwatchButton) {
+        annotationCanvas?.colorPreset = sender.preset
+        updateColorButtons(selected: sender.preset)
         window?.makeFirstResponder(self)
     }
 

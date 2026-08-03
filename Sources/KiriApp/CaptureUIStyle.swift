@@ -100,6 +100,106 @@ final class CaptureSparkleView: NSImageView {
     }
 }
 
+final class AnnotationColorSwatchButton: NSButton {
+    let preset: AnnotationColorPreset
+    private var selectedColor = false
+    private var hovering = false
+    private var hoverTrackingArea: NSTrackingArea?
+
+    init(
+        preset: AnnotationColorPreset,
+        target: AnyObject?,
+        action: Selector
+    ) {
+        self.preset = preset
+        super.init(frame: CGRect(x: 0, y: 0, width: 22, height: 28))
+        self.target = target
+        self.action = action
+        title = ""
+        isBordered = false
+        focusRingType = .exterior
+        toolTip = preset.name
+        setAccessibilityLabel("Annotation color: \(preset.name)")
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.cornerCurve = .continuous
+        setFrameSize(CGSize(width: 22, height: 28))
+        refreshAppearance()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        CGSize(width: 22, height: 28)
+    }
+
+    func setColorSelected(_ selected: Bool) {
+        selectedColor = selected
+        refreshAppearance()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea {
+            removeTrackingArea(hoverTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        refreshAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        refreshAppearance()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance()
+    }
+
+    private func refreshAppearance() {
+        let swatch = preset.color
+        layer?.backgroundColor = selectedColor
+            ? swatch.withAlphaComponent(0.2).cgColor
+            : (hovering ? CaptureUIColors.hoverFill.cgColor : NSColor.clear.cgColor)
+        layer?.borderWidth = selectedColor ? 1.5 : 0
+        layer?.borderColor = swatch.cgColor
+
+        let circleSize: CGFloat = selectedColor ? 12 : 10
+        let image = NSImage(size: CGSize(width: 16, height: 16), flipped: false) { rect in
+            let circle = NSBezierPath(
+                ovalIn: CGRect(
+                    x: rect.midX - circleSize / 2,
+                    y: rect.midY - circleSize / 2,
+                    width: circleSize,
+                    height: circleSize
+                )
+            )
+            swatch.setFill()
+            circle.fill()
+            NSColor.black.withAlphaComponent(0.18).setStroke()
+            circle.lineWidth = 0.75
+            circle.stroke()
+            return true
+        }
+        self.image = image
+        imagePosition = .imageOnly
+    }
+}
+
 final class CaptureActionButton: NSButton {
     enum Style {
         case tool

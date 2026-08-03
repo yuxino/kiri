@@ -8,6 +8,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private var onClose: (() -> Void)?
     private let canvas: AnnotationCanvasView
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
+    private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
     private var undoButton: CaptureActionButton?
     private var redoButton: CaptureActionButton?
     private var clearButton: CaptureActionButton?
@@ -85,6 +86,22 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         }
         toolbar.addArrangedSubview(CaptureDividerView(height: 24))
 
+        let colorGroup = NSStackView()
+        colorGroup.orientation = .horizontal
+        colorGroup.alignment = .centerY
+        colorGroup.spacing = 1
+        for preset in AnnotationColorPreset.allCases {
+            let button = AnnotationColorSwatchButton(
+                preset: preset,
+                target: self,
+                action: #selector(selectAnnotationColor(_:))
+            )
+            colorButtons[preset] = button
+            colorGroup.addArrangedSubview(button)
+        }
+        toolbar.addArrangedSubview(CaptureToolGroupView(content: colorGroup))
+        toolbar.addArrangedSubview(CaptureDividerView(height: 24))
+
         let undoButton = historyButton(
             symbol: "arrow.uturn.backward",
             label: "Undo (⌘Z)",
@@ -155,6 +172,12 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         canvas.onHistoryChange = { [weak self] canUndo, canRedo in
             self?.updateHistoryControls(canUndo: canUndo, canRedo: canRedo)
         }
+        canvas.onConfirmRequested = { [weak self] in
+            self?.copyImage()
+        }
+        canvas.onCancelRequested = { [weak self] in
+            self?.cancel()
+        }
 
         root.addSubview(toolbarSurface)
         toolbarSurface.addSubview(toolbar)
@@ -174,6 +197,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             canvas.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
         updateToolButtons(selected: canvas.tool)
+        updateColorButtons(selected: canvas.colorPreset)
         updateHistoryControls(canUndo: false, canRedo: false)
         controller.view = root
         return controller
@@ -211,6 +235,12 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         clearButton?.setActionEnabled(canUndo)
     }
 
+    private func updateColorButtons(selected: AnnotationColorPreset) {
+        for (preset, button) in colorButtons {
+            button.setColorSelected(preset == selected)
+        }
+    }
+
     @objc private func usePen() {
         canvas.tool = .pen
     }
@@ -228,8 +258,12 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     }
 
     @objc private func useText() {
-        guard let text = AnnotationTextPrompt.requestText() else { return }
-        canvas.beginTextPlacement(text)
+        canvas.beginTextPlacement()
+    }
+
+    @objc private func selectAnnotationColor(_ sender: AnnotationColorSwatchButton) {
+        canvas.colorPreset = sender.preset
+        updateColorButtons(selected: sender.preset)
     }
 
     @objc private func useMosaic() {

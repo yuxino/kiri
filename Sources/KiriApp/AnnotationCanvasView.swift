@@ -10,18 +10,65 @@ enum AnnotationTool: CaseIterable {
     case mosaic
 }
 
+enum AnnotationColorPreset: CaseIterable {
+    case violet
+    case cherry
+    case orange
+    case yellow
+    case mint
+    case blue
+    case white
+    case black
+
+    var name: String {
+        switch self {
+        case .violet: "Violet"
+        case .cherry: "Cherry"
+        case .orange: "Orange"
+        case .yellow: "Yellow"
+        case .mint: "Mint"
+        case .blue: "Blue"
+        case .white: "White"
+        case .black: "Black"
+        }
+    }
+
+    var color: NSColor {
+        switch self {
+        case .violet:
+            CaptureUIColors.accent
+        case .cherry:
+            NSColor(calibratedRed: 0.98, green: 0.28, blue: 0.43, alpha: 1)
+        case .orange:
+            NSColor(calibratedRed: 1.00, green: 0.49, blue: 0.18, alpha: 1)
+        case .yellow:
+            NSColor(calibratedRed: 1.00, green: 0.82, blue: 0.16, alpha: 1)
+        case .mint:
+            NSColor(calibratedRed: 0.16, green: 0.78, blue: 0.56, alpha: 1)
+        case .blue:
+            NSColor(calibratedRed: 0.16, green: 0.58, blue: 1.00, alpha: 1)
+        case .white:
+            .white
+        case .black:
+            NSColor(calibratedWhite: 0.08, alpha: 1)
+        }
+    }
+}
+
 private enum AnnotationMark {
-    case pen([CGPoint])
-    case rectangle(CGRect)
-    case line(CGPoint, CGPoint)
-    case arrow(CGPoint, CGPoint)
-    case text(String, CGPoint)
+    case pen([CGPoint], AnnotationColorPreset)
+    case rectangle(CGRect, AnnotationColorPreset)
+    case line(CGPoint, CGPoint, AnnotationColorPreset)
+    case arrow(CGPoint, CGPoint, AnnotationColorPreset)
+    case text(String, CGPoint, AnnotationColorPreset)
     case mosaic(CGRect)
 }
 
-final class AnnotationCanvasView: NSView {
+final class AnnotationCanvasView: NSView, NSTextFieldDelegate {
     let image: CGImage
     var onToolChange: ((AnnotationTool) -> Void)?
+    var onConfirmRequested: (() -> Void)?
+    var onCancelRequested: (() -> Void)?
     var onHistoryChange: ((_ canUndo: Bool, _ canRedo: Bool) -> Void)? {
         didSet {
             publishHistoryState()
@@ -29,7 +76,15 @@ final class AnnotationCanvasView: NSView {
     }
     var tool: AnnotationTool = .rectangle {
         didSet {
+            if oldValue == .text, tool != .text {
+                commitTextEditing()
+            }
             onToolChange?(tool)
+            needsDisplay = true
+        }
+    }
+    var colorPreset: AnnotationColorPreset = .violet {
+        didSet {
             needsDisplay = true
         }
     }
@@ -38,7 +93,9 @@ final class AnnotationCanvasView: NSView {
     private var draftPoints: [CGPoint] = []
     private var dragStart: CGPoint?
     private var dragCurrent: CGPoint?
-    private var pendingText: String?
+    private weak var textEditor: NSTextField?
+    private var textOrigin: CGPoint?
+    private var textColorPreset: AnnotationColorPreset?
 
     init(image: CGImage) {
         self.image = image
@@ -69,15 +126,15 @@ final class AnnotationCanvasView: NSView {
             draw(mark)
         }
         if tool == .pen, draftPoints.count > 1 {
-            draw(.pen(draftPoints))
+            draw(.pen(draftPoints, colorPreset))
         } else if let dragStart, let dragCurrent {
             switch tool {
             case .rectangle:
-                draw(.rectangle(Self.rect(from: dragStart, to: dragCurrent)))
+                draw(.rectangle(Self.rect(from: dragStart, to: dragCurrent), colorPreset))
             case .line:
-                draw(.line(dragStart, dragCurrent))
+                draw(.line(dragStart, dragCurrent, colorPreset))
             case .arrow:
-                draw(.arrow(dragStart, dragCurrent))
+                draw(.arrow(dragStart, dragCurrent, colorPreset))
             case .mosaic:
                 drawMosaicPreview(in: Self.rect(from: dragStart, to: dragCurrent))
             case .pen, .text:
@@ -88,10 +145,8 @@ final class AnnotationCanvasView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
-        if tool == .text, let pendingText {
-            append(.text(pendingText, point))
-            self.pendingText = nil
-            tool = .rectangle
+        if tool == .text {
+            beginTextEditing(at: point)
             return
         }
         dragStart = point
@@ -113,14 +168,14 @@ final class AnnotationCanvasView: NSView {
         guard let start = dragStart, let end = dragCurrent else { return }
         switch tool {
         case .pen where draftPoints.count > 1:
-            append(.pen(draftPoints))
+            append(.pen(draftPoints, colorPreset))
         case .rectangle:
-            append(.rectangle(Self.rect(from: start, to: end)))
+            append(.rectangle(Self.rect(from: start, to: end), colorPreset))
         case .line where Self.hasVisibleLength(from: start, to: end):
-            append(.line(start, end))
+            append(.line(start, end, colorPreset))
         case .arrow:
             if Self.hasVisibleLength(from: start, to: end) {
-                append(.arrow(start, end))
+                append(.arrow(start, end, colorPreset))
             }
         case .mosaic:
             let rect = Self.rect(from: start, to: end)
@@ -157,12 +212,12 @@ final class AnnotationCanvasView: NSView {
         needsDisplay = true
     }
 
-    func beginTextPlacement(_ text: String) {
-        pendingText = text
+    func beginTextPlacement() {
         tool = .text
     }
 
     func renderedImage() -> CGImage? {
+        commitTextEditing()
         let outputSize = NSSize(width: image.width, height: image.height)
         guard let bitmap = NSBitmapImageRep(
             bitmapDataPlanes: nil,
@@ -243,9 +298,9 @@ final class AnnotationCanvasView: NSView {
     }
 
     private func draw(_ mark: AnnotationMark) {
-        annotationColor.setStroke()
         switch mark {
-        case let .pen(points):
+        case let .pen(points, colorPreset):
+            colorPreset.color.setStroke()
             guard let first = points.first else { return }
             let path = NSBezierPath()
             path.move(to: first)
@@ -254,16 +309,22 @@ final class AnnotationCanvasView: NSView {
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
             path.stroke()
-        case let .rectangle(rect):
+        case let .rectangle(rect, colorPreset):
+            colorPreset.color.setStroke()
             let path = NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
             path.lineWidth = 3
             path.stroke()
-        case let .line(start, end):
+        case let .line(start, end, colorPreset):
+            colorPreset.color.setStroke()
             drawLine(from: start, to: end, width: 3)
-        case let .arrow(start, end):
+        case let .arrow(start, end, colorPreset):
+            colorPreset.color.setStroke()
             drawArrow(from: start, to: end, width: 3)
-        case let .text(text, point):
-            text.draw(at: point, withAttributes: textAttributes(fontSize: 18))
+        case let .text(text, point, colorPreset):
+            text.draw(
+                at: point,
+                withAttributes: textAttributes(fontSize: 18, colorPreset: colorPreset)
+            )
         case let .mosaic(rect):
             drawMosaicPreview(in: rect)
         }
@@ -278,9 +339,9 @@ final class AnnotationCanvasView: NSView {
             return CGPoint(x: x, y: outputHeight - topY)
         }
 
-        annotationColor.setStroke()
         switch mark {
-        case let .pen(points):
+        case let .pen(points, colorPreset):
+            colorPreset.color.setStroke()
             guard let first = points.first else { return }
             let path = NSBezierPath()
             path.move(to: convert(first))
@@ -289,7 +350,8 @@ final class AnnotationCanvasView: NSView {
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
             path.stroke()
-        case let .rectangle(rect):
+        case let .rectangle(rect, colorPreset):
+            colorPreset.color.setStroke()
             let first = convert(CGPoint(x: rect.minX, y: rect.maxY))
             let second = convert(CGPoint(x: rect.maxX, y: rect.minY))
             let converted = CGRect(
@@ -301,20 +363,22 @@ final class AnnotationCanvasView: NSView {
             let path = NSBezierPath(roundedRect: converted, xRadius: 3, yRadius: 3)
             path.lineWidth = max(4, 3 * scaleX)
             path.stroke()
-        case let .line(start, end):
+        case let .line(start, end, colorPreset):
+            colorPreset.color.setStroke()
             drawLine(
                 from: convert(start),
                 to: convert(end),
                 width: max(4, 3 * scaleX)
             )
-        case let .arrow(start, end):
+        case let .arrow(start, end, colorPreset):
+            colorPreset.color.setStroke()
             drawArrow(from: convert(start), to: convert(end), width: max(4, 3 * scaleX))
-        case let .text(text, point):
+        case let .text(text, point, colorPreset):
             let fontSize = max(18, 18 * min(scaleX, scaleY))
             let converted = convert(point)
             text.draw(
                 at: CGPoint(x: converted.x, y: converted.y - fontSize),
-                withAttributes: textAttributes(fontSize: fontSize)
+                withAttributes: textAttributes(fontSize: fontSize, colorPreset: colorPreset)
             )
         case let .mosaic(rect):
             let topLeft = convert(CGPoint(x: rect.minX, y: rect.maxY))
@@ -336,16 +400,98 @@ final class AnnotationCanvasView: NSView {
         }
     }
 
-    private var annotationColor: NSColor {
-        CaptureUIColors.accent
+    private func textAttributes(
+        fontSize: CGFloat,
+        colorPreset: AnnotationColorPreset
+    ) -> [NSAttributedString.Key: Any] {
+        let color = colorPreset.color
+        let background = color.brightnessComponent < 0.36
+            ? NSColor.white.withAlphaComponent(0.84)
+            : NSColor.black.withAlphaComponent(0.68)
+        return [
+            NSAttributedString.Key.font: NSFont.systemFont(
+                ofSize: fontSize,
+                weight: .semibold
+            ),
+            NSAttributedString.Key.foregroundColor: color,
+            NSAttributedString.Key.backgroundColor: background
+        ]
     }
 
-    private func textAttributes(fontSize: CGFloat) -> [NSAttributedString.Key: Any] {
-        [
-            .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
-            .foregroundColor: NSColor.white,
-            .backgroundColor: NSColor.black.withAlphaComponent(0.68)
-        ]
+    private func beginTextEditing(at point: CGPoint) {
+        commitTextEditing()
+
+        let editor = NSTextField(string: "")
+        editor.placeholderString = "Type something…"
+        editor.font = .systemFont(ofSize: 18, weight: .semibold)
+        editor.textColor = colorPreset.color
+        editor.backgroundColor = colorPreset.color.brightnessComponent < 0.36
+            ? NSColor.white.withAlphaComponent(0.9)
+            : NSColor.black.withAlphaComponent(0.74)
+        editor.isBordered = false
+        editor.isBezeled = false
+        editor.drawsBackground = true
+        editor.focusRingType = .exterior
+        editor.delegate = self
+        editor.wantsLayer = true
+        editor.layer?.cornerRadius = 7
+        editor.layer?.cornerCurve = .continuous
+        editor.setAccessibilityLabel("Annotation text")
+
+        let width = min(260, max(120, imageRect.maxX - point.x))
+        let origin = CGPoint(
+            x: min(point.x, imageRect.maxX - width),
+            y: min(point.y, imageRect.maxY - 30)
+        )
+        editor.frame = CGRect(origin: origin, size: CGSize(width: width, height: 30))
+        addSubview(editor)
+        textEditor = editor
+        textOrigin = origin
+        textColorPreset = colorPreset
+        window?.makeFirstResponder(editor)
+    }
+
+    private func commitTextEditing() {
+        guard let editor = textEditor else { return }
+        let text = editor.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let origin = textOrigin
+        let colorPreset = textColorPreset
+        discardTextEditing()
+        if !text.isEmpty, let origin, let colorPreset {
+            append(.text(text, origin, colorPreset))
+        }
+    }
+
+    private func discardTextEditing() {
+        guard let editor = textEditor else { return }
+        textEditor = nil
+        textOrigin = nil
+        textColorPreset = nil
+        editor.delegate = nil
+        editor.removeFromSuperview()
+        window?.makeFirstResponder(superview ?? self)
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        commitTextEditing()
+    }
+
+    func control(
+        _ control: NSControl,
+        textView: NSTextView,
+        doCommandBy commandSelector: Selector
+    ) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            commitTextEditing()
+            onConfirmRequested?()
+            return true
+        }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            discardTextEditing()
+            onCancelRequested?()
+            return true
+        }
+        return false
     }
 
     private func drawMosaicPreview(in rect: CGRect) {
@@ -422,26 +568,6 @@ final class AnnotationCanvasView: NSView {
         path.lineWidth = width
         path.lineCapStyle = .round
         path.stroke()
-    }
-}
-
-enum AnnotationTextPrompt {
-    @MainActor
-    static func requestText() -> String? {
-        let alert = NSAlert()
-        alert.messageText = "Add text"
-        alert.informativeText = "Enter the text, then click the image to place it."
-        alert.addButton(withTitle: "Place")
-        alert.addButton(withTitle: "Cancel")
-        let field = NSTextField(string: "")
-        field.placeholderString = "Text"
-        field.frame = CGRect(x: 0, y: 0, width: 280, height: 24)
-        alert.accessoryView = field
-        alert.window.initialFirstResponder = field
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
-        let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
     }
 }
 
