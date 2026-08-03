@@ -47,6 +47,7 @@ final class AppModel: ObservableObject {
     private var recordingConfiguration: RegionRecordingConfiguration?
     private var recordingSegments: [RecordedMedia] = []
     private var recordingSourceApplication: String?
+    private var recordingReturnApplication: NSRunningApplication?
     private var hasStarted = false
 
     init() {
@@ -126,14 +127,18 @@ final class AppModel: ObservableObject {
         guard overlayController == nil, !captureIsUnavailable else { return }
         isCaptureStarting = true
         errorMessage = nil
-        let frontmostApplication = NSWorkspace.shared.frontmostApplication
-        let isKiriFrontmost = frontmostApplication?.processIdentifier
+        let initialFrontmostApplication = NSWorkspace.shared.frontmostApplication
+        let isKiriFrontmost = initialFrontmostApplication?.processIdentifier
             == ProcessInfo.processInfo.processIdentifier
-        let sourceApplication = isKiriFrontmost ? nil : frontmostApplication?.localizedName
-        let hiddenWindows = hideCaptureOriginWindowsIfNeeded(frontmostApplication)
+        let hiddenWindows = hideKiriLibraryWindows()
         Task {
             defer { isCaptureStarting = false }
             do {
+                let returnApplication = await resolveCaptureReturnApplication(
+                    initialFrontmostApplication,
+                    wasKiriFrontmost: isKiriFrontmost
+                )
+                let sourceApplication = returnApplication?.localizedName
                 if !hiddenWindows.isEmpty {
                     try? await Task.sleep(for: .milliseconds(120))
                 }
@@ -143,7 +148,11 @@ final class AppModel: ObservableObject {
                 controller.present(
                     onComplete: { [weak self] image, action in
                         self?.overlayController = nil
-                        self?.restoreCaptureOriginWindows(hiddenWindows)
+                        self?.finishCapturePresentation(
+                            returnApplication: returnApplication,
+                            hiddenWindows: hiddenWindows,
+                            action: action
+                        )
                         self?.completeCapture(
                             image: image,
                             action: action,
@@ -152,24 +161,38 @@ final class AppModel: ObservableObject {
                     },
                     onRecord: { [weak self] region, options in
                         self?.overlayController = nil
-                        self?.restoreCaptureOriginWindows(hiddenWindows)
+                        self?.keepKiriLibraryHidden(hiddenWindows)
+                        self?.activate(returnApplication)
                         self?.beginRegionRecording(
                             capture: capture,
                             region: region,
                             options: options,
-                            sourceApplication: sourceApplication
+                            sourceApplication: sourceApplication,
+                            returnApplication: returnApplication
                         )
                     },
                     onCancel: { [weak self] in
                         self?.overlayController = nil
-                        self?.restoreCaptureOriginWindows(hiddenWindows)
+                        self?.cancelCapturePresentation(
+                            initialApplication: initialFrontmostApplication,
+                            returnApplication: returnApplication,
+                            hiddenWindows: hiddenWindows
+                        )
                     }
                 )
             } catch let error as CaptureCoordinatorError {
-                restoreCaptureOriginWindows(hiddenWindows)
+                cancelCapturePresentation(
+                    initialApplication: initialFrontmostApplication,
+                    returnApplication: initialFrontmostApplication,
+                    hiddenWindows: hiddenWindows
+                )
                 handleCaptureCoordinatorError(error)
             } catch {
-                restoreCaptureOriginWindows(hiddenWindows)
+                cancelCapturePresentation(
+                    initialApplication: initialFrontmostApplication,
+                    returnApplication: initialFrontmostApplication,
+                    hiddenWindows: hiddenWindows
+                )
                 errorMessage = error.localizedDescription
             }
         }
@@ -179,10 +202,12 @@ final class AppModel: ObservableObject {
         capture: CapturedDisplay,
         region: CGRect,
         options: RecordingOptions,
-        sourceApplication: String?
+        sourceApplication: String?,
+        returnApplication: NSRunningApplication?
     ) {
         guard regionRecorder == nil, !captureIsUnavailable else { return }
         recordingSourceApplication = sourceApplication
+        recordingReturnApplication = returnApplication
         isRecordingStarting = true
         errorMessage = nil
         Task {
@@ -239,6 +264,7 @@ final class AppModel: ObservableObject {
                 recordingStartedAt = Date()
                 startRecordingClock()
                 updateRecordingControlPanel()
+                activate(recordingReturnApplication)
                 showNotice(title: "Recording Started", symbol: "record.circle.fill")
             } catch let error as RecordingAccessError {
                 resetRecordingSession()
@@ -327,6 +353,7 @@ final class AppModel: ObservableObject {
                 recordingStartedAt = Date()
                 startRecordingClock()
                 updateRecordingControlPanel()
+                activate(recordingReturnApplication)
                 showNotice(title: "Recording Resumed", symbol: "play.circle.fill")
             } catch {
                 if regionRecorder === recorder {
@@ -348,6 +375,7 @@ final class AppModel: ObservableObject {
         isRecordingFinalizing = true
         stopRecordingClock()
         updateRecordingControlPanel()
+        activate(recordingReturnApplication)
         Task {
             var segments = recordingSegments
             do {
@@ -444,14 +472,10 @@ final class AppModel: ObservableObject {
         recordingConfiguration = nil
         recordingSegments = []
         recordingSourceApplication = nil
+        recordingReturnApplication = nil
     }
 
-    private func hideCaptureOriginWindowsIfNeeded(
-        _ frontmostApplication: NSRunningApplication?
-    ) -> [NSWindow] {
-        guard frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier else {
-            return []
-        }
+    private func hideKiriLibraryWindows() -> [NSWindow] {
         let windows = NSApplication.shared.windows.filter { window in
             window.isVisible && window.level == .normal && window.styleMask.contains(.titled)
         }
@@ -459,10 +483,55 @@ final class AppModel: ObservableObject {
         return windows
     }
 
-    private func restoreCaptureOriginWindows(_ windows: [NSWindow]) {
-        guard !windows.isEmpty else { return }
-        windows.forEach { $0.orderFront(nil) }
-        NSApplication.shared.activate(ignoringOtherApps: true)
+    private func resolveCaptureReturnApplication(
+        _ initialApplication: NSRunningApplication?,
+        wasKiriFrontmost: Bool
+    ) async -> NSRunningApplication? {
+        guard wasKiriFrontmost else { return initialApplication }
+        NSApplication.shared.hide(nil)
+        try? await Task.sleep(for: .milliseconds(100))
+        let application = NSWorkspace.shared.frontmostApplication
+        NSApplication.shared.unhideWithoutActivation()
+        guard application?.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+            return nil
+        }
+        return application
+    }
+
+    private func finishCapturePresentation(
+        returnApplication: NSRunningApplication?,
+        hiddenWindows: [NSWindow],
+        action: CaptureSessionAction
+    ) {
+        keepKiriLibraryHidden(hiddenWindows)
+        if case .copy = action {
+            activate(returnApplication)
+        }
+    }
+
+    private func cancelCapturePresentation(
+        initialApplication: NSRunningApplication?,
+        returnApplication: NSRunningApplication?,
+        hiddenWindows: [NSWindow]
+    ) {
+        let wasKiriFrontmost = initialApplication?.processIdentifier
+            == ProcessInfo.processInfo.processIdentifier
+        if wasKiriFrontmost {
+            hiddenWindows.forEach { $0.orderFront(nil) }
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        } else {
+            keepKiriLibraryHidden(hiddenWindows)
+            activate(returnApplication)
+        }
+    }
+
+    private func keepKiriLibraryHidden(_ windows: [NSWindow]) {
+        windows.forEach { $0.orderOut(nil) }
+    }
+
+    private func activate(_ application: NSRunningApplication?) {
+        guard let application, !application.isTerminated else { return }
+        application.activate(options: [])
     }
 
     func performCapturePermissionRecovery() {

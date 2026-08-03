@@ -52,6 +52,8 @@ temporary directory and are removed after import or on failure.
 - One recording at a time, with idempotent stop.
 - A failed or cancelled session must not create a library entry.
 - The overlay and Kiri windows must not appear in the recording.
+- Default copy and recording flows must hide Kiri's library and return focus to
+  the application that was active before capture.
 - MP4 dimensions must be positive and even for H.264 compatibility.
 - Recording target: 30 fps H.264 with independently controlled system audio,
   microphone, cursor, and click feedback.

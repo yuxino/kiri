@@ -28,11 +28,13 @@ does not disappear just because the clipboard changed.
 - Choose from eight annotation colors; text supports complex input, long content,
   and Transparent (default), Dark, or Light backgrounds
 - Press Escape to cancel at any capture stage and Return once a region exists to copy immediately
+- Default screenshots copy to the clipboard and return focus to the original app without opening Kiri's library
 - Save, pin, or open the full editor when needed
 - Choose Screenshot or Record in the capture overlay's first-level mode switch instead of finding recording inside screenshot tools
 - Configure remembered countdown, system audio, microphone, pointer, and click-highlight switches before recording
 - Cancel the 3-2-1 countdown with Escape, save H.264 MP4, and convert library videos up to 15 seconds to looping GIF
 - Pause, resume, or stop from a visible recording control bar; paused time is omitted from the final video
+- Recordings save in the background and restore the original app; the library opens only when requested
 - Persist each completed result once and add it to local History
 - Search, favorite, reveal, and copy captures from the local library
 - Move captures directly from each library card to recoverable Trash, restore them, or delete permanently
