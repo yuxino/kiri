@@ -55,12 +55,34 @@ enum AnnotationColorPreset: CaseIterable {
     }
 }
 
+enum AnnotationTextBackgroundStyle: CaseIterable {
+    case transparent
+    case dark
+    case light
+
+    var name: String {
+        switch self {
+        case .transparent: "Transparent"
+        case .dark: "Dark"
+        case .light: "Light"
+        }
+    }
+
+    var color: NSColor? {
+        switch self {
+        case .transparent: nil
+        case .dark: NSColor.black.withAlphaComponent(0.72)
+        case .light: NSColor.white.withAlphaComponent(0.9)
+        }
+    }
+}
+
 private enum AnnotationMark {
     case pen([CGPoint], AnnotationColorPreset)
     case rectangle(CGRect, AnnotationColorPreset)
     case line(CGPoint, CGPoint, AnnotationColorPreset)
     case arrow(CGPoint, CGPoint, AnnotationColorPreset)
-    case text(String, CGPoint, AnnotationColorPreset)
+    case text(String, CGRect, AnnotationColorPreset, AnnotationTextBackgroundStyle)
     case mosaic(CGRect)
 }
 
@@ -119,6 +141,12 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             needsDisplay = true
         }
     }
+    var textBackgroundStyle: AnnotationTextBackgroundStyle = .transparent {
+        didSet {
+            updateTextEditorStyle()
+            needsDisplay = true
+        }
+    }
 
     private var history = AnnotationHistory<AnnotationMark>()
     private var draftPoints: [CGPoint] = []
@@ -126,6 +154,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     private var dragCurrent: CGPoint?
     private var textEditor: InlineAnnotationTextView?
     private var textColorPreset: AnnotationColorPreset?
+    private var editingTextBackgroundStyle: AnnotationTextBackgroundStyle?
 
     init(image: CGImage) {
         self.image = image
@@ -353,10 +382,13 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         case let .arrow(start, end, colorPreset):
             colorPreset.color.setStroke()
             drawArrow(from: start, to: end, width: 3)
-        case let .text(text, point, colorPreset):
-            text.draw(
-                at: point,
-                withAttributes: textAttributes(fontSize: 18, colorPreset: colorPreset)
+        case let .text(text, rect, colorPreset, backgroundStyle):
+            drawText(
+                text,
+                in: rect,
+                fontSize: 18,
+                colorPreset: colorPreset,
+                backgroundStyle: backgroundStyle
             )
         case let .mosaic(rect):
             drawMosaicPreview(in: rect)
@@ -406,12 +438,23 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         case let .arrow(start, end, colorPreset):
             colorPreset.color.setStroke()
             drawArrow(from: convert(start), to: convert(end), width: max(4, 3 * scaleX))
-        case let .text(text, point, colorPreset):
+        case let .text(text, rect, colorPreset, backgroundStyle):
             let fontSize = max(18, 18 * min(scaleX, scaleY))
-            let converted = convert(point)
-            text.draw(
-                at: CGPoint(x: converted.x, y: converted.y - fontSize),
-                withAttributes: textAttributes(fontSize: fontSize, colorPreset: colorPreset)
+            let first = convert(CGPoint(x: rect.minX, y: rect.maxY))
+            let second = convert(CGPoint(x: rect.maxX, y: rect.minY))
+            let convertedRect = CGRect(
+                x: min(first.x, second.x),
+                y: min(first.y, second.y),
+                width: abs(second.x - first.x),
+                height: abs(second.y - first.y)
+            )
+            drawText(
+                text,
+                in: convertedRect,
+                fontSize: fontSize,
+                colorPreset: colorPreset,
+                backgroundStyle: backgroundStyle,
+                paddingScale: min(scaleX, scaleY)
             )
         case let .mosaic(rect):
             let topLeft = convert(CGPoint(x: rect.minX, y: rect.maxY))
@@ -437,18 +480,42 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         fontSize: CGFloat,
         colorPreset: AnnotationColorPreset
     ) -> [NSAttributedString.Key: Any] {
-        let color = colorPreset.color
-        let background = color.brightnessComponent < 0.36
-            ? NSColor.white.withAlphaComponent(0.84)
-            : NSColor.black.withAlphaComponent(0.68)
-        return [
+        [
             NSAttributedString.Key.font: NSFont.systemFont(
                 ofSize: fontSize,
                 weight: .semibold
             ),
-            NSAttributedString.Key.foregroundColor: color,
-            NSAttributedString.Key.backgroundColor: background
+            NSAttributedString.Key.foregroundColor: colorPreset.color
         ]
+    }
+
+    private func drawText(
+        _ text: String,
+        in rect: CGRect,
+        fontSize: CGFloat,
+        colorPreset: AnnotationColorPreset,
+        backgroundStyle: AnnotationTextBackgroundStyle,
+        paddingScale: CGFloat = 1
+    ) {
+        if let backgroundColor = backgroundStyle.color {
+            backgroundColor.setFill()
+            let horizontalPadding = 5 * paddingScale
+            let verticalPadding = 3 * paddingScale
+            let backgroundRect = rect.insetBy(
+                dx: -horizontalPadding,
+                dy: -verticalPadding
+            )
+            NSBezierPath(
+                roundedRect: backgroundRect,
+                xRadius: 5 * paddingScale,
+                yRadius: 5 * paddingScale
+            ).fill()
+        }
+        (text as NSString).draw(
+            with: rect,
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: textAttributes(fontSize: fontSize, colorPreset: colorPreset)
+        )
     }
 
     private func beginTextEditing(at point: CGPoint) {
@@ -492,6 +559,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         addSubview(editor)
         textEditor = editor
         textColorPreset = colorPreset
+        editingTextBackgroundStyle = textBackgroundStyle
         updateTextEditorStyle()
         resizeTextEditor()
         window?.makeFirstResponder(editor)
@@ -500,14 +568,17 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     private func commitTextEditing() {
         guard let editor = textEditor else { return }
         let text = editor.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        let origin = CGPoint(
+        let textRect = CGRect(
             x: editor.frame.minX + editor.textContainerInset.width,
-            y: editor.frame.minY + editor.textContainerInset.height
+            y: editor.frame.minY + editor.textContainerInset.height,
+            width: max(1, editor.frame.width - editor.textContainerInset.width * 2),
+            height: max(1, editor.frame.height - editor.textContainerInset.height * 2)
         )
         let colorPreset = textColorPreset
+        let backgroundStyle = editingTextBackgroundStyle
         discardTextEditing()
-        if !text.isEmpty, let colorPreset {
-            append(.text(text, origin, colorPreset))
+        if !text.isEmpty, let colorPreset, let backgroundStyle {
+            append(.text(text, textRect, colorPreset, backgroundStyle))
         }
     }
 
@@ -515,6 +586,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         guard let editor = textEditor else { return }
         textEditor = nil
         textColorPreset = nil
+        editingTextBackgroundStyle = nil
         editor.delegate = nil
         editor.onCommit = nil
         editor.onCancel = nil
@@ -533,11 +605,10 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     private func updateTextEditorStyle() {
         guard let editor = textEditor else { return }
         textColorPreset = colorPreset
+        editingTextBackgroundStyle = textBackgroundStyle
         editor.textColor = colorPreset.color
         editor.insertionPointColor = colorPreset.color
-        editor.backgroundColor = colorPreset.color.brightnessComponent < 0.36
-            ? NSColor.white.withAlphaComponent(0.92)
-            : NSColor.black.withAlphaComponent(0.76)
+        editor.backgroundColor = textBackgroundStyle.color ?? .clear
         editor.layer?.borderColor = colorPreset.color.withAlphaComponent(0.8).cgColor
         editor.needsDisplay = true
     }

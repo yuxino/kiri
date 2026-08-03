@@ -9,6 +9,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private let canvas: AnnotationCanvasView
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
     private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
+    private var textBackgroundButton: CaptureActionButton?
     private var undoButton: CaptureActionButton?
     private var redoButton: CaptureActionButton?
     private var clearButton: CaptureActionButton?
@@ -100,6 +101,15 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             colorGroup.addArrangedSubview(button)
         }
         toolbar.addArrangedSubview(CaptureToolGroupView(content: colorGroup))
+        let textBackgroundButton = CaptureActionButton(
+            symbol: "character.textbox",
+            label: "Text Background",
+            style: .tool,
+            target: self,
+            action: #selector(showTextBackgroundMenu(_:))
+        )
+        self.textBackgroundButton = textBackgroundButton
+        toolbar.addArrangedSubview(textBackgroundButton)
         toolbar.addArrangedSubview(CaptureDividerView(height: 24))
 
         let undoButton = historyButton(
@@ -198,6 +208,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         ])
         updateToolButtons(selected: canvas.tool)
         updateColorButtons(selected: canvas.colorPreset)
+        updateTextBackgroundControl()
         updateHistoryControls(canUndo: false, canRedo: false)
         controller.view = root
         return controller
@@ -241,6 +252,14 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         }
     }
 
+    private func updateTextBackgroundControl() {
+        let style = canvas.textBackgroundStyle
+        let label = "Text background: \(style.name)"
+        textBackgroundButton?.setToolSelected(style != .transparent)
+        textBackgroundButton?.toolTip = label
+        textBackgroundButton?.setAccessibilityLabel(label)
+    }
+
     @objc private func usePen() {
         canvas.tool = .pen
     }
@@ -264,6 +283,51 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     @objc private func selectAnnotationColor(_ sender: AnnotationColorSwatchButton) {
         canvas.colorPreset = sender.preset
         updateColorButtons(selected: sender.preset)
+    }
+
+    @objc private func showTextBackgroundMenu(_ sender: NSButton) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let options: [(
+            AnnotationTextBackgroundStyle,
+            String,
+            String,
+            Selector
+        )] = [
+            (.transparent, "Transparent", "circle.slash", #selector(useTransparentTextBackground)),
+            (.dark, "Dark", "moon.fill", #selector(useDarkTextBackground)),
+            (.light, "Light", "sun.max.fill", #selector(useLightTextBackground))
+        ]
+        for (option, title, symbol, action) in options {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+            item.state = option == canvas.textBackgroundStyle ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(
+            positioning: nil,
+            at: CGPoint(x: sender.bounds.minX, y: sender.bounds.maxY + 4),
+            in: sender
+        )
+    }
+
+    @objc private func useTransparentTextBackground() {
+        selectTextBackground(.transparent)
+    }
+
+    @objc private func useDarkTextBackground() {
+        selectTextBackground(.dark)
+    }
+
+    @objc private func useLightTextBackground() {
+        selectTextBackground(.light)
+    }
+
+    private func selectTextBackground(_ style: AnnotationTextBackgroundStyle) {
+        canvas.textBackgroundStyle = style
+        updateTextBackgroundControl()
+        useText()
     }
 
     @objc private func useMosaic() {

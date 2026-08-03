@@ -20,15 +20,29 @@ does not disappear just because the clipboard changed.
 - Start capture with **⇧⌘A**, which Kiri filters before other apps can act on it
 - Freeze the active display, snap to the frontmost window, or drag a free region
 - Enter inline annotation immediately after selection without a second capture mode
-- Use pen, rectangle, arrow, text, and mosaic tools with undo and redo
-- Press Return in annotation to copy, or save, pin, or open the full editor
-- Persist each completed capture once and add it to History in the background
+- Use pen, rectangle, line, arrow, text, and mosaic tools with undo and redo
+- Choose from eight annotation colors; text supports complex input, long content,
+  and Transparent (default), Dark, or Light backgrounds
+- Press Escape to cancel at any capture stage and Return in annotation to copy
+- Save, pin, or open the full editor when needed
+- Persist each completed result once and add it to local History
 - Search, favorite, reveal, and copy captures from the local library
 - Move captures to a recoverable trash, restore them, or delete permanently
 - Keep source application, dimensions, type, and creation time as metadata
+- Keep both a Dock icon and a menu bar shortcut while Kiri is running
 
 > kiri is an early source preview. Recording, GIF export, and scrolling capture
 > are represented in the architecture and roadmap, but are not enabled yet.
+
+## Download
+
+Download `Kiri-v0.1.0-macos.zip` from
+[GitHub Releases](https://github.com/yuxino/kiri/releases/latest), unzip it, and
+move `Kiri.app` to Applications.
+
+v0.1.0 is an early preview that has not been notarized by Apple. On first launch,
+you may need to Control-click Kiri in Finder, choose Open, and confirm. Only
+download builds from this repository's Releases page.
 
 ## Build from source
 

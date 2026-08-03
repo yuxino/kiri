@@ -104,6 +104,7 @@ private final class CaptureSessionView: NSView {
     private var toolbar: NSVisualEffectView?
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
     private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
+    private var textBackgroundButton: CaptureActionButton?
     private var undoButton: CaptureActionButton?
     private var redoButton: CaptureActionButton?
     private var clearAnnotationsItem: NSMenuItem?
@@ -386,6 +387,7 @@ private final class CaptureSessionView: NSView {
         layoutAnnotationUI()
         updateToolButtons(selected: canvas.tool)
         updateColorButtons(selected: canvas.colorPreset)
+        updateTextBackgroundControl()
         updateHistoryControls(canUndo: false, canRedo: false)
         window?.makeFirstResponder(self)
         needsDisplay = true
@@ -400,6 +402,7 @@ private final class CaptureSessionView: NSView {
         toolbar = nil
         toolButtons.removeAll()
         colorButtons.removeAll()
+        textBackgroundButton = nil
         undoButton = nil
         redoButton = nil
         clearAnnotationsItem = nil
@@ -528,6 +531,17 @@ private final class CaptureSessionView: NSView {
             colorGroup.addArrangedSubview(button)
         }
         actions.addArrangedSubview(CaptureToolGroupView(content: colorGroup))
+        let textBackgroundButton = CaptureActionButton(
+            symbol: "character.textbox",
+            label: "Text Background",
+            style: .tool,
+            hoverHint: "Text background — Transparent, dark, or light",
+            target: self,
+            action: #selector(showTextBackgroundMenu(_:))
+        )
+        connectToolbarHint(to: textBackgroundButton)
+        self.textBackgroundButton = textBackgroundButton
+        actions.addArrangedSubview(textBackgroundButton)
         actions.addArrangedSubview(separator())
 
         let undoButton = actionButton(
@@ -649,6 +663,17 @@ private final class CaptureSessionView: NSView {
         }
     }
 
+    private func updateTextBackgroundControl() {
+        guard let button = textBackgroundButton,
+              let style = annotationCanvas?.textBackgroundStyle else {
+            return
+        }
+        let label = "Text background: \(style.name)"
+        button.setToolSelected(style != .transparent)
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+    }
+
     private func updateHistoryControls(canUndo: Bool, canRedo: Bool) {
         undoButton?.setActionEnabled(canUndo)
         redoButton?.setActionEnabled(canRedo)
@@ -680,6 +705,50 @@ private final class CaptureSessionView: NSView {
         annotationCanvas?.colorPreset = sender.preset
         updateColorButtons(selected: sender.preset)
         window?.makeFirstResponder(self)
+    }
+
+    @objc private func showTextBackgroundMenu(_ sender: NSButton) {
+        guard let style = annotationCanvas?.textBackgroundStyle else { return }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let options: [(
+            AnnotationTextBackgroundStyle,
+            String,
+            String,
+            Selector
+        )] = [
+            (.transparent, "Transparent", "circle.slash", #selector(useTransparentTextBackground)),
+            (.dark, "Dark", "moon.fill", #selector(useDarkTextBackground)),
+            (.light, "Light", "sun.max.fill", #selector(useLightTextBackground))
+        ]
+        for (option, title, symbol, action) in options {
+            let item = menuItem(title, symbol: symbol, action: action)
+            item.state = option == style ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(
+            positioning: nil,
+            at: CGPoint(x: sender.bounds.minX, y: sender.bounds.maxY + 4),
+            in: sender
+        )
+    }
+
+    @objc private func useTransparentTextBackground() {
+        selectTextBackground(.transparent)
+    }
+
+    @objc private func useDarkTextBackground() {
+        selectTextBackground(.dark)
+    }
+
+    @objc private func useLightTextBackground() {
+        selectTextBackground(.light)
+    }
+
+    private func selectTextBackground(_ style: AnnotationTextBackgroundStyle) {
+        annotationCanvas?.textBackgroundStyle = style
+        updateTextBackgroundControl()
+        useText()
     }
 
     @objc private func useMosaic() {
