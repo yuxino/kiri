@@ -8,6 +8,8 @@ struct CapturedDisplay {
     let image: CGImage
     let screenFrame: CGRect
     let windowRectsFrontToBack: [CGRect]
+    let displayID: CGDirectDisplayID
+    let backingScale: CGFloat
 }
 
 enum CaptureCoordinatorError: LocalizedError {
@@ -113,7 +115,9 @@ final class CaptureCoordinator {
         return CapturedDisplay(
             image: image,
             screenFrame: screen.frame,
-            windowRectsFrontToBack: windowRects
+            windowRectsFrontToBack: windowRects,
+            displayID: displayID,
+            backingScale: backingScale
         )
     }
 
@@ -154,7 +158,9 @@ final class CaptureCoordinator {
         return CapturedDisplay(
             image: image,
             screenFrame: screen.frame,
-            windowRectsFrontToBack: windows
+            windowRectsFrontToBack: windows,
+            displayID: 0,
+            backingScale: max(screen.backingScaleFactor, 1)
         )
     }
 

@@ -10,6 +10,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var hasLoadedLibrary = false
     @Published private(set) var libraryRevision = 0
     @Published private(set) var isCaptureStarting = false
+    @Published private(set) var isRecordingStarting = false
+    @Published private(set) var isRecording = false
+    @Published private(set) var isRecordingFinalizing = false
+    @Published private(set) var recordingElapsed: TimeInterval = 0
+    @Published private(set) var gifConversionAssetIDs: Set<UUID> = []
     @Published private(set) var notice: AppNotice?
     @Published var searchQuery = ""
     @Published var showingTrash = false
@@ -30,6 +35,10 @@ final class AppModel: ObservableObject {
     private var overlayController: SelectionOverlayController?
     private var editorController: EditorWindowController?
     private var pinnedControllers: [UUID: PinnedImageController] = [:]
+    private var regionRecorder: RegionRecorder?
+    private var recordingClockTask: Task<Void, Never>?
+    private var recordingStartedAt: Date?
+    private var recordingSourceApplication: String?
     private var hasStarted = false
 
     init() {
@@ -49,6 +58,14 @@ final class AppModel: ObservableObject {
 
     var captureShortcutLabel: String {
         CaptureShortcut.kiriCapture.displayLabel
+    }
+
+    var recordingElapsedLabel: String {
+        RecordingPolicy.elapsedLabel(recordingElapsed)
+    }
+
+    var captureIsUnavailable: Bool {
+        isCaptureStarting || isRecordingStarting || isRecording || isRecordingFinalizing
     }
 
     var capturePermissionRecoveryLabel: String? {
@@ -87,7 +104,7 @@ final class AppModel: ObservableObject {
     }
 
     func startCapture() {
-        guard overlayController == nil, !isCaptureStarting else { return }
+        guard overlayController == nil, !captureIsUnavailable else { return }
         isCaptureStarting = true
         errorMessage = nil
         let frontmostApplication = NSWorkspace.shared.frontmostApplication
@@ -114,6 +131,15 @@ final class AppModel: ObservableObject {
                             sourceApplication: sourceApplication
                         )
                     },
+                    onRecord: { [weak self] region in
+                        self?.overlayController = nil
+                        self?.restoreCaptureOriginWindows(hiddenWindows)
+                        self?.beginRegionRecording(
+                            capture: capture,
+                            region: region,
+                            sourceApplication: sourceApplication
+                        )
+                    },
                     onCancel: { [weak self] in
                         self?.overlayController = nil
                         self?.restoreCaptureOriginWindows(hiddenWindows)
@@ -127,6 +153,91 @@ final class AppModel: ObservableObject {
                 errorMessage = error.localizedDescription
             }
         }
+    }
+
+    private func beginRegionRecording(
+        capture: CapturedDisplay,
+        region: CGRect,
+        sourceApplication: String?
+    ) {
+        guard regionRecorder == nil, !captureIsUnavailable else { return }
+        let recorder = RegionRecorder()
+        regionRecorder = recorder
+        recordingSourceApplication = sourceApplication
+        isRecordingStarting = true
+        errorMessage = nil
+        Task {
+            do {
+                try await recorder.start(
+                    displayID: capture.displayID,
+                    sourceRect: region,
+                    backingScale: capture.backingScale
+                )
+                guard regionRecorder === recorder else { return }
+                isRecordingStarting = false
+                isRecording = true
+                recordingElapsed = 0
+                recordingStartedAt = Date()
+                startRecordingClock()
+                showNotice(title: "Recording Started", symbol: "record.circle.fill")
+            } catch {
+                if regionRecorder === recorder {
+                    regionRecorder = nil
+                }
+                recordingSourceApplication = nil
+                isRecordingStarting = false
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func stopRecording() {
+        guard isRecording, let recorder = regionRecorder else { return }
+        isRecording = false
+        isRecordingFinalizing = true
+        stopRecordingClock()
+        Task {
+            do {
+                let media = try await recorder.stop()
+                defer { try? FileManager.default.removeItem(at: media.fileURL) }
+                _ = try await library.importFile(
+                    at: media.fileURL,
+                    kind: .video,
+                    fileExtension: "mp4",
+                    pixelWidth: media.pixelWidth,
+                    pixelHeight: media.pixelHeight,
+                    duration: media.duration,
+                    sourceApplication: recordingSourceApplication
+                )
+                await refresh()
+                showNotice(title: "Recording Saved", symbol: "video.fill")
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            if regionRecorder === recorder {
+                regionRecorder = nil
+            }
+            isRecordingFinalizing = false
+            recordingElapsed = 0
+            recordingStartedAt = nil
+            recordingSourceApplication = nil
+        }
+    }
+
+    private func startRecordingClock() {
+        recordingClockTask?.cancel()
+        recordingClockTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard let self, let recordingStartedAt = self.recordingStartedAt else { return }
+                self.recordingElapsed = Date().timeIntervalSince(recordingStartedAt)
+            }
+        }
+    }
+
+    private func stopRecordingClock() {
+        recordingClockTask?.cancel()
+        recordingClockTask = nil
     }
 
     private func hideCaptureOriginWindowsIfNeeded(
@@ -249,6 +360,40 @@ final class AppModel: ObservableObject {
 
     func reveal(_ asset: CaptureAsset) {
         NSWorkspace.shared.activateFileViewerSelecting([assetFileURL(asset)])
+    }
+
+    func canConvertToGIF(_ asset: CaptureAsset) -> Bool {
+        asset.kind == .video && RecordingPolicy.isGIFEligible(duration: asset.duration)
+    }
+
+    func isConvertingToGIF(_ asset: CaptureAsset) -> Bool {
+        gifConversionAssetIDs.contains(asset.id)
+    }
+
+    func convertToGIF(_ asset: CaptureAsset) {
+        guard canConvertToGIF(asset), !gifConversionAssetIDs.contains(asset.id) else { return }
+        gifConversionAssetIDs.insert(asset.id)
+        let sourceURL = assetFileURL(asset)
+        Task {
+            do {
+                let exported = try await GIFExporter.export(videoAt: sourceURL)
+                defer { try? FileManager.default.removeItem(at: exported.fileURL) }
+                _ = try await library.importFile(
+                    at: exported.fileURL,
+                    kind: .gif,
+                    fileExtension: "gif",
+                    pixelWidth: exported.pixelWidth,
+                    pixelHeight: exported.pixelHeight,
+                    duration: exported.duration,
+                    sourceApplication: asset.sourceApplication
+                )
+                await refresh()
+                showNotice(title: "GIF Created", symbol: "sparkles.rectangle.stack")
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+            gifConversionAssetIDs.remove(asset.id)
+        }
     }
 
     func assetFileURL(_ asset: CaptureAsset) -> URL {

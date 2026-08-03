@@ -24,7 +24,11 @@ let package = Package(
             exclude: ["Info.plist"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
+                .linkedFramework("AVFoundation"),
                 .linkedFramework("Carbon"),
+                .linkedFramework("CoreMedia"),
+                .linkedFramework("CoreVideo"),
+                .linkedFramework("ImageIO"),
                 .linkedFramework("ScreenCaptureKit")
             ]
         ),

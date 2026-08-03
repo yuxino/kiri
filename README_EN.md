@@ -29,14 +29,16 @@ does not disappear just because the clipboard changed.
   and Transparent (default), Dark, or Light backgrounds
 - Press Escape to cancel at any capture stage and Return once a region exists to copy immediately
 - Save, pin, or open the full editor when needed
+- Record a silent region to MP4 and convert library videos up to 15 seconds to looping GIF
 - Persist each completed result once and add it to local History
 - Search, favorite, reveal, and copy captures from the local library
 - Move captures directly from each library card to recoverable Trash, restore them, or delete permanently
 - Keep source application, dimensions, type, and creation time as metadata
 - Keep both a Dock icon and a menu bar shortcut while Kiri is running
 
-> kiri is an early source preview. Recording, GIF export, and scrolling capture
-> are represented in the architecture and roadmap, but are not enabled yet.
+> kiri is an early source preview. Silent region recording and short-video GIF
+> export are available in the v0.2 preview; audio, pause, trimming, and scrolling
+> capture are still in development.
 
 ## Download
 
@@ -89,6 +91,16 @@ Open Settings or Quit Kiri recovery action instead of prompting repeatedly.
 
 Captures stay under `~/Library/Application Support/kiri/` and are never
 uploaded automatically.
+
+## Region recording and GIF (v0.2 preview)
+
+1. Press **⇧⌘A** and select a region.
+2. Open More Actions and choose **Record Region**.
+3. Stop from Kiri's menu bar or Capture menu; the MP4 enters the library.
+4. Open More Actions on a video up to 15 seconds and choose **Convert to GIF**.
+
+The first preview records the pointer without audio. Audio, pause/resume, and
+trimming will follow in later v0.2 iterations.
 
 See [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
 [SECURITY.md](SECURITY.md).

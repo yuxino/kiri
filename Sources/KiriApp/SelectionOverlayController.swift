@@ -38,6 +38,7 @@ final class SelectionOverlayController {
 
     func present(
         onComplete: @escaping (CGImage, CaptureSessionAction) -> Void,
+        onRecord: @escaping (CGRect) -> Void,
         onCancel: @escaping () -> Void
     ) {
         let window = CaptureOverlayWindow(
@@ -66,6 +67,10 @@ final class SelectionOverlayController {
             self?.close()
             onComplete(image, action)
         }
+        sessionView.onRecord = { [weak self] region in
+            self?.close()
+            onRecord(region)
+        }
         window.onEscape = { [weak sessionView] in
             sessionView?.onCancel?()
         }
@@ -89,6 +94,7 @@ final class SelectionOverlayController {
 
 private final class CaptureSessionView: NSView {
     var onComplete: ((CGImage, CaptureSessionAction) -> Void)?
+    var onRecord: ((CGRect) -> Void)?
     var onCancel: (() -> Void)?
 
     private let image: CGImage
@@ -698,7 +704,7 @@ private final class CaptureSessionView: NSView {
         let moreButton = actionButton(
             symbol: "ellipsis.circle",
             label: "More Actions",
-            hoverHint: "More — Save, pin, edit, or clear",
+            hoverHint: "More — Record, save, pin, edit, or clear",
             action: #selector(showMoreActions(_:))
         )
         actions.addArrangedSubview(moreButton)
@@ -1100,6 +1106,9 @@ private final class CaptureSessionView: NSView {
         )
         menu.addItem(.separator())
         menu.addItem(
+            menuItem("Record Region", symbol: "record.circle", action: #selector(recordRegion))
+        )
+        menu.addItem(
             menuItem("Save As…", symbol: "square.and.arrow.down", action: #selector(saveCapture))
         )
         menu.addItem(
@@ -1140,6 +1149,13 @@ private final class CaptureSessionView: NSView {
 
     @objc private func saveCapture() {
         complete(.save)
+    }
+
+    @objc private func recordRegion() {
+        guard !isCompleting, SelectionGeometry.isValid(selection) else { return }
+        isCompleting = true
+        window?.orderOut(nil)
+        onRecord?(selection.standardized)
     }
 
     @objc private func pinCapture() {

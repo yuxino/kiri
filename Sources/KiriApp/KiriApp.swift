@@ -99,10 +99,16 @@ private struct KiriCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Capture") {
-            Button("Capture") {
-                model.startCapture()
+            if model.isRecording {
+                Button("Stop Recording  \(model.recordingElapsedLabel)") {
+                    model.stopRecording()
+                }
+            } else {
+                Button("Capture") {
+                    model.startCapture()
+                }
+                .disabled(model.captureIsUnavailable)
             }
-            .disabled(model.isCaptureStarting)
         }
 
         CommandGroup(after: .textEditing) {
@@ -120,16 +126,29 @@ private struct MenuBarView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button {
-            model.startCapture()
-        } label: {
-            if model.isCaptureStarting {
-                Label("Preparing Capture…", systemImage: "hourglass")
-            } else {
-                Text("Capture  \(model.captureShortcutLabel)")
+        if model.isRecording {
+            Button {
+                model.stopRecording()
+            } label: {
+                Label(
+                    "Stop Recording  \(model.recordingElapsedLabel)",
+                    systemImage: "stop.circle.fill"
+                )
             }
+        } else {
+            Button {
+                model.startCapture()
+            } label: {
+                if model.isRecordingFinalizing {
+                    Label("Finalizing Recording…", systemImage: "hourglass")
+                } else if model.isRecordingStarting || model.isCaptureStarting {
+                    Label("Preparing Capture…", systemImage: "hourglass")
+                } else {
+                    Text("Capture  \(model.captureShortcutLabel)")
+                }
+            }
+            .disabled(model.captureIsUnavailable)
         }
-        .disabled(model.isCaptureStarting)
         Divider()
         Button("Open Library") {
             openWindow(id: "library")

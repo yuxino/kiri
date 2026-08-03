@@ -29,12 +29,15 @@ Before a stable v0.1 release:
 
 ## v0.2 — video and GIF
 
-- [ ] Region and display recording with ScreenCaptureKit
+- [x] Region recording with ScreenCaptureKit
+- [ ] Full-display recording
 - [ ] Optional microphone and system audio
 - [ ] Pause and resume
+- [x] H.264 MP4 export and local library import
 - [ ] MP4 trimming
-- [ ] Short recording to optimized GIF
-- [ ] Video/GIF thumbnails and inline library playback
+- [x] Short recording to optimized GIF
+- [x] Video thumbnails in the local library
+- [ ] Inline video and GIF playback
 - [ ] Recording duration and file-size safeguards
 
 ## v0.3 — long capture

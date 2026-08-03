@@ -1,4 +1,5 @@
 import AppKit
+@preconcurrency import AVFoundation
 import ImageIO
 import KiriCore
 import SwiftUI
@@ -136,8 +137,8 @@ struct LibraryView: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
-        .disabled(model.isCaptureStarting)
-        .help("Capture a region, then add boxes, lines, arrows, text, or mosaic")
+        .disabled(model.captureIsUnavailable)
+        .help("Capture or record a region, with optional annotation tools")
     }
 
     @ViewBuilder
@@ -398,9 +399,9 @@ private struct CaptureCard: View {
             .overlay {
                 if isHovered, asset.trashedAt == nil {
                     Button {
-                        model.copy(asset)
+                        performPrimaryAction()
                     } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
+                        Label(primaryActionTitle, systemImage: primaryActionSymbol)
                             .font(.callout.weight(.semibold))
                     }
                     .buttonStyle(.borderedProminent)
@@ -435,9 +436,9 @@ private struct CaptureCard: View {
             HStack(spacing: 6) {
                 if asset.trashedAt == nil {
                     Button {
-                        model.copy(asset)
+                        performPrimaryAction()
                     } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
+                        Label(primaryActionTitle, systemImage: primaryActionSymbol)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
@@ -492,9 +493,17 @@ private struct CaptureCard: View {
         }
         .contextMenu {
             if asset.trashedAt == nil {
-                Button("Copy", systemImage: "doc.on.doc") { model.copy(asset) }
+                if asset.kind == .image || asset.kind == .longImage {
+                    Button("Copy", systemImage: "doc.on.doc") { model.copy(asset) }
+                }
                 Button("Open", systemImage: "arrow.up.right.square") { model.open(asset) }
                 Button("Show in Finder", systemImage: "folder") { model.reveal(asset) }
+                if asset.kind == .video {
+                    Button("Convert to GIF", systemImage: "sparkles.rectangle.stack") {
+                        model.convertToGIF(asset)
+                    }
+                    .disabled(!model.canConvertToGIF(asset) || model.isConvertingToGIF(asset))
+                }
                 Button(
                     asset.isFavorite ? "Remove Favorite" : "Favorite",
                     systemImage: asset.isFavorite ? "star.slash" : "star"
@@ -531,10 +540,15 @@ private struct CaptureCard: View {
 
     private var metadata: String {
         let dimensions = "\(asset.pixelWidth) × \(asset.pixelHeight)"
-        guard let source = asset.sourceApplication, !source.isEmpty else {
-            return dimensions
+        let details = if let duration = asset.duration {
+            "\(dimensions) · \(RecordingPolicy.elapsedLabel(duration))"
+        } else {
+            dimensions
         }
-        return "\(dimensions) · \(source)"
+        guard let source = asset.sourceApplication, !source.isEmpty else {
+            return details
+        }
+        return "\(details) · \(source)"
     }
 
     private var iconName: String {
@@ -548,6 +562,16 @@ private struct CaptureCard: View {
 
     private var actionMenu: some View {
         Menu {
+            if asset.kind == .video {
+                Button(
+                    model.isConvertingToGIF(asset) ? "Converting to GIF…" : "Convert to GIF",
+                    systemImage: "sparkles.rectangle.stack"
+                ) {
+                    model.convertToGIF(asset)
+                }
+                .disabled(!model.canConvertToGIF(asset) || model.isConvertingToGIF(asset))
+                Divider()
+            }
             Button("Open", systemImage: "arrow.up.right.square") {
                 model.open(asset)
             }
@@ -563,6 +587,22 @@ private struct CaptureCard: View {
         .fixedSize()
         .help("More Actions")
         .accessibilityLabel("More Actions")
+    }
+
+    private var primaryActionTitle: String {
+        asset.kind == .image || asset.kind == .longImage ? "Copy" : "Open"
+    }
+
+    private var primaryActionSymbol: String {
+        asset.kind == .image || asset.kind == .longImage ? "doc.on.doc" : "play.fill"
+    }
+
+    private func performPrimaryAction() {
+        if asset.kind == .image || asset.kind == .longImage {
+            model.copy(asset)
+        } else {
+            model.open(asset)
+        }
     }
 
     private func iconButton(
@@ -618,7 +658,14 @@ private struct CaptureThumbnail: View {
 
 private enum CaptureThumbnailLoader {
     static func load(_ url: URL) async -> CGImage? {
-        await Task.detached(priority: .userInitiated) {
+        if url.pathExtension.lowercased() == "mp4" || url.pathExtension.lowercased() == "mov" {
+            let asset = AVURLAsset(url: url)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 640, height: 640)
+            return try? await generator.image(at: .zero).image
+        }
+        return await Task.detached(priority: .userInitiated) { () -> CGImage? in
             guard !Task.isCancelled else { return nil }
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
                 return nil
