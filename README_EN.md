@@ -19,12 +19,13 @@ does not disappear just because the clipboard changed.
 
 - Start capture with **⇧⌘A**, which Kiri filters before other apps can act on it
 - Freeze the active display, snap to the frontmost window, or drag, move, and resize a free region
-- Confirm the region and enter inline annotation without a separate capture mode
+- See the full toolbar as soon as the region is drawn, while it remains movable and resizable until a tool is chosen
 - Use pen, rectangle, line, arrow, text, and continuous brush mosaic tools with undo and redo
-- Choose small, medium, or large mosaic brushes and soft, standard, or strong pixelation
+- Continuously adjust pen width, shape width, text size, and mosaic brush size with live numeric sliders
+- Choose soft, standard, or strong mosaic pixelation
 - Choose from eight annotation colors; text supports complex input, long content,
   and Transparent (default), Dark, or Light backgrounds
-- Press Escape to cancel at any capture stage and Return in annotation to copy
+- Press Escape to cancel at any capture stage and Return once a region exists to copy immediately
 - Save, pin, or open the full editor when needed
 - Persist each completed result once and add it to local History
 - Search, favorite, reveal, and copy captures from the local library

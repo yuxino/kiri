@@ -49,44 +49,6 @@ func rejectsTinySelection() throws {
     )
 }
 
-func confirmsAnExistingSelectionWithAClick() throws {
-    try expect(
-        SelectionCompletionPolicy.confirmsExistingSelectionOnMouseUp(
-            selection: CGRect(x: 10, y: 10, width: 120, height: 80),
-            beganInsideSelection: true,
-            interactionMoved: false
-        ),
-        "A click inside an existing selection should confirm it"
-    )
-}
-
-func keepsNewOrAdjustedSelectionsEditable() throws {
-    try expect(
-        !SelectionCompletionPolicy.confirmsExistingSelectionOnMouseUp(
-            selection: CGRect(x: 10, y: 10, width: 2, height: 2),
-            beganInsideSelection: true,
-            interactionMoved: false
-        ),
-        "An invalid selection should not confirm"
-    )
-    try expect(
-        !SelectionCompletionPolicy.confirmsExistingSelectionOnMouseUp(
-            selection: CGRect(x: 10, y: 10, width: 120, height: 80),
-            beganInsideSelection: false,
-            interactionMoved: false
-        ),
-        "Creating a selection should leave it editable"
-    )
-    try expect(
-        !SelectionCompletionPolicy.confirmsExistingSelectionOnMouseUp(
-            selection: CGRect(x: 10, y: 10, width: 120, height: 80),
-            beganInsideSelection: true,
-            interactionMoved: true
-        ),
-        "Moving a selection should leave it editable"
-    )
-}
-
 func hitTestsSelectionHandles() throws {
     let selection = CGRect(x: 20, y: 30, width: 100, height: 80)
     try expect(

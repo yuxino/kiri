@@ -10,6 +10,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
     private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
     private var colorGroupContainer: CaptureToolGroupView?
+    private var sizeControlTitle: NSTextField?
+    private var sizeSlider: NSSlider?
+    private var sizeValueLabel: NSTextField?
     private var textBackgroundButton: CaptureActionButton?
     private var mosaicIntensityButton: CaptureActionButton?
     private var undoButton: CaptureActionButton?
@@ -87,6 +90,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             toolButtons[tool] = button
             toolbar.addArrangedSubview(button)
         }
+        let sizeControl = makeSizeControl()
+        sizeControlTitle = sizeControl.title
+        sizeSlider = sizeControl.slider
+        sizeValueLabel = sizeControl.valueLabel
+        toolbar.addArrangedSubview(sizeControl.container)
         toolbar.addArrangedSubview(CaptureDividerView(height: 24))
 
         let colorGroup = NSStackView()
@@ -228,6 +236,47 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         return controller
     }
 
+    private func makeSizeControl() -> (
+        container: NSStackView,
+        title: NSTextField,
+        slider: NSSlider,
+        valueLabel: NSTextField
+    ) {
+        let container = NSStackView()
+        container.orientation = .horizontal
+        container.alignment = .centerY
+        container.spacing = 5
+
+        let title = NSTextField(labelWithString: "Line")
+        title.font = .systemFont(ofSize: 10, weight: .semibold)
+        title.textColor = .secondaryLabelColor
+
+        let slider = NSSlider(
+            value: 3,
+            minValue: 1,
+            maxValue: 16,
+            target: self,
+            action: #selector(changeToolSize(_:))
+        )
+        slider.isContinuous = true
+        slider.controlSize = .small
+        slider.setAccessibilityLabel("Tool size")
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        slider.widthAnchor.constraint(equalToConstant: 92).isActive = true
+
+        let valueLabel = NSTextField(labelWithString: "3 px")
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: 9, weight: .medium)
+        valueLabel.textColor = .secondaryLabelColor
+        valueLabel.alignment = .right
+        valueLabel.translatesAutoresizingMaskIntoConstraints = false
+        valueLabel.widthAnchor.constraint(equalToConstant: 36).isActive = true
+
+        container.addArrangedSubview(title)
+        container.addArrangedSubview(slider)
+        container.addArrangedSubview(valueLabel)
+        return (container, title, slider, valueLabel)
+    }
+
     private func historyButton(
         symbol: String,
         label: String,
@@ -255,6 +304,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         textBackgroundButton?.isHidden = selected != .text
         mosaicIntensityButton?.isHidden = selected != .mosaic
         colorGroupContainer?.isHidden = selected == .mosaic
+        configureSizeControl(for: selected)
     }
 
     private func updateHistoryControls(canUndo: Bool, canRedo: Bool) {
@@ -279,10 +329,43 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     private func updateMosaicIntensityControl() {
         let intensity = canvas.mosaicIntensity
-        let brushSize = canvas.mosaicBrushSize
-        let label = "Mosaic: \(brushSize.name) brush · \(intensity.name) strength"
+        let label = "Mosaic strength: \(intensity.name)"
         mosaicIntensityButton?.toolTip = label
         mosaicIntensityButton?.setAccessibilityLabel(label)
+    }
+
+    private func configureSizeControl(for tool: AnnotationTool) {
+        let configuration: (String, Double, Double, CGFloat, String) = switch tool {
+        case .pen:
+            ("Brush", 1, 24, canvas.penWidth, "px")
+        case .rectangle, .line, .arrow:
+            ("Line", 1, 16, canvas.shapeWidth, "px")
+        case .text:
+            ("Font", 12, 64, canvas.textFontSize, "pt")
+        case .mosaic:
+            ("Brush", 12, 120, canvas.mosaicBrushDiameter, "px")
+        }
+        sizeControlTitle?.stringValue = configuration.0
+        sizeSlider?.minValue = configuration.1
+        sizeSlider?.maxValue = configuration.2
+        sizeSlider?.doubleValue = Double(configuration.3)
+        sizeValueLabel?.stringValue = "\(Int(configuration.3.rounded())) \(configuration.4)"
+    }
+
+    @objc private func changeToolSize(_ sender: NSSlider) {
+        let value = CGFloat(sender.doubleValue.rounded())
+        sender.doubleValue = Double(value)
+        switch canvas.tool {
+        case .pen:
+            canvas.penWidth = value
+        case .rectangle, .line, .arrow:
+            canvas.shapeWidth = value
+        case .text:
+            canvas.textFontSize = value
+        case .mosaic:
+            canvas.mosaicBrushDiameter = value
+        }
+        configureSizeControl(for: canvas.tool)
     }
 
     @objc private func usePen() {
@@ -358,24 +441,6 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     @objc private func showMosaicIntensityMenu(_ sender: NSButton) {
         let menu = NSMenu()
         menu.autoenablesItems = false
-        let sizeHeading = NSMenuItem(title: "Brush Size", action: nil, keyEquivalent: "")
-        sizeHeading.isEnabled = false
-        menu.addItem(sizeHeading)
-        let sizes: [(MosaicBrushSizePreset, String, Selector)] = [
-            (.small, "Small", #selector(useSmallMosaicBrush)),
-            (.medium, "Medium", #selector(useMediumMosaicBrush)),
-            (.large, "Large", #selector(useLargeMosaicBrush))
-        ]
-        for (option, title, action) in sizes {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            item.target = self
-            item.state = option == canvas.mosaicBrushSize ? .on : .off
-            menu.addItem(item)
-        }
-        menu.addItem(.separator())
-        let strengthHeading = NSMenuItem(title: "Strength", action: nil, keyEquivalent: "")
-        strengthHeading.isEnabled = false
-        menu.addItem(strengthHeading)
         let options: [(MosaicIntensityPreset, String, Selector)] = [
             (.soft, "Soft", #selector(useSoftMosaic)),
             (.standard, "Standard", #selector(useStandardMosaic)),
@@ -393,24 +458,6 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             at: CGPoint(x: sender.bounds.minX, y: sender.bounds.maxY + 4),
             in: sender
         )
-    }
-
-    @objc private func useSmallMosaicBrush() {
-        selectMosaicBrushSize(.small)
-    }
-
-    @objc private func useMediumMosaicBrush() {
-        selectMosaicBrushSize(.medium)
-    }
-
-    @objc private func useLargeMosaicBrush() {
-        selectMosaicBrushSize(.large)
-    }
-
-    private func selectMosaicBrushSize(_ brushSize: MosaicBrushSizePreset) {
-        canvas.mosaicBrushSize = brushSize
-        updateMosaicIntensityControl()
-        useMosaic()
     }
 
     @objc private func useSoftMosaic() {

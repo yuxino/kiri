@@ -169,16 +169,6 @@ public enum SelectionGeometry {
     }
 }
 
-public enum SelectionCompletionPolicy {
-    public static func confirmsExistingSelectionOnMouseUp(
-        selection: CGRect,
-        beganInsideSelection: Bool,
-        interactionMoved: Bool
-    ) -> Bool {
-        SelectionGeometry.isValid(selection) && beganInsideSelection && !interactionMoved
-    }
-}
-
 public enum WindowSnapGeometry {
     public static func candidate(
         at point: CGPoint,

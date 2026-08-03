@@ -99,43 +99,13 @@ enum MosaicIntensityPreset: CaseIterable, Equatable {
     }
 }
 
-enum MosaicBrushSizePreset: CaseIterable, Equatable {
-    case small
-    case medium
-    case large
-
-    var name: String {
-        switch self {
-        case .small: "Small"
-        case .medium: "Medium"
-        case .large: "Large"
-        }
-    }
-
-    var shortName: String {
-        switch self {
-        case .small: "S"
-        case .medium: "M"
-        case .large: "L"
-        }
-    }
-
-    var viewDiameter: CGFloat {
-        switch self {
-        case .small: 20
-        case .medium: 36
-        case .large: 56
-        }
-    }
-}
-
 private enum AnnotationMark {
-    case pen([CGPoint], AnnotationColorPreset)
-    case rectangle(CGRect, AnnotationColorPreset)
-    case line(CGPoint, CGPoint, AnnotationColorPreset)
-    case arrow(CGPoint, CGPoint, AnnotationColorPreset)
-    case text(String, CGRect, AnnotationColorPreset, AnnotationTextBackgroundStyle)
-    case mosaic([CGPoint], MosaicBrushSizePreset, MosaicIntensityPreset)
+    case pen([CGPoint], AnnotationColorPreset, CGFloat)
+    case rectangle(CGRect, AnnotationColorPreset, CGFloat)
+    case line(CGPoint, CGPoint, AnnotationColorPreset, CGFloat)
+    case arrow(CGPoint, CGPoint, AnnotationColorPreset, CGFloat)
+    case text(String, CGRect, AnnotationColorPreset, AnnotationTextBackgroundStyle, CGFloat)
+    case mosaic([CGPoint], CGFloat, MosaicIntensityPreset)
 }
 
 private final class InlineAnnotationTextView: NSTextView {
@@ -204,7 +174,20 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             needsDisplay = true
         }
     }
-    var mosaicBrushSize: MosaicBrushSizePreset = .medium {
+    var penWidth: CGFloat = 3 {
+        didSet { needsDisplay = true }
+    }
+    var shapeWidth: CGFloat = 3 {
+        didSet { needsDisplay = true }
+    }
+    var textFontSize: CGFloat = 18 {
+        didSet {
+            updateTextEditorStyle()
+            resizeTextEditor()
+            needsDisplay = true
+        }
+    }
+    var mosaicBrushDiameter: CGFloat = 36 {
         didSet {
             needsDisplay = true
         }
@@ -218,6 +201,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     private var textEditor: InlineAnnotationTextView?
     private var textColorPreset: AnnotationColorPreset?
     private var editingTextBackgroundStyle: AnnotationTextBackgroundStyle?
+    private var editingTextFontSize: CGFloat?
 
     init(image: CGImage) {
         self.image = image
@@ -248,21 +232,21 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             draw(mark)
         }
         if tool == .pen, draftPoints.count > 1 {
-            draw(.pen(draftPoints, colorPreset))
+            draw(.pen(draftPoints, colorPreset, penWidth))
         } else if tool == .mosaic, !draftPoints.isEmpty {
             drawMosaicStroke(
                 points: draftPoints,
-                brushSize: mosaicBrushSize,
+                brushDiameter: mosaicBrushDiameter,
                 intensity: mosaicIntensity
             )
         } else if let dragStart, let dragCurrent {
             switch tool {
             case .rectangle:
-                draw(.rectangle(Self.rect(from: dragStart, to: dragCurrent), colorPreset))
+                draw(.rectangle(Self.rect(from: dragStart, to: dragCurrent), colorPreset, shapeWidth))
             case .line:
-                draw(.line(dragStart, dragCurrent, colorPreset))
+                draw(.line(dragStart, dragCurrent, colorPreset, shapeWidth))
             case .arrow:
-                draw(.arrow(dragStart, dragCurrent, colorPreset))
+                draw(.arrow(dragStart, dragCurrent, colorPreset, shapeWidth))
             case .pen, .text, .mosaic:
                 break
             }
@@ -330,17 +314,17 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         guard let start = dragStart, let end = dragCurrent else { return }
         switch tool {
         case .pen where draftPoints.count > 1:
-            append(.pen(draftPoints, colorPreset))
+            append(.pen(draftPoints, colorPreset, penWidth))
         case .rectangle:
-            append(.rectangle(Self.rect(from: start, to: end), colorPreset))
+            append(.rectangle(Self.rect(from: start, to: end), colorPreset, shapeWidth))
         case .line where Self.hasVisibleLength(from: start, to: end):
-            append(.line(start, end, colorPreset))
+            append(.line(start, end, colorPreset, shapeWidth))
         case .arrow:
             if Self.hasVisibleLength(from: start, to: end) {
-                append(.arrow(start, end, colorPreset))
+                append(.arrow(start, end, colorPreset, shapeWidth))
             }
         case .mosaic where !draftPoints.isEmpty:
-            append(.mosaic(draftPoints, mosaicBrushSize, mosaicIntensity))
+            append(.mosaic(draftPoints, mosaicBrushDiameter, mosaicIntensity))
         case .text:
             break
         default:
@@ -461,37 +445,37 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
     private func draw(_ mark: AnnotationMark) {
         switch mark {
-        case let .pen(points, colorPreset):
+        case let .pen(points, colorPreset, width):
             colorPreset.color.setStroke()
             guard let first = points.first else { return }
             let path = NSBezierPath()
             path.move(to: first)
             points.dropFirst().forEach { path.line(to: $0) }
-            path.lineWidth = 3
+            path.lineWidth = width
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
             path.stroke()
-        case let .rectangle(rect, colorPreset):
+        case let .rectangle(rect, colorPreset, width):
             colorPreset.color.setStroke()
             let path = NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2)
-            path.lineWidth = 3
+            path.lineWidth = width
             path.stroke()
-        case let .line(start, end, colorPreset):
+        case let .line(start, end, colorPreset, width):
             colorPreset.color.setStroke()
-            drawLine(from: start, to: end, width: 3)
-        case let .arrow(start, end, colorPreset):
+            drawLine(from: start, to: end, width: width)
+        case let .arrow(start, end, colorPreset, width):
             colorPreset.color.setStroke()
-            drawArrow(from: start, to: end, width: 3)
-        case let .text(text, rect, colorPreset, backgroundStyle):
+            drawArrow(from: start, to: end, width: width)
+        case let .text(text, rect, colorPreset, backgroundStyle, fontSize):
             drawText(
                 text,
                 in: rect,
-                fontSize: 18,
+                fontSize: fontSize,
                 colorPreset: colorPreset,
                 backgroundStyle: backgroundStyle
             )
-        case let .mosaic(points, brushSize, intensity):
-            drawMosaicStroke(points: points, brushSize: brushSize, intensity: intensity)
+        case let .mosaic(points, brushDiameter, intensity):
+            drawMosaicStroke(points: points, brushDiameter: brushDiameter, intensity: intensity)
         }
     }
 
@@ -505,17 +489,17 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         }
 
         switch mark {
-        case let .pen(points, colorPreset):
+        case let .pen(points, colorPreset, width):
             colorPreset.color.setStroke()
             guard let first = points.first else { return }
             let path = NSBezierPath()
             path.move(to: convert(first))
             points.dropFirst().forEach { path.line(to: convert($0)) }
-            path.lineWidth = max(4, 3 * scaleX)
+            path.lineWidth = max(1, width * min(scaleX, scaleY))
             path.lineCapStyle = .round
             path.lineJoinStyle = .round
             path.stroke()
-        case let .rectangle(rect, colorPreset):
+        case let .rectangle(rect, colorPreset, width):
             colorPreset.color.setStroke()
             let first = convert(CGPoint(x: rect.minX, y: rect.maxY))
             let second = convert(CGPoint(x: rect.maxX, y: rect.minY))
@@ -526,20 +510,24 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
                 height: abs(second.y - first.y)
             )
             let path = NSBezierPath(roundedRect: converted, xRadius: 3, yRadius: 3)
-            path.lineWidth = max(4, 3 * scaleX)
+            path.lineWidth = max(1, width * min(scaleX, scaleY))
             path.stroke()
-        case let .line(start, end, colorPreset):
+        case let .line(start, end, colorPreset, width):
             colorPreset.color.setStroke()
             drawLine(
                 from: convert(start),
                 to: convert(end),
-                width: max(4, 3 * scaleX)
+                width: max(1, width * min(scaleX, scaleY))
             )
-        case let .arrow(start, end, colorPreset):
+        case let .arrow(start, end, colorPreset, width):
             colorPreset.color.setStroke()
-            drawArrow(from: convert(start), to: convert(end), width: max(4, 3 * scaleX))
-        case let .text(text, rect, colorPreset, backgroundStyle):
-            let fontSize = max(18, 18 * min(scaleX, scaleY))
+            drawArrow(
+                from: convert(start),
+                to: convert(end),
+                width: max(1, width * min(scaleX, scaleY))
+            )
+        case let .text(text, rect, colorPreset, backgroundStyle, viewFontSize):
+            let fontSize = max(1, viewFontSize * min(scaleX, scaleY))
             let first = convert(CGPoint(x: rect.minX, y: rect.maxY))
             let second = convert(CGPoint(x: rect.maxX, y: rect.minY))
             let convertedRect = CGRect(
@@ -556,11 +544,11 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
                 backgroundStyle: backgroundStyle,
                 paddingScale: min(scaleX, scaleY)
             )
-        case let .mosaic(points, brushSize, intensity):
+        case let .mosaic(points, brushDiameter, intensity):
             guard !points.isEmpty else { return }
             let viewBounds = mosaicStrokeBounds(
                 points: points,
-                diameter: brushSize.viewDiameter
+                diameter: brushDiameter
             ).intersection(imageRect)
             guard !viewBounds.isNull, viewBounds.width >= 1, viewBounds.height >= 1 else { return }
             let topLeft = convert(CGPoint(x: viewBounds.minX, y: viewBounds.maxY))
@@ -576,7 +564,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             NSGraphicsContext.saveGraphicsState()
             clipToMosaicStroke(
                 points: convertedPoints,
-                diameter: brushSize.viewDiameter * min(scaleX, scaleY)
+                diameter: brushDiameter * min(scaleX, scaleY)
             )
             NSGraphicsContext.current?.imageInterpolation = .none
             mosaic.draw(
@@ -636,7 +624,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
         let editor = InlineAnnotationTextView(frame: .zero)
         editor.string = ""
-        editor.font = .systemFont(ofSize: 18, weight: .semibold)
+        editor.font = .systemFont(ofSize: textFontSize, weight: .semibold)
         editor.isRichText = false
         editor.importsGraphics = false
         editor.isAutomaticQuoteSubstitutionEnabled = false
@@ -673,6 +661,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         textEditor = editor
         textColorPreset = colorPreset
         editingTextBackgroundStyle = textBackgroundStyle
+        editingTextFontSize = textFontSize
         updateTextEditorStyle()
         resizeTextEditor()
         window?.makeFirstResponder(editor)
@@ -689,9 +678,10 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         )
         let colorPreset = textColorPreset
         let backgroundStyle = editingTextBackgroundStyle
+        let fontSize = editingTextFontSize
         discardTextEditing()
-        if !text.isEmpty, let colorPreset, let backgroundStyle {
-            append(.text(text, textRect, colorPreset, backgroundStyle))
+        if !text.isEmpty, let colorPreset, let backgroundStyle, let fontSize {
+            append(.text(text, textRect, colorPreset, backgroundStyle, fontSize))
         }
     }
 
@@ -700,6 +690,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         textEditor = nil
         textColorPreset = nil
         editingTextBackgroundStyle = nil
+        editingTextFontSize = nil
         editor.delegate = nil
         editor.onCommit = nil
         editor.onCancel = nil
@@ -719,6 +710,8 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         guard let editor = textEditor else { return }
         textColorPreset = colorPreset
         editingTextBackgroundStyle = textBackgroundStyle
+        editingTextFontSize = textFontSize
+        editor.font = .systemFont(ofSize: textFontSize, weight: .semibold)
         editor.textColor = colorPreset.color
         editor.insertionPointColor = colorPreset.color
         editor.backgroundColor = textBackgroundStyle.color ?? .clear
@@ -748,18 +741,18 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
     private func drawMosaicStroke(
         points: [CGPoint],
-        brushSize: MosaicBrushSizePreset,
-        intensity: MosaicIntensityPreset,
+        brushDiameter: CGFloat,
+        intensity: MosaicIntensityPreset
     ) {
         guard !points.isEmpty else { return }
         let strokeBounds = mosaicStrokeBounds(
             points: points,
-            diameter: brushSize.viewDiameter
+            diameter: brushDiameter
         ).intersection(imageRect)
         guard !strokeBounds.isNull,
               let mosaic = pixelatedCrop(for: strokeBounds, intensity: intensity) else { return }
         NSGraphicsContext.saveGraphicsState()
-        clipToMosaicStroke(points: points, diameter: brushSize.viewDiameter)
+        clipToMosaicStroke(points: points, diameter: brushDiameter)
         NSGraphicsContext.current?.imageInterpolation = .none
         mosaic.draw(
             in: strokeBounds,
@@ -818,7 +811,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     }
 
     private func drawMosaicBrushCursor(at point: CGPoint) {
-        let diameter = mosaicBrushSize.viewDiameter
+        let diameter = mosaicBrushDiameter
         let cursorRect = CGRect(
             x: point.x - diameter / 2,
             y: point.y - diameter / 2,

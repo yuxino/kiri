@@ -106,10 +106,17 @@ private final class CaptureSessionView: NSView {
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
     private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
     private var colorGroupContainer: CaptureToolGroupView?
+    private var strokeOptionsRow: NSStackView?
+    private var strokeOptionsTitle: NSTextField?
+    private var strokeSizeSlider: NSSlider?
+    private var strokeSizeValueLabel: NSTextField?
     private var textOptionsRow: NSStackView?
     private var textBackgroundControl: NSSegmentedControl?
+    private var textFontSizeSlider: NSSlider?
+    private var textFontSizeValueLabel: NSTextField?
     private var mosaicOptionsRow: NSStackView?
-    private var mosaicBrushSizeControl: NSSegmentedControl?
+    private var mosaicBrushSizeSlider: NSSlider?
+    private var mosaicBrushSizeValueLabel: NSTextField?
     private var mosaicIntensityControl: NSSegmentedControl?
     private var undoButton: CaptureActionButton?
     private var redoButton: CaptureActionButton?
@@ -159,7 +166,9 @@ private final class CaptureSessionView: NSView {
             if phase == .selecting, SelectionGeometry.isValid(selection) {
                 drawDimensions()
                 drawSelectionHandles()
-                drawHint()
+                if toolbar == nil {
+                    drawHint()
+                }
             } else if phase == .selecting, snapCandidate != nil {
                 drawWindowHint(for: activeRect)
             }
@@ -179,7 +188,7 @@ private final class CaptureSessionView: NSView {
 
     override func layout() {
         super.layout()
-        if phase == .annotating {
+        if toolbar != nil {
             layoutAnnotationUI()
         }
     }
@@ -216,6 +225,7 @@ private final class CaptureSessionView: NSView {
                 pendingWindowSelection = nil
             } else {
                 selectionInteraction = .creating
+                tearDownAnnotationUI()
                 pendingWindowSelection = WindowSnapGeometry.candidate(
                     at: point,
                     windowsFrontToBack: windowRectsFrontToBack,
@@ -225,6 +235,7 @@ private final class CaptureSessionView: NSView {
             }
         } else {
             selectionInteraction = .creating
+            tearDownAnnotationUI()
             pendingWindowSelection = snapCandidate
             selection = .null
         }
@@ -270,6 +281,9 @@ private final class CaptureSessionView: NSView {
             )
         }
         hoverPoint = current
+        if toolbar != nil {
+            layoutAnnotationUI()
+        }
         needsDisplay = true
     }
 
@@ -285,22 +299,13 @@ private final class CaptureSessionView: NSView {
         if !SelectionGeometry.isValid(selection) {
             selection = .null
         }
-        let confirmsSelection = SelectionCompletionPolicy.confirmsExistingSelectionOnMouseUp(
-            selection: selection,
-            beganInsideSelection: {
-                if case .moving = interaction { return true }
-                return false
-            }(),
-            interactionMoved: interactionMoved
-        )
         dragStart = nil
         selectionInteraction = nil
         interactionMoved = false
         pendingWindowSelection = nil
         snapCandidate = nil
-        if confirmsSelection {
-            finishSelection()
-            return
+        if SelectionGeometry.isValid(selection) {
+            prepareSelectionToolbar()
         }
         if let hoverPoint {
             updateCursor(at: hoverPoint)
@@ -360,7 +365,7 @@ private final class CaptureSessionView: NSView {
         }
 
         if phase == .selecting, isReturn, SelectionGeometry.isValid(selection) {
-            finishSelection()
+            complete(.copy)
             return
         }
 
@@ -388,51 +393,60 @@ private final class CaptureSessionView: NSView {
                     break
                 }
             }
+        }
+        if SelectionGeometry.isValid(selection) {
             let commandModifiers: NSEvent.ModifierFlags = [.command, .control, .option]
             if event.modifierFlags.intersection(commandModifiers).isEmpty {
                 switch event.charactersIgnoringModifiers?.lowercased() {
-                case "p":
-                    usePen()
-                    return
-                case "r":
-                    useRectangle()
-                    return
-                case "l":
-                    useLine()
-                    return
-                case "a":
-                    useArrow()
-                    return
-                case "t":
-                    useText()
-                    return
-                case "m":
-                    useMosaic()
-                    return
-                default:
-                    break
+                case "p": usePen(); return
+                case "r": useRectangle(); return
+                case "l": useLine(); return
+                case "a": useArrow(); return
+                case "t": useText(); return
+                case "m": useMosaic(); return
+                default: break
                 }
             }
         }
         super.keyDown(with: event)
     }
 
-    private func finishSelection() {
-        beginAnnotation()
-    }
-
-    private func beginAnnotation() {
+    private func prepareSelectionToolbar() {
         guard phase == .selecting,
               let cropped = croppedSelection() else {
             return
         }
-        phase = .annotating
-        hoverPoint = nil
-        snapCandidate = nil
-        NSCursor.arrow.set()
-
+        let previous = annotationCanvas
         let canvas = AnnotationCanvasView(image: cropped)
-        canvas.tool = .rectangle
+        if let previous {
+            canvas.colorPreset = previous.colorPreset
+            canvas.textBackgroundStyle = previous.textBackgroundStyle
+            canvas.mosaicIntensity = previous.mosaicIntensity
+            canvas.penWidth = previous.penWidth
+            canvas.shapeWidth = previous.shapeWidth
+            canvas.textFontSize = previous.textFontSize
+            canvas.mosaicBrushDiameter = previous.mosaicBrushDiameter
+        }
+        configureAnnotationCanvas(canvas)
+        canvas.isHidden = true
+        previous?.removeFromSuperview()
+        addSubview(canvas, positioned: .below, relativeTo: toolbar)
+        annotationCanvas = canvas
+
+        if toolbar == nil {
+            let toolbar = makeToolbar()
+            addSubview(toolbar)
+            self.toolbar = toolbar
+        }
+        clearToolSelectionForAdjustingRegion()
+        updateColorButtons(selected: canvas.colorPreset)
+        updateHistoryControls(canUndo: false, canRedo: false)
+        layoutAnnotationUI()
+        window?.makeFirstResponder(self)
+        needsDisplay = true
+    }
+
+    private func configureAnnotationCanvas(_ canvas: AnnotationCanvasView) {
         canvas.onToolChange = { [weak self] tool in
             self?.updateToolButtons(selected: tool)
         }
@@ -445,23 +459,45 @@ private final class CaptureSessionView: NSView {
         canvas.onCancelRequested = { [weak self] in
             self?.onCancel?()
         }
-        addSubview(canvas)
-        annotationCanvas = canvas
+    }
 
-        let toolbar = makeToolbar()
-        addSubview(toolbar)
-        self.toolbar = toolbar
+    private func activateAnnotationTool(_ tool: AnnotationTool) {
+        guard SelectionGeometry.isValid(selection) else { return }
+        if annotationCanvas == nil {
+            prepareSelectionToolbar()
+        }
+        guard let canvas = annotationCanvas else { return }
+        phase = .annotating
+        hoverPoint = nil
+        snapCandidate = nil
+        canvas.isHidden = false
+        canvas.tool = tool
+        NSCursor.arrow.set()
         layoutAnnotationUI()
-        updateToolButtons(selected: canvas.tool)
-        updateColorButtons(selected: canvas.colorPreset)
-        updateHistoryControls(canUndo: false, canRedo: false)
         window?.makeFirstResponder(self)
         needsDisplay = true
+    }
+
+    private func clearToolSelectionForAdjustingRegion() {
+        toolButtons.values.forEach { $0.setToolSelected(false) }
+        toolbarHintLabel?.isHidden = false
+        toolbarHintLabel?.stringValue = Self.adjustingRegionHint
+        strokeOptionsRow?.isHidden = true
+        textOptionsRow?.isHidden = true
+        mosaicOptionsRow?.isHidden = true
+        colorGroupContainer?.isHidden = false
     }
 
     @objc private func returnToSelection() {
         phase = .selecting
         selection = .null
+        tearDownAnnotationUI()
+        NSCursor.crosshair.set()
+        window?.makeFirstResponder(self)
+        needsDisplay = true
+    }
+
+    private func tearDownAnnotationUI() {
         annotationCanvas?.removeFromSuperview()
         annotationCanvas = nil
         toolbar?.removeFromSuperview()
@@ -469,18 +505,22 @@ private final class CaptureSessionView: NSView {
         toolButtons.removeAll()
         colorButtons.removeAll()
         colorGroupContainer = nil
+        strokeOptionsRow = nil
+        strokeOptionsTitle = nil
+        strokeSizeSlider = nil
+        strokeSizeValueLabel = nil
         textOptionsRow = nil
         textBackgroundControl = nil
+        textFontSizeSlider = nil
+        textFontSizeValueLabel = nil
         mosaicOptionsRow = nil
-        mosaicBrushSizeControl = nil
+        mosaicBrushSizeSlider = nil
+        mosaicBrushSizeValueLabel = nil
         mosaicIntensityControl = nil
         undoButton = nil
         redoButton = nil
         clearAnnotationsItem = nil
         toolbarHintLabel = nil
-        NSCursor.crosshair.set()
-        window?.makeFirstResponder(self)
-        needsDisplay = true
     }
 
     private func croppedSelection() -> CGImage? {
@@ -653,25 +693,30 @@ private final class CaptureSessionView: NSView {
         hint.lineBreakMode = .byTruncatingTail
         toolbarHintLabel = hint
 
-        let textOptions = makeContextRow(
-            symbol: "character.textbox",
-            title: "Text background",
-            segments: ["Transparent", "Dark", "Light"],
-            action: #selector(selectTextBackgroundOption(_:)),
-            detail: "Click the image to place text"
-        )
+        let strokeOptions = makeStrokeContextRow()
+        strokeOptions.row.isHidden = true
+        strokeOptionsRow = strokeOptions.row
+        strokeOptionsTitle = strokeOptions.title
+        strokeSizeSlider = strokeOptions.slider
+        strokeSizeValueLabel = strokeOptions.valueLabel
+
+        let textOptions = makeTextContextRow()
         textOptions.row.isHidden = true
         textOptionsRow = textOptions.row
-        textBackgroundControl = textOptions.control
+        textBackgroundControl = textOptions.backgroundControl
+        textFontSizeSlider = textOptions.slider
+        textFontSizeValueLabel = textOptions.valueLabel
 
         let mosaicOptions = makeMosaicContextRow()
         mosaicOptions.row.isHidden = true
         mosaicOptionsRow = mosaicOptions.row
-        mosaicBrushSizeControl = mosaicOptions.sizeControl
+        mosaicBrushSizeSlider = mosaicOptions.slider
+        mosaicBrushSizeValueLabel = mosaicOptions.valueLabel
         mosaicIntensityControl = mosaicOptions.intensityControl
 
         content.addArrangedSubview(actions)
         content.addArrangedSubview(hint)
+        content.addArrangedSubview(strokeOptions.row)
         content.addArrangedSubview(textOptions.row)
         content.addArrangedSubview(mosaicOptions.row)
         effect.addSubview(content)
@@ -685,55 +730,76 @@ private final class CaptureSessionView: NSView {
         return effect
     }
 
-    private func makeContextRow(
-        symbol: String,
-        title: String,
-        segments: [String],
-        action: Selector,
-        detail: String
-    ) -> (row: NSStackView, control: NSSegmentedControl) {
+    private func makeStrokeContextRow() -> (
+        row: NSStackView,
+        title: NSTextField,
+        slider: NSSlider,
+        valueLabel: NSTextField
+    ) {
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 8
+        let title = contextLabel("Line width")
+        let size = makeSizeSlider(
+            value: 3,
+            minimum: 1,
+            maximum: 16,
+            action: #selector(changeStrokeSize(_:)),
+            accessibilityLabel: "Annotation line width"
+        )
+        let detailLabel = detailLabel("Drag to draw")
 
-        let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
-        icon.contentTintColor = CaptureUIColors.accent
-        icon.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 16),
-            icon.heightAnchor.constraint(equalToConstant: 16)
-        ])
-
-        let titleLabel = NSTextField(labelWithString: title)
-        titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-        titleLabel.textColor = .labelColor
-
-        let control = NSSegmentedControl(labels: segments, trackingMode: .selectOne, target: self, action: action)
-        control.segmentStyle = .capsule
-        control.controlSize = .small
-        control.font = .systemFont(ofSize: 10, weight: .medium)
-        control.setAccessibilityLabel(title)
-        for index in segments.indices {
-            control.setWidth(segments[index].count > 6 ? 78 : 58, forSegment: index)
-        }
-
-        let detailLabel = NSTextField(labelWithString: detail)
-        detailLabel.font = .systemFont(ofSize: 10, weight: .medium)
-        detailLabel.textColor = .secondaryLabelColor
-
-        row.addArrangedSubview(icon)
-        row.addArrangedSubview(titleLabel)
-        row.addArrangedSubview(control)
+        row.addArrangedSubview(contextIcon("lineweight", label: "Stroke size"))
+        row.addArrangedSubview(title)
+        row.addArrangedSubview(size.slider)
+        row.addArrangedSubview(size.valueLabel)
         row.addArrangedSubview(detailLabel)
-        return (row, control)
+        return (row, title, size.slider, size.valueLabel)
+    }
+
+    private func makeTextContextRow() -> (
+        row: NSStackView,
+        slider: NSSlider,
+        valueLabel: NSTextField,
+        backgroundControl: NSSegmentedControl
+    ) {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 7
+        let size = makeSizeSlider(
+            value: 18,
+            minimum: 12,
+            maximum: 64,
+            action: #selector(changeTextFontSize(_:)),
+            accessibilityLabel: "Text font size"
+        )
+        let backgroundControl = NSSegmentedControl(
+            labels: ["Transparent", "Dark", "Light"],
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(selectTextBackgroundOption(_:))
+        )
+        configureContextControl(
+            backgroundControl,
+            widths: [78, 52, 52],
+            label: "Text background"
+        )
+
+        row.addArrangedSubview(contextIcon("character.textbox", label: "Text options"))
+        row.addArrangedSubview(contextLabel("Font"))
+        row.addArrangedSubview(size.slider)
+        row.addArrangedSubview(size.valueLabel)
+        row.addArrangedSubview(contextLabel("Background"))
+        row.addArrangedSubview(backgroundControl)
+        return (row, size.slider, size.valueLabel, backgroundControl)
     }
 
     private func makeMosaicContextRow() -> (
         row: NSStackView,
-        sizeControl: NSSegmentedControl,
+        slider: NSSlider,
+        valueLabel: NSTextField,
         intensityControl: NSSegmentedControl
     ) {
         let row = NSStackView()
@@ -741,27 +807,13 @@ private final class CaptureSessionView: NSView {
         row.alignment = .centerY
         row.spacing = 7
 
-        let icon = NSImageView()
-        icon.image = NSImage(
-            systemSymbolName: "square.grid.3x3.fill",
-            accessibilityDescription: "Mosaic brush"
+        let size = makeSizeSlider(
+            value: 36,
+            minimum: 12,
+            maximum: 120,
+            action: #selector(changeMosaicBrushSize(_:)),
+            accessibilityLabel: "Mosaic brush size"
         )
-        icon.contentTintColor = CaptureUIColors.accent
-        icon.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: 16),
-            icon.heightAnchor.constraint(equalToConstant: 16)
-        ])
-
-        let brushLabel = contextLabel("Brush")
-        let sizeControl = NSSegmentedControl(
-            labels: MosaicBrushSizePreset.allCases.map(\.shortName),
-            trackingMode: .selectOne,
-            target: self,
-            action: #selector(selectMosaicBrushSize(_:))
-        )
-        configureContextControl(sizeControl, widths: [32, 32, 32], label: "Mosaic brush size")
 
         let strengthLabel = contextLabel("Strength")
         let intensityControl = NSSegmentedControl(
@@ -772,17 +824,63 @@ private final class CaptureSessionView: NSView {
         )
         configureContextControl(intensityControl, widths: [48, 66, 56], label: "Mosaic strength")
 
-        let detailLabel = NSTextField(labelWithString: "Drag to paint")
-        detailLabel.font = .systemFont(ofSize: 10, weight: .medium)
-        detailLabel.textColor = .secondaryLabelColor
-
-        row.addArrangedSubview(icon)
-        row.addArrangedSubview(brushLabel)
-        row.addArrangedSubview(sizeControl)
+        row.addArrangedSubview(contextIcon("square.grid.3x3.fill", label: "Mosaic brush"))
+        row.addArrangedSubview(contextLabel("Brush"))
+        row.addArrangedSubview(size.slider)
+        row.addArrangedSubview(size.valueLabel)
         row.addArrangedSubview(strengthLabel)
         row.addArrangedSubview(intensityControl)
-        row.addArrangedSubview(detailLabel)
-        return (row, sizeControl, intensityControl)
+        row.addArrangedSubview(detailLabel("Drag to paint"))
+        return (row, size.slider, size.valueLabel, intensityControl)
+    }
+
+    private func makeSizeSlider(
+        value: Double,
+        minimum: Double,
+        maximum: Double,
+        action: Selector,
+        accessibilityLabel: String
+    ) -> (slider: NSSlider, valueLabel: NSTextField) {
+        let slider = NSSlider(
+            value: value,
+            minValue: minimum,
+            maxValue: maximum,
+            target: self,
+            action: action
+        )
+        slider.isContinuous = true
+        slider.controlSize = .small
+        slider.setAccessibilityLabel(accessibilityLabel)
+        slider.translatesAutoresizingMaskIntoConstraints = false
+        slider.widthAnchor.constraint(equalToConstant: 124).isActive = true
+
+        let valueLabel = NSTextField(labelWithString: "\(Int(value)) px")
+        valueLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        valueLabel.textColor = .secondaryLabelColor
+        valueLabel.alignment = .right
+        valueLabel.translatesAutoresizingMaskIntoConstraints = false
+        valueLabel.widthAnchor.constraint(equalToConstant: 40).isActive = true
+        return (slider, valueLabel)
+    }
+
+    private func contextIcon(_ symbol: String, label: String) -> NSImageView {
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        icon.contentTintColor = CaptureUIColors.accent
+        icon.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16)
+        ])
+        return icon
+    }
+
+    private func detailLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 10, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        return label
     }
 
     private func contextLabel(_ text: String) -> NSTextField {
@@ -826,8 +924,13 @@ private final class CaptureSessionView: NSView {
 
     private func connectToolbarHint(to button: CaptureActionButton) {
         button.onHoverHintChange = { [weak self] hint in
-            self?.toolbarHintLabel?.stringValue = hint ?? Self.defaultToolbarHint
+            guard let self else { return }
+            toolbarHintLabel?.stringValue = hint ?? currentToolbarHint
         }
+    }
+
+    private var currentToolbarHint: String {
+        phase == .selecting ? Self.adjustingRegionHint : Self.defaultToolbarHint
     }
 
     private func separator() -> NSView {
@@ -867,10 +970,32 @@ private final class CaptureSessionView: NSView {
     }
 
     private func updateContextualControls(selected: AnnotationTool) {
-        toolbarHintLabel?.isHidden = selected == .text || selected == .mosaic
+        toolbarHintLabel?.isHidden = true
+        strokeOptionsRow?.isHidden = selected == .text || selected == .mosaic
         textOptionsRow?.isHidden = selected != .text
         mosaicOptionsRow?.isHidden = selected != .mosaic
         colorGroupContainer?.isHidden = selected == .mosaic
+
+        if let canvas = annotationCanvas {
+            let isPen = selected == .pen
+            strokeOptionsTitle?.stringValue = isPen ? "Brush size" : "Line width"
+            strokeSizeSlider?.minValue = 1
+            strokeSizeSlider?.maxValue = isPen ? 24 : 16
+            strokeSizeSlider?.doubleValue = Double(isPen ? canvas.penWidth : canvas.shapeWidth)
+            updateValueLabel(
+                strokeSizeValueLabel,
+                value: isPen ? canvas.penWidth : canvas.shapeWidth,
+                unit: "px"
+            )
+            textFontSizeSlider?.doubleValue = Double(canvas.textFontSize)
+            updateValueLabel(textFontSizeValueLabel, value: canvas.textFontSize, unit: "pt")
+            mosaicBrushSizeSlider?.doubleValue = Double(canvas.mosaicBrushDiameter)
+            updateValueLabel(
+                mosaicBrushSizeValueLabel,
+                value: canvas.mosaicBrushDiameter,
+                unit: "px"
+            )
+        }
 
         if let style = annotationCanvas?.textBackgroundStyle {
             textBackgroundControl?.selectedSegment = switch style {
@@ -883,13 +1008,13 @@ private final class CaptureSessionView: NSView {
            let index = MosaicIntensityPreset.allCases.firstIndex(of: intensity) {
             mosaicIntensityControl?.selectedSegment = index
         }
-        if let brushSize = annotationCanvas?.mosaicBrushSize,
-           let index = MosaicBrushSizePreset.allCases.firstIndex(of: brushSize) {
-            mosaicBrushSizeControl?.selectedSegment = index
-        }
         if toolbar != nil {
             layoutAnnotationUI()
         }
+    }
+
+    private func updateValueLabel(_ label: NSTextField?, value: CGFloat, unit: String) {
+        label?.stringValue = "\(Int(value.rounded())) \(unit)"
     }
 
     private func updateHistoryControls(canUndo: Bool, canRedo: Bool) {
@@ -915,8 +1040,7 @@ private final class CaptureSessionView: NSView {
     }
 
     @objc private func useText() {
-        annotationCanvas?.beginTextPlacement()
-        window?.makeFirstResponder(self)
+        selectTool(.text)
     }
 
     @objc private func selectAnnotationColor(_ sender: AnnotationColorSwatchButton) {
@@ -940,10 +1064,33 @@ private final class CaptureSessionView: NSView {
         useMosaic()
     }
 
-    @objc private func selectMosaicBrushSize(_ sender: NSSegmentedControl) {
-        guard MosaicBrushSizePreset.allCases.indices.contains(sender.selectedSegment) else { return }
-        annotationCanvas?.mosaicBrushSize = MosaicBrushSizePreset.allCases[sender.selectedSegment]
-        useMosaic()
+    @objc private func changeStrokeSize(_ sender: NSSlider) {
+        guard let canvas = annotationCanvas else { return }
+        let value = CGFloat(sender.doubleValue.rounded())
+        sender.doubleValue = Double(value)
+        if canvas.tool == .pen {
+            canvas.penWidth = value
+        } else {
+            canvas.shapeWidth = value
+        }
+        updateValueLabel(strokeSizeValueLabel, value: value, unit: "px")
+        window?.makeFirstResponder(self)
+    }
+
+    @objc private func changeTextFontSize(_ sender: NSSlider) {
+        let value = CGFloat(sender.doubleValue.rounded())
+        sender.doubleValue = Double(value)
+        annotationCanvas?.textFontSize = value
+        updateValueLabel(textFontSizeValueLabel, value: value, unit: "pt")
+        window?.makeFirstResponder(self)
+    }
+
+    @objc private func changeMosaicBrushSize(_ sender: NSSlider) {
+        let value = CGFloat(sender.doubleValue.rounded())
+        sender.doubleValue = Double(value)
+        annotationCanvas?.mosaicBrushDiameter = value
+        updateValueLabel(mosaicBrushSizeValueLabel, value: value, unit: "px")
+        window?.makeFirstResponder(self)
     }
 
     @objc private func useMosaic() {
@@ -1027,7 +1174,11 @@ private final class CaptureSessionView: NSView {
     }
 
     private func selectTool(_ tool: AnnotationTool) {
-        annotationCanvas?.tool = tool
+        if phase == .selecting {
+            activateAnnotationTool(tool)
+        } else {
+            annotationCanvas?.tool = tool
+        }
         window?.makeFirstResponder(self)
     }
 
@@ -1102,11 +1253,9 @@ private final class CaptureSessionView: NSView {
     }
 
     private func drawHint() {
-        let text = if selectionInteraction == nil {
-            "Drag handles to resize · Drag inside to move · Click or Return to edit"
-        } else {
-            "Release to keep adjusting · Return to edit"
-        }
+        let text = selectionInteraction == .creating
+            ? "Release to show tools"
+            : "Drag handles to resize · Drag inside to move"
         let textValue = text as NSString
         drawHint(textValue, near: selection)
     }
@@ -1140,6 +1289,7 @@ private final class CaptureSessionView: NSView {
     }
 
     private static let defaultToolbarHint = "Return  Copy   ·   Esc  Cancel   ·   ⌘Z  Undo"
+    private static let adjustingRegionHint = "Adjust region · Choose a tool · Return to copy"
 
     private func drawHint(_ text: NSString, near rect: CGRect) {
         let attributes = labelAttributes(monospaced: false)
