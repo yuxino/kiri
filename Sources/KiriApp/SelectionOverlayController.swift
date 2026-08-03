@@ -95,7 +95,8 @@ private final class CaptureSessionView: NSView {
     private let windowRectsFrontToBack: [CGRect]
     private var phase: CapturePhase = .selecting
     private var dragStart: CGPoint?
-    private var isSelecting = false
+    private var selectionInteraction: SelectionInteraction?
+    private var interactionMoved = false
     private var selection: CGRect = .null
     private var hoverPoint: CGPoint?
     private var snapCandidate: CGRect?
@@ -104,7 +105,12 @@ private final class CaptureSessionView: NSView {
     private var toolbar: NSVisualEffectView?
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
     private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
-    private var textBackgroundButton: CaptureActionButton?
+    private var colorGroupContainer: CaptureToolGroupView?
+    private var textOptionsRow: NSStackView?
+    private var textBackgroundControl: NSSegmentedControl?
+    private var mosaicOptionsRow: NSStackView?
+    private var mosaicBrushSizeControl: NSSegmentedControl?
+    private var mosaicIntensityControl: NSSegmentedControl?
     private var undoButton: CaptureActionButton?
     private var redoButton: CaptureActionButton?
     private var clearAnnotationsItem: NSMenuItem?
@@ -152,6 +158,7 @@ private final class CaptureSessionView: NSView {
 
             if phase == .selecting, SelectionGeometry.isValid(selection) {
                 drawDimensions()
+                drawSelectionHandles()
                 drawHint()
             } else if phase == .selecting, snapCandidate != nil {
                 drawWindowHint(for: activeRect)
@@ -161,7 +168,9 @@ private final class CaptureSessionView: NSView {
         }
 
         if phase == .selecting {
-            drawLoupe()
+            if !SelectionGeometry.isValid(selection) || selectionInteraction == .creating {
+                drawLoupe()
+            }
             if !SelectionGeometry.isValid(selection), snapCandidate == nil {
                 drawInitialHint()
             }
@@ -197,22 +206,67 @@ private final class CaptureSessionView: NSView {
         guard phase == .selecting else { return }
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
         dragStart = point
-        isSelecting = true
-        pendingWindowSelection = snapCandidate
-        selection = .null
+        interactionMoved = false
+        if SelectionGeometry.isValid(selection) {
+            if let handle = SelectionGeometry.hitTest(point, selection: selection, radius: 10) {
+                selectionInteraction = .resizing(handle: handle, original: selection)
+                pendingWindowSelection = nil
+            } else if selection.contains(point) {
+                selectionInteraction = .moving(original: selection)
+                pendingWindowSelection = nil
+            } else {
+                selectionInteraction = .creating
+                pendingWindowSelection = WindowSnapGeometry.candidate(
+                    at: point,
+                    windowsFrontToBack: windowRectsFrontToBack,
+                    within: bounds
+                )
+                selection = .null
+            }
+        } else {
+            selectionInteraction = .creating
+            pendingWindowSelection = snapCandidate
+            selection = .null
+        }
         hoverPoint = point
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard phase == .selecting, isSelecting, let dragStart else { return }
+        guard phase == .selecting,
+              let interaction = selectionInteraction,
+              let dragStart else { return }
         let current = clampedPoint(convert(event.locationInWindow, from: nil))
-        if hypot(current.x - dragStart.x, current.y - dragStart.y) >= 3 {
+        let distance = hypot(current.x - dragStart.x, current.y - dragStart.y)
+        if distance >= 3 {
+            interactionMoved = true
+        }
+        guard interactionMoved else {
+            hoverPoint = current
+            needsDisplay = true
+            return
+        }
+        switch interaction {
+        case .creating:
             pendingWindowSelection = nil
             snapCandidate = nil
             selection = SelectionGeometry.clamped(
                 SelectionGeometry.normalized(from: dragStart, to: current),
                 to: bounds
+            )
+        case let .moving(original):
+            selection = SelectionGeometry.moved(
+                original,
+                by: CGSize(width: current.x - dragStart.x, height: current.y - dragStart.y),
+                within: bounds
+            )
+        case let .resizing(handle, original):
+            selection = SelectionGeometry.resized(
+                original,
+                using: handle,
+                to: current,
+                within: bounds,
+                minimumSide: 16
             )
         }
         hoverPoint = current
@@ -222,21 +276,29 @@ private final class CaptureSessionView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard phase == .selecting else { return }
         mouseDragged(with: event)
-        let shouldFinishSelection = isSelecting
-        if !SelectionGeometry.isValid(selection), let pendingWindowSelection {
+        let interaction = selectionInteraction
+        if interaction == .creating,
+           !SelectionGeometry.isValid(selection),
+           let pendingWindowSelection {
             selection = pendingWindowSelection
         }
         if !SelectionGeometry.isValid(selection) {
             selection = .null
         }
+        let confirmsSelection = SelectionCompletionPolicy.confirmsExistingSelectionOnMouseUp(
+            selection: selection,
+            beganInsideSelection: {
+                if case .moving = interaction { return true }
+                return false
+            }(),
+            interactionMoved: interactionMoved
+        )
         dragStart = nil
-        isSelecting = false
+        selectionInteraction = nil
+        interactionMoved = false
         pendingWindowSelection = nil
         snapCandidate = nil
-        if SelectionCompletionPolicy.completesOnMouseUp(
-            selection: selection,
-            interactionStarted: shouldFinishSelection
-        ) {
+        if confirmsSelection {
             finishSelection()
             return
         }
@@ -250,7 +312,7 @@ private final class CaptureSessionView: NSView {
         guard phase == .selecting else { return }
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
         hoverPoint = point
-        if !SelectionGeometry.isValid(selection), !isSelecting {
+        if !SelectionGeometry.isValid(selection), selectionInteraction == nil {
             snapCandidate = WindowSnapGeometry.candidate(
                 at: point,
                 windowsFrontToBack: windowRectsFrontToBack,
@@ -294,6 +356,11 @@ private final class CaptureSessionView: NSView {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
         if event.keyCode == 53 {
             onCancel?()
+            return
+        }
+
+        if phase == .selecting, isReturn, SelectionGeometry.isValid(selection) {
+            finishSelection()
             return
         }
 
@@ -387,7 +454,6 @@ private final class CaptureSessionView: NSView {
         layoutAnnotationUI()
         updateToolButtons(selected: canvas.tool)
         updateColorButtons(selected: canvas.colorPreset)
-        updateTextBackgroundControl()
         updateHistoryControls(canUndo: false, canRedo: false)
         window?.makeFirstResponder(self)
         needsDisplay = true
@@ -402,7 +468,12 @@ private final class CaptureSessionView: NSView {
         toolbar = nil
         toolButtons.removeAll()
         colorButtons.removeAll()
-        textBackgroundButton = nil
+        colorGroupContainer = nil
+        textOptionsRow = nil
+        textBackgroundControl = nil
+        mosaicOptionsRow = nil
+        mosaicBrushSizeControl = nil
+        mosaicIntensityControl = nil
         undoButton = nil
         redoButton = nil
         clearAnnotationsItem = nil
@@ -530,18 +601,9 @@ private final class CaptureSessionView: NSView {
             colorButtons[preset] = button
             colorGroup.addArrangedSubview(button)
         }
-        actions.addArrangedSubview(CaptureToolGroupView(content: colorGroup))
-        let textBackgroundButton = CaptureActionButton(
-            symbol: "character.textbox",
-            label: "Text Background",
-            style: .tool,
-            hoverHint: "Text background — Transparent, dark, or light",
-            target: self,
-            action: #selector(showTextBackgroundMenu(_:))
-        )
-        connectToolbarHint(to: textBackgroundButton)
-        self.textBackgroundButton = textBackgroundButton
-        actions.addArrangedSubview(textBackgroundButton)
+        let colorGroupContainer = CaptureToolGroupView(content: colorGroup)
+        self.colorGroupContainer = colorGroupContainer
+        actions.addArrangedSubview(colorGroupContainer)
         actions.addArrangedSubview(separator())
 
         let undoButton = actionButton(
@@ -591,8 +653,27 @@ private final class CaptureSessionView: NSView {
         hint.lineBreakMode = .byTruncatingTail
         toolbarHintLabel = hint
 
+        let textOptions = makeContextRow(
+            symbol: "character.textbox",
+            title: "Text background",
+            segments: ["Transparent", "Dark", "Light"],
+            action: #selector(selectTextBackgroundOption(_:)),
+            detail: "Click the image to place text"
+        )
+        textOptions.row.isHidden = true
+        textOptionsRow = textOptions.row
+        textBackgroundControl = textOptions.control
+
+        let mosaicOptions = makeMosaicContextRow()
+        mosaicOptions.row.isHidden = true
+        mosaicOptionsRow = mosaicOptions.row
+        mosaicBrushSizeControl = mosaicOptions.sizeControl
+        mosaicIntensityControl = mosaicOptions.intensityControl
+
         content.addArrangedSubview(actions)
         content.addArrangedSubview(hint)
+        content.addArrangedSubview(textOptions.row)
+        content.addArrangedSubview(mosaicOptions.row)
         effect.addSubview(content)
         NSLayoutConstraint.activate([
             content.topAnchor.constraint(equalTo: effect.topAnchor),
@@ -602,6 +683,127 @@ private final class CaptureSessionView: NSView {
             hint.widthAnchor.constraint(equalTo: actions.widthAnchor)
         ])
         return effect
+    }
+
+    private func makeContextRow(
+        symbol: String,
+        title: String,
+        segments: [String],
+        action: Selector,
+        detail: String
+    ) -> (row: NSStackView, control: NSSegmentedControl) {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+        icon.contentTintColor = CaptureUIColors.accent
+        icon.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16)
+        ])
+
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        titleLabel.textColor = .labelColor
+
+        let control = NSSegmentedControl(labels: segments, trackingMode: .selectOne, target: self, action: action)
+        control.segmentStyle = .capsule
+        control.controlSize = .small
+        control.font = .systemFont(ofSize: 10, weight: .medium)
+        control.setAccessibilityLabel(title)
+        for index in segments.indices {
+            control.setWidth(segments[index].count > 6 ? 78 : 58, forSegment: index)
+        }
+
+        let detailLabel = NSTextField(labelWithString: detail)
+        detailLabel.font = .systemFont(ofSize: 10, weight: .medium)
+        detailLabel.textColor = .secondaryLabelColor
+
+        row.addArrangedSubview(icon)
+        row.addArrangedSubview(titleLabel)
+        row.addArrangedSubview(control)
+        row.addArrangedSubview(detailLabel)
+        return (row, control)
+    }
+
+    private func makeMosaicContextRow() -> (
+        row: NSStackView,
+        sizeControl: NSSegmentedControl,
+        intensityControl: NSSegmentedControl
+    ) {
+        let row = NSStackView()
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 7
+
+        let icon = NSImageView()
+        icon.image = NSImage(
+            systemSymbolName: "square.grid.3x3.fill",
+            accessibilityDescription: "Mosaic brush"
+        )
+        icon.contentTintColor = CaptureUIColors.accent
+        icon.symbolConfiguration = .init(pointSize: 11, weight: .semibold)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            icon.heightAnchor.constraint(equalToConstant: 16)
+        ])
+
+        let brushLabel = contextLabel("Brush")
+        let sizeControl = NSSegmentedControl(
+            labels: MosaicBrushSizePreset.allCases.map(\.shortName),
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(selectMosaicBrushSize(_:))
+        )
+        configureContextControl(sizeControl, widths: [32, 32, 32], label: "Mosaic brush size")
+
+        let strengthLabel = contextLabel("Strength")
+        let intensityControl = NSSegmentedControl(
+            labels: MosaicIntensityPreset.allCases.map(\.name),
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(selectMosaicIntensity(_:))
+        )
+        configureContextControl(intensityControl, widths: [48, 66, 56], label: "Mosaic strength")
+
+        let detailLabel = NSTextField(labelWithString: "Drag to paint")
+        detailLabel.font = .systemFont(ofSize: 10, weight: .medium)
+        detailLabel.textColor = .secondaryLabelColor
+
+        row.addArrangedSubview(icon)
+        row.addArrangedSubview(brushLabel)
+        row.addArrangedSubview(sizeControl)
+        row.addArrangedSubview(strengthLabel)
+        row.addArrangedSubview(intensityControl)
+        row.addArrangedSubview(detailLabel)
+        return (row, sizeControl, intensityControl)
+    }
+
+    private func contextLabel(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .labelColor
+        return label
+    }
+
+    private func configureContextControl(
+        _ control: NSSegmentedControl,
+        widths: [CGFloat],
+        label: String
+    ) {
+        control.segmentStyle = .capsule
+        control.controlSize = .small
+        control.font = .systemFont(ofSize: 10, weight: .medium)
+        control.setAccessibilityLabel(label)
+        for (index, width) in widths.enumerated() {
+            control.setWidth(width, forSegment: index)
+        }
     }
 
     private func actionButton(
@@ -655,6 +857,7 @@ private final class CaptureSessionView: NSView {
         for (tool, button) in toolButtons {
             button.setToolSelected(tool == selected)
         }
+        updateContextualControls(selected: selected)
     }
 
     private func updateColorButtons(selected: AnnotationColorPreset) {
@@ -663,15 +866,30 @@ private final class CaptureSessionView: NSView {
         }
     }
 
-    private func updateTextBackgroundControl() {
-        guard let button = textBackgroundButton,
-              let style = annotationCanvas?.textBackgroundStyle else {
-            return
+    private func updateContextualControls(selected: AnnotationTool) {
+        toolbarHintLabel?.isHidden = selected == .text || selected == .mosaic
+        textOptionsRow?.isHidden = selected != .text
+        mosaicOptionsRow?.isHidden = selected != .mosaic
+        colorGroupContainer?.isHidden = selected == .mosaic
+
+        if let style = annotationCanvas?.textBackgroundStyle {
+            textBackgroundControl?.selectedSegment = switch style {
+            case .transparent: 0
+            case .dark: 1
+            case .light: 2
+            }
         }
-        let label = "Text background: \(style.name)"
-        button.setToolSelected(style != .transparent)
-        button.toolTip = label
-        button.setAccessibilityLabel(label)
+        if let intensity = annotationCanvas?.mosaicIntensity,
+           let index = MosaicIntensityPreset.allCases.firstIndex(of: intensity) {
+            mosaicIntensityControl?.selectedSegment = index
+        }
+        if let brushSize = annotationCanvas?.mosaicBrushSize,
+           let index = MosaicBrushSizePreset.allCases.firstIndex(of: brushSize) {
+            mosaicBrushSizeControl?.selectedSegment = index
+        }
+        if toolbar != nil {
+            layoutAnnotationUI()
+        }
     }
 
     private func updateHistoryControls(canUndo: Bool, canRedo: Bool) {
@@ -707,48 +925,25 @@ private final class CaptureSessionView: NSView {
         window?.makeFirstResponder(self)
     }
 
-    @objc private func showTextBackgroundMenu(_ sender: NSButton) {
-        guard let style = annotationCanvas?.textBackgroundStyle else { return }
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        let options: [(
-            AnnotationTextBackgroundStyle,
-            String,
-            String,
-            Selector
-        )] = [
-            (.transparent, "Transparent", "circle.slash", #selector(useTransparentTextBackground)),
-            (.dark, "Dark", "moon.fill", #selector(useDarkTextBackground)),
-            (.light, "Light", "sun.max.fill", #selector(useLightTextBackground))
-        ]
-        for (option, title, symbol, action) in options {
-            let item = menuItem(title, symbol: symbol, action: action)
-            item.state = option == style ? .on : .off
-            menu.addItem(item)
+    @objc private func selectTextBackgroundOption(_ sender: NSSegmentedControl) {
+        annotationCanvas?.textBackgroundStyle = switch sender.selectedSegment {
+        case 1: .dark
+        case 2: .light
+        default: .transparent
         }
-        menu.popUp(
-            positioning: nil,
-            at: CGPoint(x: sender.bounds.minX, y: sender.bounds.maxY + 4),
-            in: sender
-        )
-    }
-
-    @objc private func useTransparentTextBackground() {
-        selectTextBackground(.transparent)
-    }
-
-    @objc private func useDarkTextBackground() {
-        selectTextBackground(.dark)
-    }
-
-    @objc private func useLightTextBackground() {
-        selectTextBackground(.light)
-    }
-
-    private func selectTextBackground(_ style: AnnotationTextBackgroundStyle) {
-        annotationCanvas?.textBackgroundStyle = style
-        updateTextBackgroundControl()
         useText()
+    }
+
+    @objc private func selectMosaicIntensity(_ sender: NSSegmentedControl) {
+        guard MosaicIntensityPreset.allCases.indices.contains(sender.selectedSegment) else { return }
+        annotationCanvas?.mosaicIntensity = MosaicIntensityPreset.allCases[sender.selectedSegment]
+        useMosaic()
+    }
+
+    @objc private func selectMosaicBrushSize(_ sender: NSSegmentedControl) {
+        guard MosaicBrushSizePreset.allCases.indices.contains(sender.selectedSegment) else { return }
+        annotationCanvas?.mosaicBrushSize = MosaicBrushSizePreset.allCases[sender.selectedSegment]
+        useMosaic()
     }
 
     @objc private func useMosaic() {
@@ -843,8 +1038,29 @@ private final class CaptureSessionView: NSView {
         )
     }
 
-    private func updateCursor(at _: CGPoint) {
-        NSCursor.crosshair.set()
+    private func updateCursor(at point: CGPoint) {
+        guard SelectionGeometry.isValid(selection) else {
+            NSCursor.crosshair.set()
+            return
+        }
+        if let handle = SelectionGeometry.hitTest(point, selection: selection, radius: 10) {
+            switch handle {
+            case .top, .bottom:
+                NSCursor.resizeUpDown.set()
+            case .left, .right:
+                NSCursor.resizeLeftRight.set()
+            case .topLeft, .topRight, .bottomLeft, .bottomRight:
+                NSCursor.crosshair.set()
+            }
+        } else if selection.contains(point) {
+            if case .moving = selectionInteraction, interactionMoved {
+                NSCursor.closedHand.set()
+            } else {
+                NSCursor.openHand.set()
+            }
+        } else {
+            NSCursor.crosshair.set()
+        }
     }
 
     private func dimOutside(_ rect: CGRect) {
@@ -872,9 +1088,27 @@ private final class CaptureSessionView: NSView {
         drawBadge(text, origin: origin, size: badgeSize, attributes: attributes)
     }
 
+    private func drawSelectionHandles() {
+        for handle in SelectionHandle.allCases {
+            let center = SelectionGeometry.handlePoint(for: handle, in: selection)
+            let outerRect = CGRect(x: center.x - 5, y: center.y - 5, width: 10, height: 10)
+            let innerRect = outerRect.insetBy(dx: 2, dy: 2)
+            let outer = NSBezierPath(ovalIn: outerRect)
+            NSColor.white.setFill()
+            outer.fill()
+            CaptureUIColors.accent.setFill()
+            NSBezierPath(ovalIn: innerRect).fill()
+        }
+    }
+
     private func drawHint() {
-        let text = "Release to edit · Esc to cancel" as NSString
-        drawHint(text, near: selection)
+        let text = if selectionInteraction == nil {
+            "Drag handles to resize · Drag inside to move · Click or Return to edit"
+        } else {
+            "Release to keep adjusting · Return to edit"
+        }
+        let textValue = text as NSString
+        drawHint(textValue, near: selection)
     }
 
     private func drawWindowHint(for rect: CGRect) {

@@ -18,9 +18,10 @@ does not disappear just because the clipboard changed.
 ## Available today
 
 - Start capture with **⇧⌘A**, which Kiri filters before other apps can act on it
-- Freeze the active display, snap to the frontmost window, or drag a free region
-- Enter inline annotation immediately after selection without a second capture mode
-- Use pen, rectangle, line, arrow, text, and mosaic tools with undo and redo
+- Freeze the active display, snap to the frontmost window, or drag, move, and resize a free region
+- Confirm the region and enter inline annotation without a separate capture mode
+- Use pen, rectangle, line, arrow, text, and continuous brush mosaic tools with undo and redo
+- Choose small, medium, or large mosaic brushes and soft, standard, or strong pixelation
 - Choose from eight annotation colors; text supports complex input, long content,
   and Transparent (default), Dark, or Light backgrounds
 - Press Escape to cancel at any capture stage and Return in annotation to copy

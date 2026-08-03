@@ -55,11 +55,11 @@ let tests = [
     KiriTest(name: "selection minimum size") {
         try rejectsTinySelection()
     },
-    KiriTest(name: "selection completes on mouse up") {
-        try completesValidSelectionOnMouseUp()
+    KiriTest(name: "selection confirms with inside click") {
+        try confirmsAnExistingSelectionWithAClick()
     },
-    KiriTest(name: "selection ignores invalid mouse up") {
-        try ignoresInvalidSelectionOnMouseUp()
+    KiriTest(name: "selection stays editable after adjustments") {
+        try keepsNewOrAdjustedSelectionsEditable()
     },
     KiriTest(name: "selection handle hit testing") {
         try hitTestsSelectionHandles()

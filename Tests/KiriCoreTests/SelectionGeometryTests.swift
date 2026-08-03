@@ -49,30 +49,41 @@ func rejectsTinySelection() throws {
     )
 }
 
-func completesValidSelectionOnMouseUp() throws {
+func confirmsAnExistingSelectionWithAClick() throws {
     try expect(
-        SelectionCompletionPolicy.completesOnMouseUp(
+        SelectionCompletionPolicy.confirmsExistingSelectionOnMouseUp(
             selection: CGRect(x: 10, y: 10, width: 120, height: 80),
-            interactionStarted: true
+            beganInsideSelection: true,
+            interactionMoved: false
         ),
-        "A valid drag should complete as soon as the mouse is released"
+        "A click inside an existing selection should confirm it"
     )
 }
 
-func ignoresInvalidSelectionOnMouseUp() throws {
+func keepsNewOrAdjustedSelectionsEditable() throws {
     try expect(
-        !SelectionCompletionPolicy.completesOnMouseUp(
+        !SelectionCompletionPolicy.confirmsExistingSelectionOnMouseUp(
             selection: CGRect(x: 10, y: 10, width: 2, height: 2),
-            interactionStarted: true
+            beganInsideSelection: true,
+            interactionMoved: false
         ),
-        "An accidental click should not complete an invalid region"
+        "An invalid selection should not confirm"
     )
     try expect(
-        !SelectionCompletionPolicy.completesOnMouseUp(
+        !SelectionCompletionPolicy.confirmsExistingSelectionOnMouseUp(
             selection: CGRect(x: 10, y: 10, width: 120, height: 80),
-            interactionStarted: false
+            beganInsideSelection: false,
+            interactionMoved: false
         ),
-        "A stray mouse-up should not complete an old selection"
+        "Creating a selection should leave it editable"
+    )
+    try expect(
+        !SelectionCompletionPolicy.confirmsExistingSelectionOnMouseUp(
+            selection: CGRect(x: 10, y: 10, width: 120, height: 80),
+            beganInsideSelection: true,
+            interactionMoved: true
+        ),
+        "Moving a selection should leave it editable"
     )
 }
 

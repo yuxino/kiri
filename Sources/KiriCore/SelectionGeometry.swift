@@ -170,11 +170,12 @@ public enum SelectionGeometry {
 }
 
 public enum SelectionCompletionPolicy {
-    public static func completesOnMouseUp(
+    public static func confirmsExistingSelectionOnMouseUp(
         selection: CGRect,
-        interactionStarted: Bool
+        beganInsideSelection: Bool,
+        interactionMoved: Bool
     ) -> Bool {
-        interactionStarted && SelectionGeometry.isValid(selection)
+        SelectionGeometry.isValid(selection) && beganInsideSelection && !interactionMoved
     }
 }
 

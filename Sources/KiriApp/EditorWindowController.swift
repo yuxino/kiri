@@ -9,7 +9,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private let canvas: AnnotationCanvasView
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
     private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
+    private var colorGroupContainer: CaptureToolGroupView?
     private var textBackgroundButton: CaptureActionButton?
+    private var mosaicIntensityButton: CaptureActionButton?
     private var undoButton: CaptureActionButton?
     private var redoButton: CaptureActionButton?
     private var clearButton: CaptureActionButton?
@@ -100,7 +102,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             colorButtons[preset] = button
             colorGroup.addArrangedSubview(button)
         }
-        toolbar.addArrangedSubview(CaptureToolGroupView(content: colorGroup))
+        let colorGroupContainer = CaptureToolGroupView(content: colorGroup)
+        self.colorGroupContainer = colorGroupContainer
+        toolbar.addArrangedSubview(colorGroupContainer)
         let textBackgroundButton = CaptureActionButton(
             symbol: "character.textbox",
             label: "Text Background",
@@ -110,6 +114,15 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         )
         self.textBackgroundButton = textBackgroundButton
         toolbar.addArrangedSubview(textBackgroundButton)
+        let mosaicIntensityButton = CaptureActionButton(
+            symbol: "square.grid.3x3.fill",
+            label: "Mosaic Strength",
+            style: .tool,
+            target: self,
+            action: #selector(showMosaicIntensityMenu(_:))
+        )
+        self.mosaicIntensityButton = mosaicIntensityButton
+        toolbar.addArrangedSubview(mosaicIntensityButton)
         toolbar.addArrangedSubview(CaptureDividerView(height: 24))
 
         let undoButton = historyButton(
@@ -209,6 +222,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         updateToolButtons(selected: canvas.tool)
         updateColorButtons(selected: canvas.colorPreset)
         updateTextBackgroundControl()
+        updateMosaicIntensityControl()
         updateHistoryControls(canUndo: false, canRedo: false)
         controller.view = root
         return controller
@@ -238,6 +252,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         for (tool, button) in toolButtons {
             button.setToolSelected(tool == selected)
         }
+        textBackgroundButton?.isHidden = selected != .text
+        mosaicIntensityButton?.isHidden = selected != .mosaic
+        colorGroupContainer?.isHidden = selected == .mosaic
     }
 
     private func updateHistoryControls(canUndo: Bool, canRedo: Bool) {
@@ -258,6 +275,14 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         textBackgroundButton?.setToolSelected(style != .transparent)
         textBackgroundButton?.toolTip = label
         textBackgroundButton?.setAccessibilityLabel(label)
+    }
+
+    private func updateMosaicIntensityControl() {
+        let intensity = canvas.mosaicIntensity
+        let brushSize = canvas.mosaicBrushSize
+        let label = "Mosaic: \(brushSize.name) brush · \(intensity.name) strength"
+        mosaicIntensityButton?.toolTip = label
+        mosaicIntensityButton?.setAccessibilityLabel(label)
     }
 
     @objc private func usePen() {
@@ -328,6 +353,82 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         canvas.textBackgroundStyle = style
         updateTextBackgroundControl()
         useText()
+    }
+
+    @objc private func showMosaicIntensityMenu(_ sender: NSButton) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let sizeHeading = NSMenuItem(title: "Brush Size", action: nil, keyEquivalent: "")
+        sizeHeading.isEnabled = false
+        menu.addItem(sizeHeading)
+        let sizes: [(MosaicBrushSizePreset, String, Selector)] = [
+            (.small, "Small", #selector(useSmallMosaicBrush)),
+            (.medium, "Medium", #selector(useMediumMosaicBrush)),
+            (.large, "Large", #selector(useLargeMosaicBrush))
+        ]
+        for (option, title, action) in sizes {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.state = option == canvas.mosaicBrushSize ? .on : .off
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let strengthHeading = NSMenuItem(title: "Strength", action: nil, keyEquivalent: "")
+        strengthHeading.isEnabled = false
+        menu.addItem(strengthHeading)
+        let options: [(MosaicIntensityPreset, String, Selector)] = [
+            (.soft, "Soft", #selector(useSoftMosaic)),
+            (.standard, "Standard", #selector(useStandardMosaic)),
+            (.strong, "Strong", #selector(useStrongMosaic))
+        ]
+        for (option, title, action) in options {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+            item.target = self
+            item.image = NSImage(systemSymbolName: "square.grid.3x3.fill", accessibilityDescription: title)
+            item.state = option == canvas.mosaicIntensity ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(
+            positioning: nil,
+            at: CGPoint(x: sender.bounds.minX, y: sender.bounds.maxY + 4),
+            in: sender
+        )
+    }
+
+    @objc private func useSmallMosaicBrush() {
+        selectMosaicBrushSize(.small)
+    }
+
+    @objc private func useMediumMosaicBrush() {
+        selectMosaicBrushSize(.medium)
+    }
+
+    @objc private func useLargeMosaicBrush() {
+        selectMosaicBrushSize(.large)
+    }
+
+    private func selectMosaicBrushSize(_ brushSize: MosaicBrushSizePreset) {
+        canvas.mosaicBrushSize = brushSize
+        updateMosaicIntensityControl()
+        useMosaic()
+    }
+
+    @objc private func useSoftMosaic() {
+        selectMosaicIntensity(.soft)
+    }
+
+    @objc private func useStandardMosaic() {
+        selectMosaicIntensity(.standard)
+    }
+
+    @objc private func useStrongMosaic() {
+        selectMosaicIntensity(.strong)
+    }
+
+    private func selectMosaicIntensity(_ intensity: MosaicIntensityPreset) {
+        canvas.mosaicIntensity = intensity
+        updateMosaicIntensityControl()
+        useMosaic()
     }
 
     @objc private func useMosaic() {
