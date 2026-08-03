@@ -59,3 +59,16 @@ func annotationHistoryReplacesElementsWithUndoAndRedo() throws {
     _ = history.redo()
     try expect(history.elements == ["edited"], "Redo should restore the replacement")
 }
+
+func annotationHistoryRemovesElementsWithUndoAndRedo() throws {
+    var history = AnnotationHistory<String>()
+    history.append("first")
+    history.append("second")
+
+    try expect(history.remove(at: 0) == "first", "Remove should return the deleted element")
+    try expect(history.elements == ["second"], "Remove should delete the indexed element")
+    _ = history.undo()
+    try expect(history.elements == ["first", "second"], "Undo should restore a deleted element")
+    _ = history.redo()
+    try expect(history.elements == ["second"], "Redo should delete the element again")
+}

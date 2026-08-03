@@ -109,6 +109,12 @@ private enum AnnotationMark {
     case mosaic([CGPoint], CGFloat, MosaicIntensityPreset)
 }
 
+private enum AnnotationSelectionInteraction {
+    case moving
+    case resizingRectangle(SelectionHandle)
+    case movingEndpoint(isStart: Bool)
+}
+
 private final class InlineAnnotationTextView: NSTextView {
     var onCommit: (() -> Void)?
     var onCancel: (() -> Void)?
@@ -207,6 +213,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     private var selectedMarkIndex: Int?
     private var selectionDragOriginalMark: AnnotationMark?
     private var selectionDragPreviewMark: AnnotationMark?
+    private var selectionInteraction: AnnotationSelectionInteraction?
 
     init(image: CGImage) {
         self.image = image
@@ -297,7 +304,9 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             NSCursor.crosshair.set()
         } else if tool == .select {
             let point = clampedPoint(convert(event.locationInWindow, from: nil))
-            if textMarkIndex(at: point) != nil {
+            if selectionInteraction(at: point) != nil {
+                NSCursor.crosshair.set()
+            } else if annotationMarkIndex(at: point) != nil {
                 NSCursor.openHand.set()
             } else {
                 NSCursor.arrow.set()
@@ -310,15 +319,19 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     override func mouseDown(with event: NSEvent) {
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
         if tool == .select {
-            guard let index = textMarkIndex(at: point) else {
+            let handleInteraction = selectionInteraction(at: point)
+            let index = handleInteraction == nil ? annotationMarkIndex(at: point) : selectedMarkIndex
+            guard let index,
+                  history.elements.indices.contains(index) else {
                 selectedMarkIndex = nil
                 selectionDragOriginalMark = nil
                 selectionDragPreviewMark = nil
+                selectionInteraction = nil
                 needsDisplay = true
                 return
             }
             selectedMarkIndex = index
-            if event.clickCount >= 2 {
+            if event.clickCount >= 2, history.elements[index].isText {
                 beginTextEditing(markIndex: index)
                 return
             }
@@ -326,14 +339,20 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             dragCurrent = point
             selectionDragOriginalMark = history.elements[index]
             selectionDragPreviewMark = nil
+            selectionInteraction = handleInteraction ?? selectionInteraction(
+                at: point,
+                for: history.elements[index]
+            ) ?? .moving
             NSCursor.closedHand.set()
             needsDisplay = true
             return
         }
         if tool == .text {
+            selectedMarkIndex = nil
             beginTextEditing(at: point)
             return
         }
+        selectedMarkIndex = nil
         dragStart = point
         dragCurrent = point
         draftPoints = tool == .pen || tool == .mosaic ? [point] : []
@@ -345,10 +364,21 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
            let start = dragStart,
            let original = selectionDragOriginalMark {
             dragCurrent = point
-            selectionDragPreviewMark = original.translated(
-                by: CGSize(width: point.x - start.x, height: point.y - start.y),
-                within: imageRect
-            )
+            selectionDragPreviewMark = switch selectionInteraction ?? .moving {
+            case .moving:
+                original.translated(
+                    by: CGSize(width: point.x - start.x, height: point.y - start.y),
+                    within: imageRect
+                )
+            case let .resizingRectangle(handle):
+                original.resizedRectangle(
+                    using: handle,
+                    to: point,
+                    within: imageRect
+                )
+            case let .movingEndpoint(isStart):
+                original.movingEndpoint(isStart: isStart, to: point)
+            }
             needsDisplay = true
             return
         }
@@ -377,6 +407,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             dragCurrent = nil
             selectionDragOriginalMark = nil
             selectionDragPreviewMark = nil
+            selectionInteraction = nil
             NSCursor.arrow.set()
             needsDisplay = true
             return
@@ -406,6 +437,14 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         needsDisplay = true
     }
 
+    override func keyDown(with event: NSEvent) {
+        if tool == .select, event.keyCode == 51 || event.keyCode == 117 {
+            deleteSelection()
+            return
+        }
+        super.keyDown(with: event)
+    }
+
     func undo() {
         commitTextEditing()
         guard history.undo() != nil else { return }
@@ -427,6 +466,18 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         guard history.canUndo || history.canRedo else { return }
         history.clear()
         selectedMarkIndex = nil
+        publishHistoryState()
+        needsDisplay = true
+    }
+
+    func deleteSelection() {
+        guard tool == .select,
+              let selectedMarkIndex,
+              history.remove(at: selectedMarkIndex) != nil else { return }
+        self.selectedMarkIndex = nil
+        selectionDragOriginalMark = nil
+        selectionDragPreviewMark = nil
+        selectionInteraction = nil
         publishHistoryState()
         needsDisplay = true
     }
@@ -504,20 +555,55 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         }
     }
 
-    private func textMarkIndex(at point: CGPoint) -> Int? {
+    private func annotationMarkIndex(at point: CGPoint) -> Int? {
         for index in history.elements.indices.reversed() {
-            guard let rect = history.elements[index].textRect else { continue }
-            if rect.insetBy(dx: -7, dy: -6).contains(point) {
+            if history.elements[index].hitTest(point) {
                 return index
             }
         }
         return nil
     }
 
+    private func selectionInteraction(at point: CGPoint) -> AnnotationSelectionInteraction? {
+        guard let selectedMarkIndex,
+              history.elements.indices.contains(selectedMarkIndex) else { return nil }
+        return selectionInteraction(at: point, for: displayMark(
+            history.elements[selectedMarkIndex],
+            at: selectedMarkIndex
+        ))
+    }
+
+    private func selectionInteraction(
+        at point: CGPoint,
+        for mark: AnnotationMark
+    ) -> AnnotationSelectionInteraction? {
+        switch mark {
+        case let .rectangle(rect, _, _):
+            if let handle = SelectionGeometry.hitTest(point, selection: rect, radius: 9) {
+                return .resizingRectangle(handle)
+            }
+        case let .line(start, end, _, _), let .arrow(start, end, _, _):
+            if hypot(point.x - start.x, point.y - start.y) <= 10 {
+                return .movingEndpoint(isStart: true)
+            }
+            if hypot(point.x - end.x, point.y - end.y) <= 10 {
+                return .movingEndpoint(isStart: false)
+            }
+        case .pen, .text, .mosaic:
+            break
+        }
+        return nil
+    }
+
     private func drawSelectionOutline(for mark: AnnotationMark) {
-        guard let rect = mark.textRect else { return }
+        if let endpoints = mark.endpoints {
+            drawSelectionHandle(at: endpoints.start)
+            drawSelectionHandle(at: endpoints.end)
+            return
+        }
+        guard let rect = mark.selectionBounds, !rect.isNull else { return }
         let outline = NSBezierPath(
-            roundedRect: rect.insetBy(dx: -7, dy: -6),
+            roundedRect: rect.insetBy(dx: -5, dy: -5),
             xRadius: 6,
             yRadius: 6
         )
@@ -528,6 +614,20 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         outline.lineWidth = 1
         CaptureUIColors.accent.setStroke()
         outline.stroke()
+
+        if case let .rectangle(rect, _, _) = mark {
+            for handle in SelectionHandle.allCases {
+                drawSelectionHandle(at: SelectionGeometry.handlePoint(for: handle, in: rect))
+            }
+        }
+    }
+
+    private func drawSelectionHandle(at point: CGPoint) {
+        let outerRect = CGRect(x: point.x - 5, y: point.y - 5, width: 10, height: 10)
+        NSColor.white.setFill()
+        NSBezierPath(ovalIn: outerRect).fill()
+        CaptureUIColors.accent.setFill()
+        NSBezierPath(ovalIn: outerRect.insetBy(dx: 2, dy: 2)).fill()
     }
 
     private func clampedPoint(_ point: CGPoint) -> CGPoint {
@@ -1089,24 +1189,156 @@ private extension AnnotationMark {
         }
     }
 
+    var isText: Bool {
+        textRect != nil
+    }
+
+    var endpoints: (start: CGPoint, end: CGPoint)? {
+        switch self {
+        case let .line(start, end, _, _), let .arrow(start, end, _, _):
+            (start, end)
+        case .pen, .rectangle, .text, .mosaic:
+            nil
+        }
+    }
+
+    var selectionBounds: CGRect? {
+        switch self {
+        case let .pen(points, _, width):
+            Self.pointBounds(points)?.insetBy(dx: -max(1, width / 2), dy: -max(1, width / 2))
+        case let .rectangle(rect, _, _):
+            rect.standardized
+        case let .line(start, end, _, width), let .arrow(start, end, _, width):
+            Self.pointBounds([start, end])?.insetBy(dx: -max(1, width / 2), dy: -max(1, width / 2))
+        case let .text(_, rect, _, _, _):
+            rect.standardized
+        case let .mosaic(points, diameter, _):
+            Self.pointBounds(points)?.insetBy(dx: -diameter / 2, dy: -diameter / 2)
+        }
+    }
+
+    func hitTest(_ point: CGPoint) -> Bool {
+        switch self {
+        case let .pen(points, _, width):
+            Self.polyline(points, contains: point, tolerance: max(7, width / 2 + 4))
+        case let .rectangle(rect, _, width):
+            rect.standardized.insetBy(dx: -max(6, width), dy: -max(6, width)).contains(point)
+        case let .line(start, end, _, width), let .arrow(start, end, _, width):
+            Self.distance(from: point, toSegmentFrom: start, to: end) <= max(7, width / 2 + 4)
+        case let .text(_, rect, _, _, _):
+            rect.insetBy(dx: -7, dy: -6).contains(point)
+        case let .mosaic(points, diameter, _):
+            Self.polyline(points, contains: point, tolerance: diameter / 2 + 4)
+        }
+    }
+
     func translated(by offset: CGSize, within bounds: CGRect) -> AnnotationMark {
-        guard case let .text(text, rect, color, background, fontSize) = self else {
+        guard let markBounds = selectionBounds else { return self }
+        let dx = min(
+            max(offset.width, bounds.minX - markBounds.minX),
+            bounds.maxX - markBounds.maxX
+        )
+        let dy = min(
+            max(offset.height, bounds.minY - markBounds.minY),
+            bounds.maxY - markBounds.maxY
+        )
+        let delta = CGSize(width: dx, height: dy)
+        func translatedPoint(_ point: CGPoint) -> CGPoint {
+            CGPoint(x: point.x + delta.width, y: point.y + delta.height)
+        }
+
+        return switch self {
+        case let .pen(points, color, width):
+            .pen(points.map(translatedPoint), color, width)
+        case let .rectangle(rect, color, width):
+            .rectangle(rect.offsetBy(dx: delta.width, dy: delta.height), color, width)
+        case let .line(start, end, color, width):
+            .line(translatedPoint(start), translatedPoint(end), color, width)
+        case let .arrow(start, end, color, width):
+            .arrow(translatedPoint(start), translatedPoint(end), color, width)
+        case let .text(text, rect, color, background, fontSize):
+            .text(
+                text,
+                rect.offsetBy(dx: delta.width, dy: delta.height),
+                color,
+                background,
+                fontSize
+            )
+        case let .mosaic(points, diameter, intensity):
+            .mosaic(points.map(translatedPoint), diameter, intensity)
+        }
+    }
+
+    func resizedRectangle(
+        using handle: SelectionHandle,
+        to point: CGPoint,
+        within bounds: CGRect
+    ) -> AnnotationMark {
+        guard case let .rectangle(rect, color, width) = self else { return self }
+        return .rectangle(
+            SelectionGeometry.resized(
+                rect,
+                using: handle,
+                to: point,
+                within: bounds,
+                minimumSide: 8
+            ),
+            color,
+            width
+        )
+    }
+
+    func movingEndpoint(isStart: Bool, to point: CGPoint) -> AnnotationMark {
+        switch self {
+        case let .line(start, end, color, width):
+            return .line(isStart ? point : start, isStart ? end : point, color, width)
+        case let .arrow(start, end, color, width):
+            return .arrow(isStart ? point : start, isStart ? end : point, color, width)
+        case .pen, .rectangle, .text, .mosaic:
             return self
         }
-        let x = min(
-            max(rect.minX + offset.width, bounds.minX),
-            max(bounds.minX, bounds.maxX - rect.width)
+    }
+
+    static func pointBounds(_ points: [CGPoint]) -> CGRect? {
+        guard let first = points.first else { return nil }
+        var minX = first.x
+        var maxX = first.x
+        var minY = first.y
+        var maxY = first.y
+        for point in points.dropFirst() {
+            minX = min(minX, point.x)
+            maxX = max(maxX, point.x)
+            minY = min(minY, point.y)
+            maxY = max(maxY, point.y)
+        }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    static func polyline(_ points: [CGPoint], contains point: CGPoint, tolerance: CGFloat) -> Bool {
+        guard let first = points.first else { return false }
+        if points.count == 1 {
+            return hypot(point.x - first.x, point.y - first.y) <= tolerance
+        }
+        for index in 1..<points.count {
+            if distance(from: point, toSegmentFrom: points[index - 1], to: points[index]) <= tolerance {
+                return true
+            }
+        }
+        return false
+    }
+
+    static func distance(from point: CGPoint, toSegmentFrom start: CGPoint, to end: CGPoint) -> CGFloat {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0 else {
+            return hypot(point.x - start.x, point.y - start.y)
+        }
+        let projection = min(
+            1,
+            max(0, ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared)
         )
-        let y = min(
-            max(rect.minY + offset.height, bounds.minY),
-            max(bounds.minY, bounds.maxY - rect.height)
-        )
-        return .text(
-            text,
-            CGRect(origin: CGPoint(x: x, y: y), size: rect.size),
-            color,
-            background,
-            fontSize
-        )
+        let closest = CGPoint(x: start.x + projection * dx, y: start.y + projection * dy)
+        return hypot(point.x - closest.x, point.y - closest.y)
     }
 }

@@ -368,6 +368,10 @@ private final class CaptureSessionView: NSView {
         }
 
         if phase == .annotating {
+            if event.keyCode == 51 || event.keyCode == 117 {
+                annotationCanvas?.deleteSelection()
+                return
+            }
             if isReturn {
                 complete(.copy)
                 return

@@ -16,6 +16,9 @@ let tests = [
     KiriTest(name: "annotation history indexed replacement") {
         try annotationHistoryReplacesElementsWithUndoAndRedo()
     },
+    KiriTest(name: "annotation history indexed removal") {
+        try annotationHistoryRemovesElementsWithUndoAndRedo()
+    },
     KiriTest(name: "capture kinds round-trip") {
         try allCaptureKindsRoundTrip()
     },

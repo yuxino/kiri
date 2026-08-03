@@ -22,6 +22,7 @@ does not disappear just because the clipboard changed.
 - See the full toolbar as soon as the region is drawn, while it remains movable and resizable until a tool is chosen
 - Use pen, rectangle, line, arrow, text, and continuous brush mosaic tools with undo and redo
 - Use the default pointer to select and move existing text, then double-click it to edit again
+- Move pen and mosaic strokes, resize rectangles from eight handles, adjust line and arrow endpoints, or press Delete
 - Continuously adjust pen width, shape width, text size, and mosaic brush size with live numeric sliders
 - Choose soft, standard, or strong mosaic pixelation
 - Choose from eight annotation colors; text supports complex input, long content,
