@@ -396,6 +396,7 @@ private final class CaptureSessionView: NSView {
             let commandModifiers: NSEvent.ModifierFlags = [.command, .control, .option]
             if event.modifierFlags.intersection(commandModifiers).isEmpty {
                 switch event.charactersIgnoringModifiers?.lowercased() {
+                case "v": useSelect(); return
                 case "p": usePen(); return
                 case "r": useRectangle(); return
                 case "l": useLine(); return
@@ -477,11 +478,13 @@ private final class CaptureSessionView: NSView {
     }
 
     private func clearToolSelectionForAdjustingRegion() {
-        toolButtons.values.forEach { $0.setToolSelected(false) }
+        for (tool, button) in toolButtons {
+            button.setToolSelected(tool == .select)
+        }
         strokeOptionsRow?.isHidden = true
         textOptionsRow?.isHidden = true
         mosaicOptionsRow?.isHidden = true
-        colorGroupContainer?.isHidden = false
+        colorGroupContainer?.isHidden = true
     }
 
     @objc private func returnToSelection() {
@@ -581,6 +584,7 @@ private final class CaptureSessionView: NSView {
         toolGroup.spacing = 1
 
         let tools: [(AnnotationTool, String, String, String, Selector)] = [
+            (.select, "cursorarrow", "Select (V)", "Select and edit annotations (V)", #selector(useSelect)),
             (.pen, "pencil.tip", "Pen (P)", "Pen (P) — Draw freehand", #selector(usePen)),
             (
                 .rectangle,
@@ -926,12 +930,16 @@ private final class CaptureSessionView: NSView {
     }
 
     private func updateContextualControls(selected: AnnotationTool) {
-        strokeOptionsRow?.isHidden = selected == .text || selected == .mosaic
+        strokeOptionsRow?.isHidden = switch selected {
+        case .pen, .rectangle, .line, .arrow: false
+        case .select, .text, .mosaic: true
+        }
         textOptionsRow?.isHidden = selected != .text
         mosaicOptionsRow?.isHidden = selected != .mosaic
-        colorGroupContainer?.isHidden = selected == .mosaic
+        colorGroupContainer?.isHidden = selected == .select || selected == .mosaic
 
         if let canvas = annotationCanvas {
+            updateColorButtons(selected: canvas.colorPreset)
             let isPen = selected == .pen
             strokeSizeSlider?.minValue = 1
             strokeSizeSlider?.maxValue = isPen ? 24 : 16
@@ -976,6 +984,10 @@ private final class CaptureSessionView: NSView {
         undoButton?.setActionEnabled(canUndo)
         redoButton?.setActionEnabled(canRedo)
         clearAnnotationsItem?.isEnabled = canUndo
+    }
+
+    @objc private func useSelect() {
+        selectTool(.select)
     }
 
     @objc private func usePen() {

@@ -2,6 +2,7 @@ import AppKit
 import KiriCore
 
 enum AnnotationTool: CaseIterable {
+    case select
     case pen
     case rectangle
     case line
@@ -148,7 +149,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             publishHistoryState()
         }
     }
-    var tool: AnnotationTool = .rectangle {
+    var tool: AnnotationTool = .select {
         didSet {
             if oldValue == .text, tool != .text {
                 commitTextEditing()
@@ -202,6 +203,10 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     private var textColorPreset: AnnotationColorPreset?
     private var editingTextBackgroundStyle: AnnotationTextBackgroundStyle?
     private var editingTextFontSize: CGFloat?
+    private var editingTextMarkIndex: Int?
+    private var selectedMarkIndex: Int?
+    private var selectionDragOriginalMark: AnnotationMark?
+    private var selectionDragPreviewMark: AnnotationMark?
 
     init(image: CGImage) {
         self.image = image
@@ -225,11 +230,13 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         let target = imageRect
         NSImage(cgImage: image, size: target.size).draw(in: target)
 
-        for mark in history.elements where mark.isMosaic {
-            draw(mark)
+        for (index, mark) in history.elements.enumerated() where mark.isMosaic {
+            guard index != editingTextMarkIndex else { continue }
+            draw(displayMark(mark, at: index))
         }
-        for mark in history.elements where !mark.isMosaic {
-            draw(mark)
+        for (index, mark) in history.elements.enumerated() where !mark.isMosaic {
+            guard index != editingTextMarkIndex else { continue }
+            draw(displayMark(mark, at: index))
         }
         if tool == .pen, draftPoints.count > 1 {
             draw(.pen(draftPoints, colorPreset, penWidth))
@@ -247,12 +254,19 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
                 draw(.line(dragStart, dragCurrent, colorPreset, shapeWidth))
             case .arrow:
                 draw(.arrow(dragStart, dragCurrent, colorPreset, shapeWidth))
-            case .pen, .text, .mosaic:
+            case .select, .pen, .text, .mosaic:
                 break
             }
         }
         if tool == .mosaic, let cursorPoint = dragCurrent ?? hoverPoint {
             drawMosaicBrushCursor(at: cursorPoint)
+        }
+        if tool == .select,
+           let selectedMarkIndex,
+           history.elements.indices.contains(selectedMarkIndex) {
+            drawSelectionOutline(
+                for: displayMark(history.elements[selectedMarkIndex], at: selectedMarkIndex)
+            )
         }
     }
 
@@ -281,6 +295,13 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     override func cursorUpdate(with event: NSEvent) {
         if tool == .mosaic {
             NSCursor.crosshair.set()
+        } else if tool == .select {
+            let point = clampedPoint(convert(event.locationInWindow, from: nil))
+            if textMarkIndex(at: point) != nil {
+                NSCursor.openHand.set()
+            } else {
+                NSCursor.arrow.set()
+            }
         } else {
             NSCursor.arrow.set()
         }
@@ -288,6 +309,27 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
     override func mouseDown(with event: NSEvent) {
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
+        if tool == .select {
+            guard let index = textMarkIndex(at: point) else {
+                selectedMarkIndex = nil
+                selectionDragOriginalMark = nil
+                selectionDragPreviewMark = nil
+                needsDisplay = true
+                return
+            }
+            selectedMarkIndex = index
+            if event.clickCount >= 2 {
+                beginTextEditing(markIndex: index)
+                return
+            }
+            dragStart = point
+            dragCurrent = point
+            selectionDragOriginalMark = history.elements[index]
+            selectionDragPreviewMark = nil
+            NSCursor.closedHand.set()
+            needsDisplay = true
+            return
+        }
         if tool == .text {
             beginTextEditing(at: point)
             return
@@ -299,6 +341,17 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
     override func mouseDragged(with event: NSEvent) {
         let point = clampedPoint(convert(event.locationInWindow, from: nil))
+        if tool == .select,
+           let start = dragStart,
+           let original = selectionDragOriginalMark {
+            dragCurrent = point
+            selectionDragPreviewMark = original.translated(
+                by: CGSize(width: point.x - start.x, height: point.y - start.y),
+                within: imageRect
+            )
+            needsDisplay = true
+            return
+        }
         dragCurrent = point
         if tool == .pen || tool == .mosaic {
             if let last = draftPoints.last,
@@ -311,6 +364,23 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
     override func mouseUp(with event: NSEvent) {
         mouseDragged(with: event)
+        if tool == .select {
+            if let selectedMarkIndex,
+               let start = dragStart,
+               let end = dragCurrent,
+               hypot(end.x - start.x, end.y - start.y) >= 1,
+               let preview = selectionDragPreviewMark,
+               history.replace(at: selectedMarkIndex, with: preview) != nil {
+                publishHistoryState()
+            }
+            dragStart = nil
+            dragCurrent = nil
+            selectionDragOriginalMark = nil
+            selectionDragPreviewMark = nil
+            NSCursor.arrow.set()
+            needsDisplay = true
+            return
+        }
         guard let start = dragStart, let end = dragCurrent else { return }
         switch tool {
         case .pen where draftPoints.count > 1:
@@ -325,7 +395,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             }
         case .mosaic where !draftPoints.isEmpty:
             append(.mosaic(draftPoints, mosaicBrushDiameter, mosaicIntensity))
-        case .text:
+        case .select, .text:
             break
         default:
             break
@@ -339,6 +409,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     func undo() {
         commitTextEditing()
         guard history.undo() != nil else { return }
+        selectedMarkIndex = nil
         publishHistoryState()
         needsDisplay = true
     }
@@ -346,6 +417,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
     func redo() {
         commitTextEditing()
         guard history.redo() != nil else { return }
+        selectedMarkIndex = nil
         publishHistoryState()
         needsDisplay = true
     }
@@ -354,6 +426,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         discardTextEditing()
         guard history.canUndo || history.canRedo else { return }
         history.clear()
+        selectedMarkIndex = nil
         publishHistoryState()
         needsDisplay = true
     }
@@ -421,6 +494,40 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
 
     private func publishHistoryState() {
         onHistoryChange?(history.canUndo, history.canRedo)
+    }
+
+    private func displayMark(_ mark: AnnotationMark, at index: Int) -> AnnotationMark {
+        if index == selectedMarkIndex, let selectionDragPreviewMark {
+            selectionDragPreviewMark
+        } else {
+            mark
+        }
+    }
+
+    private func textMarkIndex(at point: CGPoint) -> Int? {
+        for index in history.elements.indices.reversed() {
+            guard let rect = history.elements[index].textRect else { continue }
+            if rect.insetBy(dx: -7, dy: -6).contains(point) {
+                return index
+            }
+        }
+        return nil
+    }
+
+    private func drawSelectionOutline(for mark: AnnotationMark) {
+        guard let rect = mark.textRect else { return }
+        let outline = NSBezierPath(
+            roundedRect: rect.insetBy(dx: -7, dy: -6),
+            xRadius: 6,
+            yRadius: 6
+        )
+        outline.lineWidth = 1.5
+        outline.setLineDash([4, 3], count: 2, phase: 0)
+        NSColor.white.withAlphaComponent(0.96).setStroke()
+        outline.stroke()
+        outline.lineWidth = 1
+        CaptureUIColors.accent.setStroke()
+        outline.stroke()
     }
 
     private func clampedPoint(_ point: CGPoint) -> CGPoint {
@@ -619,11 +726,42 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         )
     }
 
+    private func beginTextEditing(markIndex: Int) {
+        guard history.elements.indices.contains(markIndex),
+              case let .text(text, rect, preset, background, fontSize) = history.elements[markIndex] else {
+            return
+        }
+        colorPreset = preset
+        textBackgroundStyle = background
+        textFontSize = fontSize
+        tool = .text
+        beginTextEditing(
+            at: rect.origin,
+            existingMarkIndex: markIndex,
+            initialText: text,
+            existingTextRect: rect
+        )
+    }
+
     private func beginTextEditing(at point: CGPoint) {
+        beginTextEditing(
+            at: point,
+            existingMarkIndex: nil,
+            initialText: "",
+            existingTextRect: nil
+        )
+    }
+
+    private func beginTextEditing(
+        at point: CGPoint,
+        existingMarkIndex: Int?,
+        initialText: String,
+        existingTextRect: CGRect?
+    ) {
         commitTextEditing()
 
         let editor = InlineAnnotationTextView(frame: .zero)
-        editor.string = ""
+        editor.string = initialText
         editor.font = .systemFont(ofSize: textFontSize, weight: .semibold)
         editor.isRichText = false
         editor.importsGraphics = false
@@ -651,14 +789,25 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
             self?.onCancelRequested?()
         }
 
-        let width = min(180, max(96, imageRect.width))
-        let origin = CGPoint(
-            x: min(point.x, imageRect.maxX - width),
-            y: min(point.y, imageRect.maxY - 34)
-        )
-        editor.frame = CGRect(origin: origin, size: CGSize(width: width, height: 34))
+        if let existingTextRect {
+            editor.frame = CGRect(
+                x: existingTextRect.minX - editor.textContainerInset.width,
+                y: existingTextRect.minY - editor.textContainerInset.height,
+                width: existingTextRect.width + editor.textContainerInset.width * 2,
+                height: existingTextRect.height + editor.textContainerInset.height * 2
+            )
+        } else {
+            let width = min(180, max(96, imageRect.width))
+            let origin = CGPoint(
+                x: min(point.x, imageRect.maxX - width),
+                y: min(point.y, imageRect.maxY - 34)
+            )
+            editor.frame = CGRect(origin: origin, size: CGSize(width: width, height: 34))
+        }
         addSubview(editor)
         textEditor = editor
+        editingTextMarkIndex = existingMarkIndex
+        selectedMarkIndex = existingMarkIndex
         textColorPreset = colorPreset
         editingTextBackgroundStyle = textBackgroundStyle
         editingTextFontSize = textFontSize
@@ -679,9 +828,26 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         let colorPreset = textColorPreset
         let backgroundStyle = editingTextBackgroundStyle
         let fontSize = editingTextFontSize
+        let markIndex = editingTextMarkIndex
         discardTextEditing()
-        if !text.isEmpty, let colorPreset, let backgroundStyle, let fontSize {
-            append(.text(text, textRect, colorPreset, backgroundStyle, fontSize))
+        guard let colorPreset, let backgroundStyle, let fontSize else { return }
+        if text.isEmpty {
+            if let markIndex, history.remove(at: markIndex) != nil {
+                selectedMarkIndex = nil
+                publishHistoryState()
+                needsDisplay = true
+            }
+            return
+        }
+        let mark = AnnotationMark.text(text, textRect, colorPreset, backgroundStyle, fontSize)
+        if let markIndex {
+            if history.replace(at: markIndex, with: mark) != nil {
+                selectedMarkIndex = markIndex
+                publishHistoryState()
+                needsDisplay = true
+            }
+        } else {
+            append(mark)
         }
     }
 
@@ -691,6 +857,7 @@ final class AnnotationCanvasView: NSView, NSTextViewDelegate {
         textColorPreset = nil
         editingTextBackgroundStyle = nil
         editingTextFontSize = nil
+        editingTextMarkIndex = nil
         editor.delegate = nil
         editor.onCommit = nil
         editor.onCancel = nil
@@ -912,5 +1079,34 @@ private extension AnnotationMark {
         } else {
             false
         }
+    }
+
+    var textRect: CGRect? {
+        if case let .text(_, rect, _, _, _) = self {
+            rect
+        } else {
+            nil
+        }
+    }
+
+    func translated(by offset: CGSize, within bounds: CGRect) -> AnnotationMark {
+        guard case let .text(text, rect, color, background, fontSize) = self else {
+            return self
+        }
+        let x = min(
+            max(rect.minX + offset.width, bounds.minX),
+            max(bounds.minX, bounds.maxX - rect.width)
+        )
+        let y = min(
+            max(rect.minY + offset.height, bounds.minY),
+            max(bounds.minY, bounds.maxY - rect.height)
+        )
+        return .text(
+            text,
+            CGRect(origin: CGPoint(x: x, y: y), size: rect.size),
+            color,
+            background,
+            fontSize
+        )
     }
 }

@@ -10,6 +10,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
     private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
     private var colorGroupContainer: CaptureToolGroupView?
+    private var sizeControlContainer: NSStackView?
     private var sizeControlTitle: NSTextField?
     private var sizeSlider: NSSlider?
     private var sizeValueLabel: NSTextField?
@@ -70,6 +71,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         let tools: [(AnnotationTool, String, String, String, Selector)] = [
+            (.select, "cursorarrow", "Select (V)", "v", #selector(useSelect)),
             (.pen, "pencil.tip", "Pen (P)", "p", #selector(usePen)),
             (.rectangle, "rectangle.dashed", "Rectangle (R)", "r", #selector(useRectangle)),
             (.line, "line.diagonal", "Line (L)", "l", #selector(useLine)),
@@ -91,6 +93,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             toolbar.addArrangedSubview(button)
         }
         let sizeControl = makeSizeControl()
+        sizeControlContainer = sizeControl.container
         sizeControlTitle = sizeControl.title
         sizeSlider = sizeControl.slider
         sizeValueLabel = sizeControl.valueLabel
@@ -301,9 +304,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         for (tool, button) in toolButtons {
             button.setToolSelected(tool == selected)
         }
+        updateColorButtons(selected: canvas.colorPreset)
+        updateTextBackgroundControl()
+        updateMosaicIntensityControl()
         textBackgroundButton?.isHidden = selected != .text
         mosaicIntensityButton?.isHidden = selected != .mosaic
-        colorGroupContainer?.isHidden = selected == .mosaic
+        sizeControlContainer?.isHidden = selected == .select
+        colorGroupContainer?.isHidden = selected == .select || selected == .mosaic
         configureSizeControl(for: selected)
     }
 
@@ -336,6 +343,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
     private func configureSizeControl(for tool: AnnotationTool) {
         let configuration: (String, Double, Double, CGFloat, String) = switch tool {
+        case .select:
+            ("Select", 0, 1, 0, "")
         case .pen:
             ("Brush", 1, 24, canvas.penWidth, "px")
         case .rectangle, .line, .arrow:
@@ -356,6 +365,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         let value = CGFloat(sender.doubleValue.rounded())
         sender.doubleValue = Double(value)
         switch canvas.tool {
+        case .select:
+            return
         case .pen:
             canvas.penWidth = value
         case .rectangle, .line, .arrow:
@@ -366,6 +377,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             canvas.mosaicBrushDiameter = value
         }
         configureSizeControl(for: canvas.tool)
+    }
+
+    @objc private func useSelect() {
+        canvas.tool = .select
     }
 
     @objc private func usePen() {

@@ -44,3 +44,18 @@ func annotationHistoryClearsAllState() throws {
     try expect(!history.canUndo, "Clear should remove undo availability")
     try expect(!history.canRedo, "Clear should remove redo availability")
 }
+
+func annotationHistoryReplacesElementsWithUndoAndRedo() throws {
+    var history = AnnotationHistory<String>()
+    history.append("original")
+
+    try expect(
+        history.replace(at: 0, with: "edited") == "original",
+        "Replace should return the previous element"
+    )
+    try expect(history.elements == ["edited"], "Replace should update the indexed element")
+    _ = history.undo()
+    try expect(history.elements == ["original"], "Undo should restore the previous element")
+    _ = history.redo()
+    try expect(history.elements == ["edited"], "Redo should restore the replacement")
+}
