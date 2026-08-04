@@ -8,21 +8,10 @@ enum CaptureSessionAction {
     case edit
 }
 
-private enum CaptureMode: String, CaseIterable {
+private enum CaptureMode {
     case screenshot
     case recording
     case ocr
-
-    static var preferred: CaptureMode {
-        guard let rawValue = UserDefaults.standard.string(forKey: "capture.mode.v1") else {
-            return .screenshot
-        }
-        return CaptureMode(rawValue: rawValue) ?? .screenshot
-    }
-
-    func saveAsPreferred() {
-        UserDefaults.standard.set(rawValue, forKey: "capture.mode.v1")
-    }
 
     var segmentIndex: Int {
         switch self {
@@ -138,7 +127,7 @@ private final class CaptureSessionView: NSView {
 
     private let image: CGImage
     private let windowRectsFrontToBack: [CGRect]
-    private var captureMode: CaptureMode = .preferred
+    private var captureMode: CaptureMode = .screenshot
     private var phase: CapturePhase = .selecting
     private var dragStart: CGPoint?
     private var selectionInteraction: SelectionInteraction?
@@ -576,7 +565,6 @@ private final class CaptureSessionView: NSView {
         let nextMode = CaptureMode(segmentIndex: segment)
         guard nextMode != captureMode else { return }
         captureMode = nextMode
-        captureMode.saveAsPreferred()
         phase = .selecting
         tearDownAnnotationUI()
 

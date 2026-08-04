@@ -75,6 +75,9 @@
 "Text Copied" = "文字已复制";
 "No Text Found" = "未找到文字";
 "Text Recognition Failed" = "文字识别失败";
+"Try a larger region or clearer text" = "试试框选更大的区域，或选择更清晰的文字";
+"Adjust the region and try again" = "调整识别区域后再试一次";
+"%d lines · %d chars" = "%d 行 · %d 字";
 "Cancel (Esc)" = "取消 (Esc)";
 "Cancel capture · Esc" = "取消截图 · Esc";
 "Select (V)" = "选择 (V)";

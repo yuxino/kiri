@@ -4,7 +4,7 @@ import AppKit
 /// the recognized text in an editable field so the user can adjust the region
 /// (which re-runs recognition) or tweak the text before copying. Styled to
 /// match the shared capture design system.
-final class OCRResultPanel: NSVisualEffectView {
+final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
     enum State {
         case recognizing
         case text(String)
@@ -20,12 +20,14 @@ final class OCRResultPanel: NSVisualEffectView {
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
+    private let statusDetailLabel = NSTextField(labelWithString: "")
     private let statusSymbol = NSImageView()
     private let spinner = NSProgressIndicator()
     private let statusStack = NSStackView()
     private let contentWell = NSView()
     private let textView = NSTextView()
     private let scrollView = NSScrollView()
+    private let summaryLabel = NSTextField(labelWithString: "")
     private let copyButton: CaptureActionButton
     private let cancelButton: CaptureActionButton
     private var currentState: State = .recognizing
@@ -66,7 +68,10 @@ final class OCRResultPanel: NSVisualEffectView {
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
         layer?.borderColor = CaptureUIColors.surfaceBorder.cgColor
-        layer?.masksToBounds = true
+        layer?.shadowColor = NSColor.black.cgColor
+        layer?.shadowOpacity = 0.2
+        layer?.shadowRadius = 8
+        layer?.shadowOffset = CGSize(width: 0, height: 3)
 
         titleLabel.stringValue = L10n.text("Recognized Text").uppercased()
         titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
@@ -94,18 +99,20 @@ final class OCRResultPanel: NSVisualEffectView {
         contentWell.wantsLayer = true
         contentWell.layer?.cornerRadius = 9
         contentWell.layer?.cornerCurve = .continuous
-        contentWell.layer?.backgroundColor = NSColor.textBackgroundColor
-            .withAlphaComponent(0.5).cgColor
+        contentWell.layer?.backgroundColor = NSColor.labelColor
+            .withAlphaComponent(0.05).cgColor
         contentWell.layer?.borderWidth = 1
-        contentWell.layer?.borderColor = CaptureUIColors.accent.withAlphaComponent(0.28).cgColor
+        contentWell.layer?.borderColor = CaptureUIColors.surfaceBorder
+            .withAlphaComponent(0.55).cgColor
         contentWell.translatesAutoresizingMaskIntoConstraints = false
 
         textView.isRichText = false
         textView.font = .systemFont(ofSize: 13)
         textView.textColor = CaptureUIColors.label
         textView.drawsBackground = false
+        textView.delegate = self
         textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.textContainerInset = NSSize(width: 10, height: 10)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
@@ -121,6 +128,9 @@ final class OCRResultPanel: NSVisualEffectView {
         statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
         statusLabel.textColor = CaptureUIColors.secondaryLabel
         statusLabel.alignment = .center
+        statusDetailLabel.font = .systemFont(ofSize: 11)
+        statusDetailLabel.textColor = CaptureUIColors.disabledLabel
+        statusDetailLabel.alignment = .center
 
         statusStack.orientation = .vertical
         statusStack.alignment = .centerX
@@ -129,6 +139,7 @@ final class OCRResultPanel: NSVisualEffectView {
         statusStack.addArrangedSubview(spinner)
         statusStack.addArrangedSubview(statusSymbol)
         statusStack.addArrangedSubview(statusLabel)
+        statusStack.addArrangedSubview(statusDetailLabel)
 
         contentWell.addSubview(scrollView)
         contentWell.addSubview(statusStack)
@@ -143,6 +154,12 @@ final class OCRResultPanel: NSVisualEffectView {
             statusStack.trailingAnchor.constraint(lessThanOrEqualTo: contentWell.trailingAnchor, constant: -12)
         ])
 
+        summaryLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        summaryLabel.textColor = CaptureUIColors.disabledLabel
+        summaryLabel.isHidden = true
+        summaryLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        summaryLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+
         copyButton.target = self
         copyButton.action = #selector(handleCopy)
         cancelButton.target = self
@@ -153,7 +170,7 @@ final class OCRResultPanel: NSVisualEffectView {
         buttonSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         buttonSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let buttonRow = NSStackView(views: [buttonSpacer, cancelButton, copyButton])
+        let buttonRow = NSStackView(views: [summaryLabel, buttonSpacer, cancelButton, copyButton])
         buttonRow.orientation = .horizontal
         buttonRow.alignment = .centerY
         buttonRow.spacing = 8
@@ -188,8 +205,11 @@ final class OCRResultPanel: NSVisualEffectView {
             spinner.isHidden = false
             statusSymbol.isHidden = true
             statusLabel.stringValue = L10n.text("Recognizing Text…")
+            statusDetailLabel.stringValue = ""
+            statusDetailLabel.isHidden = true
             statusStack.isHidden = false
             scrollView.isHidden = true
+            summaryLabel.isHidden = true
             copyButton.setActionEnabled(false)
         case let .text(value):
             spinner.stopAnimation(nil)
@@ -198,23 +218,52 @@ final class OCRResultPanel: NSVisualEffectView {
             textView.string = value
             textView.setSelectedRange(NSRange(location: (value as NSString).length, length: 0))
             textView.scrollToBeginningOfDocument(nil)
+            summaryLabel.isHidden = false
+            updateSummary()
             copyButton.setActionEnabled(!value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         case .empty:
-            showStatus(symbol: "text.badge.xmark", message: L10n.text("No Text Found"))
+            showStatus(
+                symbol: "text.badge.xmark",
+                message: L10n.text("No Text Found"),
+                detail: L10n.text("Try a larger region or clearer text"),
+                tint: CaptureUIColors.accent
+            )
         case .failed:
-            showStatus(symbol: "exclamationmark.triangle", message: L10n.text("Text Recognition Failed"))
+            showStatus(
+                symbol: "exclamationmark.triangle",
+                message: L10n.text("Text Recognition Failed"),
+                detail: L10n.text("Adjust the region and try again"),
+                tint: .systemOrange
+            )
         }
     }
 
-    private func showStatus(symbol: String, message: String) {
+    private func showStatus(symbol: String, message: String, detail: String, tint: NSColor) {
         spinner.stopAnimation(nil)
         spinner.isHidden = true
         statusSymbol.isHidden = false
         statusSymbol.image = NSImage(systemSymbolName: symbol, accessibilityDescription: message)
+        statusSymbol.contentTintColor = tint
         statusLabel.stringValue = message
+        statusDetailLabel.stringValue = detail
+        statusDetailLabel.isHidden = detail.isEmpty
         statusStack.isHidden = false
         scrollView.isHidden = true
+        summaryLabel.isHidden = true
         copyButton.setActionEnabled(false)
+    }
+
+    private func updateSummary() {
+        let value = textView.string
+        let characterCount = value.filter { !$0.isWhitespace }.count
+        let lineCount = max(1, value.split(separator: "\n", omittingEmptySubsequences: false).count)
+        summaryLabel.stringValue = L10n.format("%d lines · %d chars", lineCount, characterCount)
+    }
+
+    func textDidChange(_ notification: Notification) {
+        updateSummary()
+        let hasText = !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        copyButton.setActionEnabled(hasText)
     }
 
     var editedText: String {

@@ -75,6 +75,9 @@
 "Text Copied" = "Text Copied";
 "No Text Found" = "No Text Found";
 "Text Recognition Failed" = "Text Recognition Failed";
+"Try a larger region or clearer text" = "Try a larger region or clearer text";
+"Adjust the region and try again" = "Adjust the region and try again";
+"%d lines · %d chars" = "%d lines · %d chars";
 "Cancel (Esc)" = "Cancel (Esc)";
 "Cancel capture · Esc" = "Cancel capture · Esc";
 "Select (V)" = "Select (V)";
