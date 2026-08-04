@@ -17,6 +17,7 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
 
     var onCopy: ((String) -> Void)?
     var onCancel: (() -> Void)?
+    var onSizeChange: (() -> Void)?
 
     private let titleLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
@@ -24,10 +25,12 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
     private let statusSymbol = NSImageView()
     private let spinner = NSProgressIndicator()
     private let statusStack = NSStackView()
+    private let headerStack = NSStackView()
     private let contentWell = NSView()
     private let textView = NSTextView()
     private let scrollView = NSScrollView()
     private let summaryLabel = NSTextField(labelWithString: "")
+    private let buttonRow = NSStackView()
     private let copyButton: CaptureActionButton
     private let cancelButton: CaptureActionButton
     private var currentState: State = .recognizing
@@ -89,13 +92,16 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
         titleIcon.contentTintColor = CaptureUIColors.accent
 
-        let header = NSStackView(views: [titleIcon, titleLabel])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = 6
+        headerStack.orientation = .horizontal
+        headerStack.alignment = .centerY
+        headerStack.spacing = 6
+        headerStack.addArrangedSubview(titleIcon)
+        headerStack.addArrangedSubview(titleLabel)
 
-        // The content well keeps a fixed footprint across every state, so the
-        // panel never collapses or leaves a gap when text is absent.
+        // The content well keeps a fixed footprint for status states, so the
+        // panel never collapses or leaves a gap when text is absent. In the
+        // text state the well shrinks to fit the recognized text, so the panel
+        // never carries a large empty band under a short result.
         contentWell.wantsLayer = true
         contentWell.layer?.cornerRadius = 9
         contentWell.layer?.cornerCurve = .continuous
@@ -170,13 +176,16 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         buttonSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         buttonSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let buttonRow = NSStackView(views: [summaryLabel, buttonSpacer, cancelButton, copyButton])
         buttonRow.orientation = .horizontal
         buttonRow.alignment = .centerY
         buttonRow.spacing = 8
         buttonRow.distribution = .fill
+        buttonRow.addArrangedSubview(summaryLabel)
+        buttonRow.addArrangedSubview(buttonSpacer)
+        buttonRow.addArrangedSubview(cancelButton)
+        buttonRow.addArrangedSubview(copyButton)
 
-        let stack = NSStackView(views: [header, contentWell, buttonRow])
+        let stack = NSStackView(views: [headerStack, contentWell, buttonRow])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 9
@@ -189,7 +198,7 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            header.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+            headerStack.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
             contentWell.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
             contentWell.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
             buttonRow.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
@@ -236,6 +245,7 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
                 tint: .systemOrange
             )
         }
+        updatePanelSize()
     }
 
     private func showStatus(symbol: String, message: String, detail: String, tint: NSColor) {
@@ -264,6 +274,25 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         updateSummary()
         let hasText = !textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         copyButton.setActionEnabled(hasText)
+    }
+
+    private func updatePanelSize() {
+        layoutSubtreeIfNeeded()
+        let headerHeight = headerStack.fittingSize.height
+        let buttonRowHeight = buttonRow.fittingSize.height
+        let wellHeight: CGFloat
+        switch currentState {
+        case .text:
+            let container = textView.textContainer!
+            textView.layoutManager?.ensureLayout(for: container)
+            let textHeight = textView.layoutManager?.usedRect(for: container).height ?? 0
+            wellHeight = min(max(textHeight + 24, 64), 132)
+        case .recognizing, .empty, .failed:
+            wellHeight = 123
+        }
+        let height = 13 + headerHeight + 9 + wellHeight + 9 + buttonRowHeight + 13
+        frame.size.height = height
+        onSizeChange?()
     }
 
     var editedText: String {

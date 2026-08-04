@@ -1369,6 +1369,9 @@ private final class CaptureSessionView: NSView {
             panel.onCancel = { [weak self] in
                 self?.onCancel?()
             }
+            panel.onSizeChange = { [weak self] in
+                self?.layoutOCRPanel()
+            }
             addSubview(panel)
             ocrResultPanel = panel
         }
@@ -1395,8 +1398,8 @@ private final class CaptureSessionView: NSView {
 
     private func layoutOCRPanel() {
         guard let panel = ocrResultPanel else { return }
-        let width = OCRResultPanel.panelWidth
-        let height = OCRResultPanel.panelHeight
+        let width = panel.frame.width
+        let height = panel.frame.height
         var origin = CGPoint(
             x: selection.midX - width / 2,
             y: selection.maxY + 12
