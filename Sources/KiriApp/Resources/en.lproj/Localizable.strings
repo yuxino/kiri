@@ -65,7 +65,16 @@
 "Esc to cancel" = "Esc to cancel";
 "Screenshot" = "Screenshot";
 "Record" = "Record";
+"OCR" = "OCR";
+"Recognize Text" = "Recognize Text";
 "Capture mode" = "Capture mode";
+"Drag to choose text to recognize   ·   Click a window   ·   Esc to cancel" = "Drag to choose text to recognize   ·   Click a window   ·   Esc to cancel";
+"Release to recognize text" = "Release to recognize text";
+"Recognizing Text…" = "Recognizing Text…";
+"Recognized Text" = "Recognized Text";
+"Text Copied" = "Text Copied";
+"No Text Found" = "No Text Found";
+"Text Recognition Failed" = "Text Recognition Failed";
 "Cancel (Esc)" = "Cancel (Esc)";
 "Cancel capture · Esc" = "Cancel capture · Esc";
 "Select (V)" = "Select (V)";

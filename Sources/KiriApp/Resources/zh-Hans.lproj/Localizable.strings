@@ -65,7 +65,16 @@
 "Esc to cancel" = "按 Esc 取消";
 "Screenshot" = "截图";
 "Record" = "录屏";
+"OCR" = "文字";
+"Recognize Text" = "识别文字";
 "Capture mode" = "截图或录屏模式";
+"Drag to choose text to recognize   ·   Click a window   ·   Esc to cancel" = "框选要识别的文字   ·   点击窗口   ·   Esc 取消";
+"Release to recognize text" = "松开以识别文字";
+"Recognizing Text…" = "正在识别文字…";
+"Recognized Text" = "识别结果";
+"Text Copied" = "文字已复制";
+"No Text Found" = "未找到文字";
+"Text Recognition Failed" = "文字识别失败";
 "Cancel (Esc)" = "取消 (Esc)";
 "Cancel capture · Esc" = "取消截图 · Esc";
 "Select (V)" = "选择 (V)";

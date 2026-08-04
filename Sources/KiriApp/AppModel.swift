@@ -172,6 +172,12 @@ final class AppModel: ObservableObject {
                             returnApplication: returnApplication
                         )
                     },
+                    onRecognizeText: { [weak self] text in
+                        self?.overlayController = nil
+                        self?.keepKiriLibraryHidden(hiddenWindows)
+                        self?.activate(returnApplication)
+                        self?.copyRecognizedText(text)
+                    },
                     onCancel: { [weak self] in
                         self?.overlayController = nil
                         self?.cancelCapturePresentation(
@@ -881,6 +887,21 @@ final class AppModel: ObservableObject {
     private func writeToClipboard(_ image: NSImage) -> Bool {
         NSPasteboard.general.clearContents()
         return NSPasteboard.general.writeObjects([image])
+    }
+
+    private func writeToClipboard(_ text: String) -> Bool {
+        NSPasteboard.general.clearContents()
+        return NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private func copyRecognizedText(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if writeToClipboard(text) {
+            showNotice(title: L10n.text("Text Copied"), symbol: "doc.on.clipboard.fill")
+        } else {
+            errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
+        }
     }
 
     nonisolated private static func pngData(for image: CGImage) -> Data? {

@@ -8,9 +8,10 @@ enum CaptureSessionAction {
     case edit
 }
 
-private enum CaptureMode: String {
+private enum CaptureMode: String, CaseIterable {
     case screenshot
     case recording
+    case ocr
 
     static var preferred: CaptureMode {
         guard let rawValue = UserDefaults.standard.string(forKey: "capture.mode.v1") else {
@@ -21,6 +22,22 @@ private enum CaptureMode: String {
 
     func saveAsPreferred() {
         UserDefaults.standard.set(rawValue, forKey: "capture.mode.v1")
+    }
+
+    var segmentIndex: Int {
+        switch self {
+        case .screenshot: 0
+        case .recording: 1
+        case .ocr: 2
+        }
+    }
+
+    init(segmentIndex: Int) {
+        switch segmentIndex {
+        case 1: self = .recording
+        case 2: self = .ocr
+        default: self = .screenshot
+        }
     }
 }
 
@@ -55,6 +72,7 @@ final class SelectionOverlayController {
     func present(
         onComplete: @escaping (CGImage, CaptureSessionAction) -> Void,
         onRecord: @escaping (CGRect, RecordingOptions) -> Void,
+        onRecognizeText: @escaping (String) -> Void,
         onCancel: @escaping () -> Void
     ) {
         let window = CaptureOverlayWindow(
@@ -87,6 +105,10 @@ final class SelectionOverlayController {
             self?.close()
             onRecord(region, options)
         }
+        sessionView.onRecognizeText = { [weak self] text in
+            self?.close()
+            onRecognizeText(text)
+        }
         window.onEscape = { [weak sessionView] in
             sessionView?.onCancel?()
         }
@@ -111,6 +133,7 @@ final class SelectionOverlayController {
 private final class CaptureSessionView: NSView {
     var onComplete: ((CGImage, CaptureSessionAction) -> Void)?
     var onRecord: ((CGRect, RecordingOptions) -> Void)?
+    var onRecognizeText: ((String) -> Void)?
     var onCancel: (() -> Void)?
 
     private let image: CGImage
@@ -145,7 +168,9 @@ private final class CaptureSessionView: NSView {
     private var clearAnnotationsItem: NSMenuItem?
     private var recordingOptionsController: RecordingOptionsPopoverController?
     private var captureModeControl: NSVisualEffectView?
-    private var captureModeSelector: NSSegmentedControl?
+    private var captureModeSelector: CaptureModeSegmentedControl?
+    private var ocrResultPanel: OCRResultPanel?
+    private var ocrRecognitionToken = 0
     private var isCompleting = false
 
     init(image: CGImage, windowRectsFrontToBack: [CGRect]) {
@@ -256,6 +281,7 @@ private final class CaptureSessionView: NSView {
             } else {
                 selectionInteraction = .creating
                 tearDownAnnotationUI()
+                tearDownOCRPanel()
                 pendingWindowSelection = WindowSelectionGeometry.candidate(
                     at: point,
                     windowsFrontToBack: windowRectsFrontToBack,
@@ -266,6 +292,7 @@ private final class CaptureSessionView: NSView {
         } else {
             selectionInteraction = .creating
             tearDownAnnotationUI()
+            tearDownOCRPanel()
             pendingWindowSelection = WindowSelectionGeometry.candidate(
                 at: point,
                 windowsFrontToBack: windowRectsFrontToBack,
@@ -318,6 +345,9 @@ private final class CaptureSessionView: NSView {
         if toolbar != nil {
             layoutAnnotationUI()
         }
+        if ocrResultPanel != nil {
+            layoutOCRPanel()
+        }
         needsDisplay = true
     }
 
@@ -350,6 +380,9 @@ private final class CaptureSessionView: NSView {
                 captureModeControl?.isHidden = false
                 layoutCaptureModeControl()
                 presentRecordingOptions()
+            case .ocr:
+                tearDownAnnotationUI()
+                presentOCRPanel()
             }
         }
         if let hoverPoint {
@@ -408,10 +441,17 @@ private final class CaptureSessionView: NSView {
         }
 
         if phase == .selecting, isReturn, SelectionGeometry.isValid(selection) {
-            if captureMode == .screenshot {
+            switch captureMode {
+            case .screenshot:
                 complete(.copy)
-            } else {
+            case .recording:
                 presentRecordingOptions()
+            case .ocr:
+                if let panel = ocrResultPanel {
+                    finishOCR(with: panel.editedText)
+                } else {
+                    presentOCRPanel()
+                }
             }
             return
         }
@@ -479,36 +519,33 @@ private final class CaptureSessionView: NSView {
         effect.layer?.shadowRadius = 8
         effect.layer?.shadowOffset = CGSize(width: 0, height: 3)
 
-        let selector = NSSegmentedControl(
-            labels: [L10n.text("Screenshot"), L10n.text("Record")],
-            trackingMode: .selectOne,
-            target: self,
-            action: #selector(changeCaptureMode(_:))
+        let selector = CaptureModeSegmentedControl(
+            segments: [
+                CaptureModeSegmentedControl.Segment(
+                    symbol: "camera.viewfinder",
+                    title: L10n.text("Screenshot"),
+                    accessibilityLabel: L10n.text("Screenshot"),
+                    toolTip: L10n.text("Screenshot")
+                ),
+                CaptureModeSegmentedControl.Segment(
+                    symbol: "record.circle",
+                    title: L10n.text("Record"),
+                    accessibilityLabel: L10n.text("Record"),
+                    toolTip: L10n.text("Record Region")
+                ),
+                CaptureModeSegmentedControl.Segment(
+                    symbol: "text.viewfinder",
+                    title: L10n.text("OCR"),
+                    accessibilityLabel: L10n.text("Recognize Text"),
+                    toolTip: L10n.text("Recognize Text")
+                )
+            ],
+            selectedIndex: captureMode.segmentIndex
         )
-        selector.segmentStyle = .capsule
-        selector.controlSize = .large
-        selector.font = .systemFont(ofSize: 12, weight: .semibold)
-        selector.selectedSegment = captureMode == .screenshot ? 0 : 1
-        selector.setImage(
-            NSImage(
-                systemSymbolName: "camera.viewfinder",
-                accessibilityDescription: L10n.text("Screenshot")
-            ),
-            forSegment: 0
-        )
-        selector.setImage(
-            NSImage(
-                systemSymbolName: "record.circle",
-                accessibilityDescription: L10n.text("Record")
-            ),
-            forSegment: 1
-        )
-        selector.setWidth(112, forSegment: 0)
-        selector.setWidth(96, forSegment: 1)
-        selector.setToolTip(L10n.text("Screenshot"), forSegment: 0)
-        selector.setToolTip(L10n.text("Record Region"), forSegment: 1)
         selector.setAccessibilityLabel(L10n.text("Capture mode"))
-        selector.translatesAutoresizingMaskIntoConstraints = false
+        selector.onSelect = { [weak self] index in
+            self?.changeCaptureMode(toSegment: index)
+        }
 
         effect.addSubview(selector)
         NSLayoutConstraint.activate([
@@ -535,8 +572,8 @@ private final class CaptureSessionView: NSView {
         )
     }
 
-    @objc private func changeCaptureMode(_ sender: NSSegmentedControl) {
-        let nextMode: CaptureMode = sender.selectedSegment == 1 ? .recording : .screenshot
+    private func changeCaptureMode(toSegment segment: Int) {
+        let nextMode = CaptureMode(segmentIndex: segment)
         guard nextMode != captureMode else { return }
         captureMode = nextMode
         captureMode.saveAsPreferred()
@@ -552,6 +589,8 @@ private final class CaptureSessionView: NSView {
                 captureModeControl?.isHidden = false
                 layoutCaptureModeControl()
                 presentRecordingOptions()
+            case .ocr:
+                presentOCRPanel()
             }
         } else {
             captureModeControl?.isHidden = false
@@ -643,6 +682,7 @@ private final class CaptureSessionView: NSView {
         phase = .selecting
         selection = .null
         tearDownAnnotationUI()
+        tearDownOCRPanel()
         captureModeControl?.isHidden = false
         layoutCaptureModeControl()
         NSCursor.crosshair.set()
@@ -1328,6 +1368,73 @@ private final class CaptureSessionView: NSView {
         onRecord?(selection.standardized, options.normalized)
     }
 
+    private func presentOCRPanel() {
+        guard captureMode == .ocr,
+              !isCompleting,
+              SelectionGeometry.isValid(selection) else { return }
+        captureModeControl?.isHidden = true
+        if ocrResultPanel == nil {
+            let panel = OCRResultPanel()
+            panel.onCopy = { [weak self] text in
+                self?.finishOCR(with: text)
+            }
+            panel.onCancel = { [weak self] in
+                self?.onCancel?()
+            }
+            addSubview(panel)
+            ocrResultPanel = panel
+        }
+        layoutOCRPanel()
+        runOCRRecognition()
+    }
+
+    private func runOCRRecognition() {
+        guard let panel = ocrResultPanel, let cropped = croppedSelection() else { return }
+        panel.setState(.recognizing)
+        ocrRecognitionToken += 1
+        let token = ocrRecognitionToken
+        Task { @MainActor [weak self] in
+            let result = try? await TextRecognizer.recognizeText(in: cropped)
+            guard let self, self.ocrRecognitionToken == token, let panel = self.ocrResultPanel else { return }
+            guard let text = result else {
+                panel.setState(.failed)
+                return
+            }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            panel.setState(trimmed.isEmpty ? .empty : .text(text))
+        }
+    }
+
+    private func layoutOCRPanel() {
+        guard let panel = ocrResultPanel else { return }
+        let width = OCRResultPanel.panelWidth
+        let height = OCRResultPanel.panelHeight
+        var origin = CGPoint(
+            x: selection.midX - width / 2,
+            y: selection.maxY + 12
+        )
+        origin.x = min(max(origin.x, 8), max(8, bounds.maxX - width - 8))
+        if origin.y + height > bounds.maxY - 8 {
+            origin.y = selection.minY - height - 12
+        }
+        origin.y = min(max(origin.y, 8), max(8, bounds.maxY - height - 8))
+        panel.frame = CGRect(origin: origin, size: CGSize(width: width, height: height))
+    }
+
+    private func tearDownOCRPanel() {
+        ocrRecognitionToken += 1
+        ocrResultPanel?.removeFromSuperview()
+        ocrResultPanel = nil
+    }
+
+    private func finishOCR(with text: String) {
+        guard !isCompleting else { return }
+        isCompleting = true
+        tearDownOCRPanel()
+        window?.orderOut(nil)
+        onRecognizeText?(text)
+    }
+
     @objc private func pinCapture() {
         complete(.pin)
     }
@@ -1416,22 +1523,21 @@ private final class CaptureSessionView: NSView {
     }
 
     private func drawHint() {
-        let text: String
+        let key: String
         if selectionInteraction == .creating {
-            text = L10n.text(
-                captureMode == .recording
-                    ? "Release for recording settings"
-                    : "Release to show tools"
-            )
+            key = switch captureMode {
+            case .screenshot: "Release to show tools"
+            case .recording: "Release for recording settings"
+            case .ocr: "Release to recognize text"
+            }
         } else {
-            text = L10n.text(
-                captureMode == .recording
-                    ? "Adjust the region · Recording settings below"
-                    : "Drag handles to resize · Drag inside to move"
-            )
+            key = switch captureMode {
+            case .screenshot: "Drag handles to resize · Drag inside to move"
+            case .recording: "Adjust the region · Recording settings below"
+            case .ocr: "Release to recognize text"
+            }
         }
-        let textValue = text as NSString
-        drawHint(textValue, near: selection)
+        drawHint(L10n.text(key) as NSString, near: selection)
     }
 
     private func drawInitialHint() {
@@ -1440,6 +1546,8 @@ private final class CaptureSessionView: NSView {
             "Drag to choose a capture area   ·   Click a window   ·   Esc to cancel"
         case .recording:
             "Drag to choose a recording area   ·   Click a window   ·   Esc to cancel"
+        case .ocr:
+            "Drag to choose text to recognize   ·   Click a window   ·   Esc to cancel"
         }
         let text = L10n.text(textKey) as NSString
         let attributes: [NSAttributedString.Key: Any] = [
