@@ -46,9 +46,9 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         )
         cancelButton = CaptureActionButton(
             symbol: "xmark",
-            label: L10n.text("Cancel"),
+            label: L10n.text("Close"),
             style: .secondary,
-            showsTitle: false,
+            showsTitle: true,
             target: nil,
             action: #selector(NSView.hash)
         )

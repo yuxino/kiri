@@ -40,6 +40,7 @@
 "Restore" = "恢复";
 "Delete Permanently" = "永久删除";
 "Empty Trash" = "清空回收站";
+"Close" = "关闭";
 "Empty Trash?" = "清空回收站？";
 "All captures in Trash will be permanently deleted. This cannot be undone." = "回收站中的所有内容将被永久删除，此操作无法撤销。";
 "Trash Emptied" = "回收站已清空";
