@@ -11,6 +11,7 @@ private extension Color {
 struct LibraryView: View {
     @ObservedObject var model: AppModel
     @FocusState private var searchIsFocused: Bool
+    @State private var confirmsEmptyTrash = false
     private let columns = [
         GridItem(.adaptive(minimum: 210, maximum: 280), spacing: KiriUI.Spacing.roomy)
     ]
@@ -57,6 +58,18 @@ struct LibraryView: View {
         .focusedValue(\.focusLibrarySearch) {
             searchIsFocused = true
         }
+        .confirmationDialog(
+            L10n.text("Empty Trash?"),
+            isPresented: $confirmsEmptyTrash,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.text("Empty Trash"), role: .destructive) {
+                model.emptyTrash()
+            }
+            Button(L10n.text("Cancel"), role: .cancel) {}
+        } message: {
+            Text(L10n.text("All captures in Trash will be permanently deleted. This cannot be undone."))
+        }
     }
 
     private var header: some View {
@@ -67,6 +80,9 @@ struct LibraryView: View {
                 searchField
                     .frame(width: 210)
                 sectionPicker
+                if model.showingTrash {
+                    emptyTrashButton
+                }
                 captureActions
             }
 
@@ -74,6 +90,9 @@ struct LibraryView: View {
                 HStack(spacing: KiriUI.Spacing.standard) {
                     titleBlock
                     Spacer()
+                    if model.showingTrash {
+                        emptyTrashButton
+                    }
                     captureActions
                 }
                 HStack(spacing: KiriUI.Spacing.compact) {
@@ -86,6 +105,21 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 12)
+    }
+
+    private var emptyTrashButton: some View {
+        Button {
+            confirmsEmptyTrash = true
+        } label: {
+            Label(L10n.text("Empty Trash"), systemImage: "trash.slash")
+                .font(.system(size: 12, weight: .medium))
+                .labelStyle(.titleAndIcon)
+        }
+        .buttonStyle(.bordered)
+        .tint(.red)
+        .disabled(!model.assets.contains { $0.trashedAt != nil })
+        .help(L10n.text("Permanently delete all captures in Trash"))
+        .accessibilityLabel(L10n.text("Empty Trash"))
     }
 
     private var titleBlock: some View {

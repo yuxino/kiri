@@ -138,6 +138,9 @@ private final class CaptureSessionView: NSView {
     private var pendingWindowSelection: CGRect?
     private var annotationCanvas: AnnotationCanvasView?
     private var toolbar: NSVisualEffectView?
+    private var hoverHintLabel: CaptureHintLabel?
+    private weak var hintAnchorButton: CaptureActionButton?
+    private var annotationUISuspended = false
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
     private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
     private var colorGroupContainer: CaptureToolGroupView?
@@ -331,6 +334,9 @@ private final class CaptureSessionView: NSView {
             )
         }
         hoverPoint = current
+        if annotationUISuspended {
+            invalidateAnnotationUI()
+        }
         if toolbar != nil {
             layoutAnnotationUI()
         }
@@ -362,15 +368,14 @@ private final class CaptureSessionView: NSView {
         if SelectionGeometry.isValid(selection) {
             switch captureMode {
             case .screenshot:
-                captureModeControl?.isHidden = true
                 prepareSelectionToolbar()
             case .recording:
-                tearDownAnnotationUI()
-                captureModeControl?.isHidden = false
-                layoutCaptureModeControl()
-                presentRecordingOptions()
+                clearAnnotationUI()
+                if recordingOptionsController == nil {
+                    presentRecordingOptions()
+                }
             case .ocr:
-                tearDownAnnotationUI()
+                clearAnnotationUI()
                 presentOCRPanel()
             }
         }
@@ -566,21 +571,30 @@ private final class CaptureSessionView: NSView {
         guard nextMode != captureMode else { return }
         captureMode = nextMode
         phase = .selecting
-        tearDownAnnotationUI()
+        recordingOptionsController?.close()
+        recordingOptionsController = nil
+        tearDownOCRPanel()
 
         if SelectionGeometry.isValid(selection) {
+            if annotationCanvas != nil {
+                suspendAnnotationUI()
+            } else {
+                clearAnnotationUI()
+            }
             switch captureMode {
             case .screenshot:
-                captureModeControl?.isHidden = true
-                prepareSelectionToolbar()
+                if annotationCanvas != nil {
+                    resumeAnnotationUI()
+                } else {
+                    prepareSelectionToolbar()
+                }
             case .recording:
-                captureModeControl?.isHidden = false
-                layoutCaptureModeControl()
                 presentRecordingOptions()
             case .ocr:
                 presentOCRPanel()
             }
         } else {
+            clearAnnotationUI()
             captureModeControl?.isHidden = false
             layoutCaptureModeControl()
         }
@@ -679,10 +693,19 @@ private final class CaptureSessionView: NSView {
     }
 
     private func tearDownAnnotationUI() {
+        recordingOptionsController?.close()
+        recordingOptionsController = nil
+        clearAnnotationUI()
+    }
+
+    private func clearAnnotationUI() {
+        annotationUISuspended = false
         annotationCanvas?.removeFromSuperview()
         annotationCanvas = nil
         toolbar?.removeFromSuperview()
         toolbar = nil
+        hoverHintLabel?.removeFromSuperview()
+        hoverHintLabel = nil
         toolButtons.removeAll()
         colorButtons.removeAll()
         colorGroupContainer = nil
@@ -700,8 +723,34 @@ private final class CaptureSessionView: NSView {
         undoButton = nil
         redoButton = nil
         clearAnnotationsItem = nil
-        recordingOptionsController?.close()
-        recordingOptionsController = nil
+    }
+
+    /// Hides the screenshot annotation UI while another capture mode takes
+    /// over, so switching back restores the canvas and any annotations.
+    private func suspendAnnotationUI() {
+        annotationUISuspended = true
+        annotationCanvas?.isHidden = true
+        toolbar?.isHidden = true
+        hoverHintLabel?.alphaValue = 0
+        hoverHintLabel?.isHidden = true
+    }
+
+    private func resumeAnnotationUI() {
+        guard let canvas = annotationCanvas, let toolbar else { return }
+        annotationUISuspended = false
+        canvas.isHidden = false
+        toolbar.isHidden = false
+        hoverHintLabel?.isHidden = false
+        layoutAnnotationUI()
+        updateToolButtons(selected: canvas.tool)
+        needsDisplay = true
+    }
+
+    /// Drops a suspended screenshot canvas once the selection has changed,
+    /// since its cropped image no longer matches the current region.
+    private func invalidateAnnotationUI() {
+        guard annotationUISuspended else { return }
+        clearAnnotationUI()
     }
 
     private func croppedSelection() -> CGImage? {
@@ -745,6 +794,11 @@ private final class CaptureSessionView: NSView {
         effect.layer?.borderWidth = 1
         effect.layer?.borderColor = CaptureUIColors.surfaceBorder.cgColor
         effect.layer?.masksToBounds = true
+
+        let hintLabel = CaptureHintLabel()
+        hintLabel.alphaValue = 0
+        addSubview(hintLabel)
+        hoverHintLabel = hintLabel
 
         let actions = NSStackView()
         actions.orientation = .horizontal
@@ -797,6 +851,7 @@ private final class CaptureSessionView: NSView {
                 target: self,
                 action: action
             )
+            wireHoverHint(button)
             toolButtons[tool] = button
             toolGroup.addArrangedSubview(button)
         }
@@ -874,6 +929,7 @@ private final class CaptureSessionView: NSView {
             target: self,
             action: #selector(finishCapture)
         )
+        wireHoverHint(doneButton)
         actions.addArrangedSubview(doneButton)
 
         let moreButton = actionButton(
@@ -1085,7 +1141,47 @@ private final class CaptureSessionView: NSView {
             target: self,
             action: action
         )
+        wireHoverHint(button)
         return button
+    }
+
+    private func wireHoverHint(_ button: CaptureActionButton) {
+        button.onHoverHintChange = { [weak self] hint in
+            self?.showHoverHint(hint, from: button)
+        }
+    }
+
+    private func showHoverHint(_ hint: String?, from button: CaptureActionButton) {
+        guard let label = hoverHintLabel else { return }
+        if let hint {
+            hintAnchorButton = button
+            label.text = hint
+            layoutHoverHint(anchoredTo: button)
+            label.setAccessibilityValue(hint)
+        } else {
+            hintAnchorButton = nil
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = KiriUI.Motion.hover
+            label.animator().alphaValue = hint == nil ? 0 : 1
+        }
+    }
+
+    private func layoutHoverHint(anchoredTo button: CaptureActionButton) {
+        guard let label = hoverHintLabel, let toolbar else { return }
+        let intrinsic = label.intrinsicContentSize
+        let width = min(intrinsic.width, bounds.width - 16)
+        let height = intrinsic.height
+        let buttonFrame = button.convert(button.bounds, to: self)
+        var origin = CGPoint(
+            x: buttonFrame.midX - width / 2,
+            y: toolbar.frame.maxY + 8
+        )
+        if origin.y + height > bounds.maxY - 8 {
+            origin.y = toolbar.frame.minY - height - 8
+        }
+        origin.x = min(max(origin.x, 8), max(8, bounds.maxX - width - 8))
+        label.frame = CGRect(origin: origin, size: CGSize(width: width, height: height))
     }
 
     private func separator() -> NSView {
@@ -1109,6 +1205,11 @@ private final class CaptureSessionView: NSView {
         }
         origin.y = min(max(origin.y, 8), max(8, bounds.maxY - height - 8))
         toolbar.frame = CGRect(origin: origin, size: CGSize(width: width, height: height))
+        if hoverHintLabel?.alphaValue ?? 0 > 0 {
+            if let hintAnchorButton {
+                layoutHoverHint(anchoredTo: hintAnchorButton)
+            }
+        }
     }
 
     private func updateToolButtons(selected: AnnotationTool) {
@@ -1360,7 +1461,6 @@ private final class CaptureSessionView: NSView {
         guard captureMode == .ocr,
               !isCompleting,
               SelectionGeometry.isValid(selection) else { return }
-        captureModeControl?.isHidden = true
         if ocrResultPanel == nil {
             let panel = OCRResultPanel()
             panel.onCopy = { [weak self] text in
@@ -1398,17 +1498,23 @@ private final class CaptureSessionView: NSView {
 
     private func layoutOCRPanel() {
         guard let panel = ocrResultPanel else { return }
-        let width = panel.frame.width
+        let width = OCRResultPanel.panelWidth
         let height = panel.frame.height
+        let bottomLimit: CGFloat
+        if let modeControl = captureModeControl, !modeControl.isHidden {
+            bottomLimit = modeControl.frame.minY - 12
+        } else {
+            bottomLimit = bounds.maxY - 8
+        }
         var origin = CGPoint(
             x: selection.midX - width / 2,
             y: selection.maxY + 12
         )
         origin.x = min(max(origin.x, 8), max(8, bounds.maxX - width - 8))
-        if origin.y + height > bounds.maxY - 8 {
+        if origin.y + height > bottomLimit {
             origin.y = selection.minY - height - 12
         }
-        origin.y = min(max(origin.y, 8), max(8, bounds.maxY - height - 8))
+        origin.y = min(max(origin.y, 8), max(8, bottomLimit - height))
         panel.frame = CGRect(origin: origin, size: CGSize(width: width, height: height))
     }
 

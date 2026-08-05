@@ -43,6 +43,59 @@ final class CaptureDividerView: NSView {
     }
 }
 
+/// A small dark pill that surfaces a button's hover hint next to the capture
+/// toolbar, matching the badge styling used for selection hints. The pill is
+/// drawn by hand so the text stays exactly centered, unlike a single-line
+/// `NSTextField` which vertically top-aligns its truncated content.
+final class CaptureHintLabel: NSView {
+    static let textAttributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+        .foregroundColor: NSColor.white
+    ]
+
+    var text: String = "" {
+        didSet {
+            needsDisplay = true
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        setAccessibilityRole(.staticText)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let size = (text as NSString).size(withAttributes: Self.textAttributes)
+        return CGSize(width: size.width + 20, height: size.height + 9)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 9, yRadius: 9)
+        NSColor.black.withAlphaComponent(0.76).setFill()
+        path.fill()
+        NSColor.white.withAlphaComponent(0.16).setStroke()
+        path.lineWidth = 1
+        path.stroke()
+
+        let text = text as NSString
+        let textSize = text.size(withAttributes: Self.textAttributes)
+        text.draw(
+            at: CGPoint(
+                x: bounds.midX - textSize.width / 2,
+                y: bounds.midY - textSize.height / 2
+            ),
+            withAttributes: Self.textAttributes
+        )
+    }
+}
+
 final class CaptureToolGroupView: NSView {
     init(content: NSView) {
         super.init(frame: .zero)

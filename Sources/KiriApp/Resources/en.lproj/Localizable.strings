@@ -39,6 +39,11 @@
 "Move to Trash" = "Move to Trash";
 "Restore" = "Restore";
 "Delete Permanently" = "Delete Permanently";
+"Empty Trash" = "Empty Trash";
+"Empty Trash?" = "Empty Trash?";
+"All captures in Trash will be permanently deleted. This cannot be undone." = "All captures in Trash will be permanently deleted. This cannot be undone.";
+"Trash Emptied" = "Trash Emptied";
+"Permanently delete all captures in Trash" = "Permanently delete all captures in Trash";
 "Copy" = "Copy";
 "Open" = "Open";
 "Show in Finder" = "Show in Finder";

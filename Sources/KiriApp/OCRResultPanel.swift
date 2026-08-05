@@ -12,7 +12,7 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         case failed
     }
 
-    static let panelWidth: CGFloat = 372
+    static let panelWidth: CGFloat = 320
     static let panelHeight: CGFloat = 214
 
     var onCopy: ((String) -> Void)?
@@ -48,7 +48,7 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
             symbol: "xmark",
             label: L10n.text("Cancel"),
             style: .secondary,
-            showsTitle: true,
+            showsTitle: false,
             target: nil,
             action: #selector(NSView.hash)
         )
@@ -67,18 +67,19 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         blendingMode = .withinWindow
         state = .active
         wantsLayer = true
-        layer?.cornerRadius = 13
+        layer?.cornerRadius = 14
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
-        layer?.borderColor = CaptureUIColors.surfaceBorder.cgColor
+        layer?.borderColor = CaptureUIColors.surfaceBorder.withAlphaComponent(0.35).cgColor
         layer?.shadowColor = NSColor.black.cgColor
         layer?.shadowOpacity = 0.2
-        layer?.shadowRadius = 8
-        layer?.shadowOffset = CGSize(width: 0, height: 3)
+        layer?.shadowRadius = 16
+        layer?.shadowOffset = CGSize(width: 0, height: 5)
 
-        titleLabel.stringValue = L10n.text("Recognized Text").uppercased()
-        titleLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-        titleLabel.textColor = CaptureUIColors.secondaryLabel
+        titleLabel.stringValue = L10n.text("Recognized Text")
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = CaptureUIColors.label
+        titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         spinner.style = .spinning
         spinner.controlSize = .small
@@ -89,27 +90,20 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         titleIcon.image = NSImage(
             systemSymbolName: "text.viewfinder",
             accessibilityDescription: nil
-        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold))
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
         titleIcon.contentTintColor = CaptureUIColors.accent
+        titleIcon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            titleIcon.widthAnchor.constraint(equalToConstant: 18),
+            titleIcon.heightAnchor.constraint(equalToConstant: 18)
+        ])
 
         headerStack.orientation = .horizontal
         headerStack.alignment = .centerY
-        headerStack.spacing = 6
+        headerStack.spacing = 8
         headerStack.addArrangedSubview(titleIcon)
         headerStack.addArrangedSubview(titleLabel)
 
-        // The content well keeps a fixed footprint for status states, so the
-        // panel never collapses or leaves a gap when text is absent. In the
-        // text state the well shrinks to fit the recognized text, so the panel
-        // never carries a large empty band under a short result.
-        contentWell.wantsLayer = true
-        contentWell.layer?.cornerRadius = 9
-        contentWell.layer?.cornerCurve = .continuous
-        contentWell.layer?.backgroundColor = NSColor.labelColor
-            .withAlphaComponent(0.05).cgColor
-        contentWell.layer?.borderWidth = 1
-        contentWell.layer?.borderColor = CaptureUIColors.surfaceBorder
-            .withAlphaComponent(0.55).cgColor
         contentWell.translatesAutoresizingMaskIntoConstraints = false
 
         textView.isRichText = false
@@ -118,29 +112,33 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         textView.drawsBackground = false
         textView.delegate = self
         textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.textContainerInset = NSSize(width: 10, height: 10)
+        textView.textContainerInset = NSSize(width: 0, height: 12)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(
+            width: 0,
+            height: CGFloat.greatestFiniteMagnitude
+        )
 
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        spinner.controlSize = .small
-        statusSymbol.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 22, weight: .regular)
+        statusSymbol.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 24, weight: .regular)
         statusSymbol.contentTintColor = CaptureUIColors.secondaryLabel
-        statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        statusLabel.font = .systemFont(ofSize: 12.5, weight: .medium)
         statusLabel.textColor = CaptureUIColors.secondaryLabel
         statusLabel.alignment = .center
-        statusDetailLabel.font = .systemFont(ofSize: 11)
-        statusDetailLabel.textColor = CaptureUIColors.disabledLabel
+        statusDetailLabel.font = .systemFont(ofSize: 11.5)
+        statusDetailLabel.textColor = CaptureUIColors.secondaryLabel.withAlphaComponent(0.8)
         statusDetailLabel.alignment = .center
 
         statusStack.orientation = .vertical
         statusStack.alignment = .centerX
-        statusStack.spacing = 8
+        statusStack.spacing = 9
         statusStack.translatesAutoresizingMaskIntoConstraints = false
         statusStack.addArrangedSubview(spinner)
         statusStack.addArrangedSubview(statusSymbol)
@@ -150,10 +148,10 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         contentWell.addSubview(scrollView)
         contentWell.addSubview(statusStack)
         NSLayoutConstraint.activate([
-            scrollView.topAnchor.constraint(equalTo: contentWell.topAnchor, constant: 2),
-            scrollView.leadingAnchor.constraint(equalTo: contentWell.leadingAnchor, constant: 2),
-            scrollView.trailingAnchor.constraint(equalTo: contentWell.trailingAnchor, constant: -2),
-            scrollView.bottomAnchor.constraint(equalTo: contentWell.bottomAnchor, constant: -2),
+            scrollView.topAnchor.constraint(equalTo: contentWell.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: contentWell.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: contentWell.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: contentWell.bottomAnchor),
             statusStack.centerXAnchor.constraint(equalTo: contentWell.centerXAnchor),
             statusStack.centerYAnchor.constraint(equalTo: contentWell.centerYAnchor),
             statusStack.leadingAnchor.constraint(greaterThanOrEqualTo: contentWell.leadingAnchor, constant: 12),
@@ -161,7 +159,7 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         ])
 
         summaryLabel.font = .systemFont(ofSize: 11, weight: .medium)
-        summaryLabel.textColor = CaptureUIColors.disabledLabel
+        summaryLabel.textColor = CaptureUIColors.secondaryLabel
         summaryLabel.isHidden = true
         summaryLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         summaryLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
@@ -188,21 +186,18 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         let stack = NSStackView(views: [headerStack, contentWell, buttonRow])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 9
-        stack.edgeInsets = NSEdgeInsets(top: 13, left: 14, bottom: 13, right: 14)
+        stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: topAnchor),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            headerStack.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
-            contentWell.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
-            contentWell.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
-            buttonRow.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
-            buttonRow.trailingAnchor.constraint(equalTo: stack.trailingAnchor)
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 14),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -14),
+            headerStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            contentWell.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            buttonRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
     }
 
@@ -286,11 +281,11 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
             let container = textView.textContainer!
             textView.layoutManager?.ensureLayout(for: container)
             let textHeight = textView.layoutManager?.usedRect(for: container).height ?? 0
-            wellHeight = min(max(textHeight + 24, 64), 132)
+            wellHeight = min(max(textHeight + 24, 56), 160)
         case .recognizing, .empty, .failed:
-            wellHeight = 123
+            wellHeight = 104
         }
-        let height = 13 + headerHeight + 9 + wellHeight + 9 + buttonRowHeight + 13
+        let height = 14 + headerHeight + 10 + wellHeight + 10 + buttonRowHeight + 14
         frame.size.height = height
         onSizeChange?()
     }

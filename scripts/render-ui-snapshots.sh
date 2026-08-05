@@ -30,6 +30,7 @@ swiftc \
     Sources/KiriApp/KiriDesignSystem.swift \
     Sources/KiriApp/L10n.swift \
     Sources/KiriApp/LibraryView.swift \
+    Sources/KiriApp/OCRResultPanel.swift \
     Sources/KiriApp/PinnedImageController.swift \
     Sources/KiriApp/RecordingClickHighlighterController.swift \
     Sources/KiriApp/RecordingControlPanelController.swift \
@@ -39,6 +40,7 @@ swiftc \
     Sources/KiriApp/RecordingSegmentMerger.swift \
     Sources/KiriApp/RegionRecorder.swift \
     Sources/KiriApp/SelectionOverlayController.swift \
+    Sources/KiriApp/TextRecognizer.swift \
     scripts/qa/LibrarySnapshotMain.swift \
     "$swift_bin_path"/KiriCore.build/*.o \
     -framework AppKit \

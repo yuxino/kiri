@@ -187,6 +187,19 @@ public actor AssetLibrary {
         )
     }
 
+    public func emptyTrash() throws {
+        let trashed = index.filter { $0.trashedAt != nil }
+        guard !trashed.isEmpty else { return }
+        index.removeAll { $0.trashedAt != nil }
+        try persist()
+        for asset in trashed {
+            try? FileManager.default.removeItem(at: assetURL(for: asset))
+            try? FileManager.default.removeItem(
+                at: thumbnailsURL.appendingPathComponent("\(asset.id.uuidString.lowercased()).jpg")
+            )
+        }
+    }
+
     private func update(id: UUID, mutation: (inout CaptureAsset) -> Void) throws {
         guard let position = index.firstIndex(where: { $0.id == id }) else {
             throw AssetLibraryError.assetNotFound

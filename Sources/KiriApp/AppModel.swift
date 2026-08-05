@@ -665,6 +665,18 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func emptyTrash() {
+        Task {
+            do {
+                try await library.emptyTrash()
+                await refresh()
+                showNotice(title: L10n.text("Trash Emptied"), symbol: "trash.slash")
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     func copy(_ asset: CaptureAsset) {
         guard let image = NSImage(contentsOf: assetFileURL(asset)) else {
             errorMessage = L10n.text("The capture file is unavailable.")
