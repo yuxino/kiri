@@ -73,6 +73,18 @@ let tests = [
     KiriTest(name: "recording click feedback stays consistent") {
         try recordingOptionsKeepClickFeedbackConsistent()
     },
+    KiriTest(name: "long screenshot rejects empty input") {
+        try longScreenshotRejectsEmptyInput()
+    },
+    KiriTest(name: "long screenshot no-overlap height sum") {
+        try longScreenshotKeepsHeightWhenThereIsNoOverlap()
+    },
+    KiriTest(name: "long screenshot detects overlap and preserves order") {
+        try longScreenshotDetectsOverlapAndPreservesPixelOrder()
+    },
+    KiriTest(name: "long screenshot handles different sizes and height cap") {
+        try longScreenshotHandlesDifferentSizesAndHeightCap()
+    },
     KiriTest(name: "selection reverse drag") {
         try normalizesReverseDrag()
     },

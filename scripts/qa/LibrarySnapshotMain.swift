@@ -29,8 +29,9 @@ struct LibrarySnapshotMain {
         var importedAssets: [CaptureAsset] = []
         if !["empty", "loading"].contains(mode) {
             for index in 0..<6 {
+                let isLongImage = index == 1
                 let pixelWidth = 900 + index * 80
-                let pixelHeight = 560 + (index % 3) * 100
+                let pixelHeight = isLongImage ? 1_800 : 560 + (index % 3) * 100
                 let image = makeFixtureImage(
                     width: pixelWidth,
                     height: pixelHeight,
@@ -42,7 +43,7 @@ struct LibrarySnapshotMain {
                 }
                 let asset = try await library.importData(
                     data,
-                    kind: .image,
+                    kind: isLongImage ? .longImage : .image,
                     fileExtension: "png",
                     pixelWidth: pixelWidth,
                     pixelHeight: pixelHeight,

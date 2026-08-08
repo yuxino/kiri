@@ -46,8 +46,9 @@ Before a stable v0.1 release:
 
 ## v0.3 — long capture
 
-- [ ] Guided scrolling capture
-- [ ] Overlap detection and automatic stitching
+- [x] Guided scrolling capture
+- [x] Overlap detection and automatic stitching
+- [x] Long-image PNG export and local library import
 - [ ] Manual seam adjustment
 - [ ] Very tall image preview and export
 - [ ] Memory-bounded stitching for long pages

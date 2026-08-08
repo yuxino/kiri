@@ -30,6 +30,7 @@ swiftc \
     Sources/KiriApp/KiriDesignSystem.swift \
     Sources/KiriApp/L10n.swift \
     Sources/KiriApp/LibraryView.swift \
+    Sources/KiriApp/LongScreenshotCaptureController.swift \
     Sources/KiriApp/OCRResultPanel.swift \
     Sources/KiriApp/PinnedImageController.swift \
     Sources/KiriApp/RecordingClickHighlighterController.swift \

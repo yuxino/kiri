@@ -74,37 +74,47 @@ struct LibraryView: View {
 
     private var header: some View {
         ViewThatFits(in: .horizontal) {
+            wideHeader
+            compactHeader
+        }
+        .padding(.horizontal, KiriUI.Spacing.page)
+        .padding(.vertical, KiriUI.Spacing.standard)
+    }
+
+    private var wideHeader: some View {
+        HStack(spacing: KiriUI.Spacing.standard) {
+            titleBlock
+                .layoutPriority(1)
+            Spacer(minLength: 0)
+            searchField
+                .frame(width: KiriUI.Header.searchWidth)
+            sectionPicker
+            if model.showingTrash {
+                emptyTrashButton
+            }
+            captureActions
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var compactHeader: some View {
+        VStack(spacing: KiriUI.Spacing.standard) {
             HStack(spacing: KiriUI.Spacing.standard) {
                 titleBlock
-                Spacer(minLength: 18)
-                searchField
-                    .frame(width: 210)
-                sectionPicker
+                    .layoutPriority(1)
+                Spacer(minLength: 0)
                 if model.showingTrash {
                     emptyTrashButton
                 }
                 captureActions
             }
-
-            VStack(spacing: KiriUI.Spacing.standard) {
-                HStack(spacing: KiriUI.Spacing.standard) {
-                    titleBlock
-                    Spacer()
-                    if model.showingTrash {
-                        emptyTrashButton
-                    }
-                    captureActions
-                }
-                HStack(spacing: KiriUI.Spacing.compact) {
-                    searchField
-                        .frame(maxWidth: .infinity)
-                    sectionPicker
-                }
+            HStack(spacing: KiriUI.Spacing.compact) {
+                searchField
+                    .frame(maxWidth: .infinity)
+                sectionPicker
             }
-            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
     }
 
     private var emptyTrashButton: some View {
@@ -123,15 +133,27 @@ struct LibraryView: View {
     }
 
     private var titleBlock: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(L10n.text(model.showingTrash ? "Trash" : "Library"))
-                .font(.title3.weight(.semibold))
-            Text(sectionSummary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .contentTransition(.numericText())
+        HStack(spacing: KiriUI.Spacing.compact) {
+            Image(systemName: model.showingTrash ? "trash" : "photo.on.rectangle")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(Color.kiriAccent)
+                .frame(width: 32, height: 32)
+                .background(
+                    Color.kiriAccent.opacity(0.11),
+                    in: RoundedRectangle(cornerRadius: KiriUI.Radius.control)
+                )
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L10n.text(model.showingTrash ? "Trash" : "Library"))
+                    .font(.title3.weight(.semibold))
+                Text(sectionSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
         }
-        .fixedSize()
+        .fixedSize(horizontal: true, vertical: true)
     }
 
     private var sectionPicker: some View {
@@ -143,7 +165,7 @@ struct LibraryView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .frame(width: 164)
+        .frame(width: KiriUI.Header.sectionPickerWidth)
         .onChange(of: model.showingTrash) {
             model.searchQuery = ""
         }
@@ -228,7 +250,7 @@ struct LibraryView: View {
             }
         }
         .padding(.horizontal, 10)
-        .frame(height: 32)
+        .frame(height: KiriUI.Header.controlHeight)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.control))
         .overlay {
@@ -424,7 +446,7 @@ private struct CaptureCard: View {
     @State private var confirmsPermanentDelete = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: KiriUI.Spacing.standard) {
             CaptureThumbnail(
                 fileURL: model.assetFileURL(asset),
                 fallbackSystemImage: iconName,
@@ -443,39 +465,43 @@ private struct CaptureCard: View {
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
                 }
             }
-            .aspectRatio(16 / 10, contentMode: .fit)
+            .overlay(alignment: .topLeading) {
+                kindBadge
+                    .padding(KiriUI.Spacing.compact)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: KiriUI.Card.thumbnailHeight)
             .contentShape(Rectangle())
             .onTapGesture(count: 2) {
                 model.open(asset)
             }
             .help(L10n.text("Double-click to open"))
 
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: KiriUI.Card.metadataSpacing) {
+                HStack(alignment: .firstTextBaseline, spacing: KiriUI.Spacing.compact) {
                     Text(asset.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                         .font(.subheadline.weight(.medium))
                         .lineLimit(1)
-                    Text(metadata)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if asset.isFavorite {
+                        Image(systemName: "star.fill")
+                            .foregroundStyle(.yellow)
+                            .accessibilityHidden(true)
+                    }
                 }
-                Spacer()
-                if asset.isFavorite {
-                    Image(systemName: "star.fill")
-                        .foregroundStyle(.yellow)
-                }
+                metadataLine
             }
 
-            HStack(spacing: 6) {
+            HStack(spacing: KiriUI.Card.actionSpacing) {
                 if asset.trashedAt == nil {
                     Button {
                         performPrimaryAction()
                     } label: {
                         Label(primaryActionTitle, systemImage: primaryActionSymbol)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
                     .controlSize(.small)
+                    .help(primaryActionTitle)
 
                     Spacer()
                     iconButton(
@@ -503,12 +529,13 @@ private struct CaptureCard: View {
                         Image(systemName: "trash.fill")
                     }
                     .buttonStyle(.borderless)
+                    .frame(width: 28, height: 26)
                     .help(L10n.text("Delete Permanently"))
                     .accessibilityLabel(L10n.text("Delete Permanently"))
                 }
             }
         }
-        .padding(12)
+        .padding(KiriUI.Card.padding)
         .background(Color(nsColor: .controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.card))
         .overlay {
@@ -572,17 +599,51 @@ private struct CaptureCard: View {
         }
     }
 
-    private var metadata: String {
-        let dimensions = "\(asset.pixelWidth) × \(asset.pixelHeight)"
-        let details = if let duration = asset.duration {
-            "\(dimensions) · \(RecordingPolicy.elapsedLabel(duration))"
-        } else {
-            dimensions
+    @ViewBuilder
+    private var metadataLine: some View {
+        HStack(spacing: KiriUI.Card.metadataSpacing) {
+            Text(pixelSize)
+                .font(.caption.monospacedDigit())
+                .fixedSize()
+            if let duration = asset.duration {
+                metadataSeparator
+                Text(RecordingPolicy.elapsedLabel(duration))
+                    .font(.caption.monospacedDigit())
+                    .fixedSize()
+            }
+            if let source = asset.sourceApplication, !source.isEmpty {
+                metadataSeparator
+                Text(source)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
         }
-        guard let source = asset.sourceApplication, !source.isEmpty else {
-            return details
-        }
-        return "\(details) · \(source)"
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var metadataSeparator: some View {
+        Text("·")
+            .foregroundStyle(.tertiary)
+            .accessibilityHidden(true)
+    }
+
+    private var pixelSize: String {
+        "\(asset.pixelWidth) × \(asset.pixelHeight)"
+    }
+
+    private var kindBadge: some View {
+        Image(systemName: iconName)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Color.kiriAccent)
+            .frame(width: 24, height: 24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: KiriUI.Radius.badge))
+            .overlay {
+                RoundedRectangle(cornerRadius: KiriUI.Radius.badge)
+                    .stroke(Color.primary.opacity(0.12))
+            }
+            .accessibilityHidden(true)
     }
 
     private var iconName: String {
@@ -614,7 +675,7 @@ private struct CaptureCard: View {
             }
         } label: {
             Image(systemName: "ellipsis")
-                .frame(width: 18, height: 18)
+                .frame(width: 28, height: 26)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -649,6 +710,8 @@ private struct CaptureCard: View {
             Image(systemName: systemName)
         }
         .buttonStyle(.borderless)
+        .frame(width: 28, height: 26)
+        .contentShape(Rectangle())
         .help(help)
         .accessibilityLabel(help)
     }

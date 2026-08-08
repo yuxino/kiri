@@ -12,12 +12,14 @@ private enum CaptureMode {
     case screenshot
     case recording
     case ocr
+    case longScreenshot
 
     var segmentIndex: Int {
         switch self {
         case .screenshot: 0
         case .recording: 1
         case .ocr: 2
+        case .longScreenshot: 3
         }
     }
 
@@ -25,6 +27,7 @@ private enum CaptureMode {
         switch segmentIndex {
         case 1: self = .recording
         case 2: self = .ocr
+        case 3: self = .longScreenshot
         default: self = .screenshot
         }
     }
@@ -62,6 +65,7 @@ final class SelectionOverlayController {
         onComplete: @escaping (CGImage, CaptureSessionAction) -> Void,
         onRecord: @escaping (CGRect, RecordingOptions) -> Void,
         onRecognizeText: @escaping (String) -> Void,
+        onLongScreenshot: @escaping (CGRect, CGImage) -> Void,
         onCancel: @escaping () -> Void
     ) {
         let window = CaptureOverlayWindow(
@@ -98,6 +102,10 @@ final class SelectionOverlayController {
             self?.close()
             onRecognizeText(text)
         }
+        sessionView.onLongScreenshot = { [weak self] region, image in
+            self?.close()
+            onLongScreenshot(region, image)
+        }
         window.onEscape = { [weak sessionView] in
             sessionView?.onCancel?()
         }
@@ -123,6 +131,7 @@ private final class CaptureSessionView: NSView {
     var onComplete: ((CGImage, CaptureSessionAction) -> Void)?
     var onRecord: ((CGRect, RecordingOptions) -> Void)?
     var onRecognizeText: ((String) -> Void)?
+    var onLongScreenshot: ((CGRect, CGImage) -> Void)?
     var onCancel: (() -> Void)?
 
     private let image: CGImage
@@ -377,6 +386,9 @@ private final class CaptureSessionView: NSView {
             case .ocr:
                 clearAnnotationUI()
                 presentOCRPanel()
+            case .longScreenshot:
+                clearAnnotationUI()
+                beginLongScreenshot()
             }
         }
         if let hoverPoint {
@@ -446,6 +458,8 @@ private final class CaptureSessionView: NSView {
                 } else {
                     presentOCRPanel()
                 }
+            case .longScreenshot:
+                beginLongScreenshot()
             }
             return
         }
@@ -532,6 +546,12 @@ private final class CaptureSessionView: NSView {
                     title: L10n.text("OCR"),
                     accessibilityLabel: L10n.text("Recognize Text"),
                     toolTip: L10n.text("Recognize Text")
+                ),
+                CaptureModeSegmentedControl.Segment(
+                    symbol: "rectangle.portrait.and.arrow.forward",
+                    title: L10n.text("Long Screenshot"),
+                    accessibilityLabel: L10n.text("Long Screenshot"),
+                    toolTip: L10n.text("Long Screenshot")
                 )
             ],
             selectedIndex: captureMode.segmentIndex
@@ -592,6 +612,8 @@ private final class CaptureSessionView: NSView {
                 presentRecordingOptions()
             case .ocr:
                 presentOCRPanel()
+            case .longScreenshot:
+                beginLongScreenshot()
             }
         } else {
             clearAnnotationUI()
@@ -1457,6 +1479,20 @@ private final class CaptureSessionView: NSView {
         onRecord?(selection.standardized, options.normalized)
     }
 
+    private func beginLongScreenshot() {
+        guard !isCompleting,
+              captureMode == .longScreenshot,
+              SelectionGeometry.isValid(selection),
+              let cropped = croppedSelection() else {
+            return
+        }
+        isCompleting = true
+        tearDownAnnotationUI()
+        tearDownOCRPanel()
+        window?.orderOut(nil)
+        onLongScreenshot?(selection.standardized, cropped)
+    }
+
     private func presentOCRPanel() {
         guard captureMode == .ocr,
               !isCompleting,
@@ -1626,12 +1662,14 @@ private final class CaptureSessionView: NSView {
             case .screenshot: "Release to show tools"
             case .recording: "Release for recording settings"
             case .ocr: "Release to recognize text"
+            case .longScreenshot: "Release to start long screenshot"
             }
         } else {
             key = switch captureMode {
             case .screenshot: "Drag handles to resize · Drag inside to move"
             case .recording: "Adjust the region · Recording settings below"
             case .ocr: "Release to recognize text"
+            case .longScreenshot: "Drag handles to resize · Drag inside to move"
             }
         }
         drawHint(L10n.text(key) as NSString, near: selection)
@@ -1645,6 +1683,8 @@ private final class CaptureSessionView: NSView {
             "Drag to choose a recording area   ·   Click a window   ·   Esc to cancel"
         case .ocr:
             "Drag to choose text to recognize   ·   Click a window   ·   Esc to cancel"
+        case .longScreenshot:
+            "Drag to choose a long screenshot area   ·   Click a window   ·   Esc to cancel"
         }
         let text = L10n.text(textKey) as NSString
         let attributes: [NSAttributedString.Key: Any] = [

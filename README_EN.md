@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="Resources/Assets/kiri-icon.png" width="112" alt="kiri">
+  <img src="Resources/Assets/kiri-icon.png" width="112" alt="kiri app icon">
   <h1>kiri</h1>
   <p>A quick, recoverable screenshot tool for macOS</p>
   <p>
@@ -10,6 +10,8 @@
 </div>
 
 `kiri` comes from the Japanese word 「切り取り」—to clip or cut out.
+
+The refreshed icon uses a white rounded square, charcoal-lavender line art, and a violet capture frame to sit more naturally beside other macOS Dock icons. The GitHub README and the macOS app share the same icon asset.
 
 It is a native macOS visual capture tool. Capture and copy a region in one
 gesture, or annotate only when needed, while kiri keeps a local, searchable copy. Your last capture
@@ -32,6 +34,7 @@ does not disappear just because the clipboard changed.
 - Default screenshots copy to the clipboard and return focus to the original app without opening Kiri's library
 - Save, pin, or open the full editor when needed
 - Choose Screenshot or Record in the capture overlay's first-level mode switch instead of finding recording inside screenshot tools
+- Capture a guided scrolling long screenshot from the same first-level mode switch, with section capture, undo, finish, and cancel controls
 - Configure remembered countdown, system audio, microphone, pointer, and click-highlight switches before recording
 - Use a centered 3-2-1 countdown that does not dim the selected region, and cancel it with Escape
 - Record high-quality MP4 at the display's Retina scale instead of upscaling a low-resolution capture
@@ -45,8 +48,8 @@ does not disappear just because the clipboard changed.
 - Keep both a Dock icon and a menu bar shortcut while Kiri is running
 
 > kiri is an early source preview. Region recording with audio and pointer
-> feedback plus short-video GIF export are available in the v0.2 preview;
-> trimming and scrolling capture are still in development.
+> feedback, short-video GIF export, and scrolling long screenshots are available
+> in preview; manual seam adjustment is still in development.
 
 ## Download
 
@@ -113,6 +116,15 @@ uploaded automatically.
 Audio is off by default and Kiri asks for microphone permission only when that
 switch is enabled. Kiri draws click highlights itself; microphone capture
 requires macOS 15 or later.
+
+## Scrolling long screenshots (preview)
+
+1. Press **⇧⌘A**, choose **Long Screenshot** in the first-level mode switch, and select a region.
+2. Scroll the original app, then click **Capture Next Section**, or press **Space / Return** while the guide is focused.
+3. Use **Undo Last** when needed; choose **Finish & Copy** when done. Press **Escape** to cancel.
+4. Kiri automatically stitches the sections, copies the final PNG, and stores the same long image in the local library.
+
+The compact guide hides itself before each fresh capture, so Kiri UI is not included in the next section. Keep the pointer on the initially selected display. The current workflow is guided stitching; manual seam adjustment remains planned.
 
 See [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
 [SECURITY.md](SECURITY.md).
