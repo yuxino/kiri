@@ -79,16 +79,20 @@ public struct LongScreenshotStitcher {
         }
 
         let preparedSections = try sections.enumerated().map { index, image in
-            try prepare(image, index: index, stitchWidth: stitchWidth)
+            guard let prepared = Self.prepare(image, index: index, stitchWidth: stitchWidth) else {
+                throw Error.invalidImage(index: index)
+            }
+            return prepared
         }
 
         var detectedOverlaps: [Int] = []
         detectedOverlaps.reserveCapacity(max(0, preparedSections.count - 1))
         for index in 1..<preparedSections.count {
             detectedOverlaps.append(
-                detectOverlap(
+                Self.detectOverlap(
                     between: preparedSections[index - 1],
-                    and: preparedSections[index]
+                    and: preparedSections[index],
+                    configuration: configuration
                 )
             )
         }
@@ -120,20 +124,27 @@ public struct LongScreenshotStitcher {
             let section = preparedSections[index]
             let overlap = index == 0 ? 0 : detectedOverlaps[index - 1]
             let visibleHeight = section.height - overlap
-            let destinationY = topOffset
+            // Accumulate top-to-bottom: this section's visible strip occupies
+            // output rows [topOffset, topOffset + visibleHeight), measured from
+            // the top of the output image. The strip's bottom edge in the
+            // bottom-left CG context is (outputHeight - topOffset).
+            let stripTopY = outputHeight - topOffset - visibleHeight
 
             context.saveGState()
             context.clip(to: CGRect(
                 x: 0,
-                y: destinationY,
+                y: stripTopY,
                 width: stitchWidth,
                 height: visibleHeight
             ))
+            // The section's top `overlap` rows are shared with the previous
+            // section; drawing the full section from the strip's top lets the
+            // shared rows extend above the clip and leaves only the new rows.
             context.draw(
                 section.image,
                 in: CGRect(
                     x: 0,
-                    y: destinationY - overlap,
+                    y: stripTopY,
                     width: stitchWidth,
                     height: section.height
                 )
@@ -156,34 +167,34 @@ public struct LongScreenshotStitcher {
         try Self(configuration: configuration).stitch(sections)
     }
 
-    private struct PreparedSection {
+    struct PreparedSection {
         let image: CGImage
         let width: Int
         let height: Int
         let grayscale: GrayscaleSamples
     }
 
-    private struct GrayscaleSamples {
+    struct GrayscaleSamples {
         let width: Int
         let height: Int
         let bytesPerRow: Int
         let pixels: [UInt8]
 
         func value(x: Int, yFromTop: Int) -> UInt8 {
-            pixels[(height - 1 - yFromTop) * bytesPerRow + x]
+            pixels[yFromTop * bytesPerRow + x]
         }
     }
 
-    private func prepare(
+    static func prepare(
         _ image: CGImage,
         index: Int,
         stitchWidth: Int
-    ) throws -> PreparedSection {
+    ) -> PreparedSection? {
         guard image.width > 0, image.height > 0, image.dataProvider != nil else {
-            throw Error.invalidImage(index: index)
+            return nil
         }
         guard let grayscale = makeGrayscaleSamples(for: image, stitchWidth: stitchWidth) else {
-            throw Error.invalidImage(index: index)
+            return nil
         }
         return PreparedSection(
             image: image,
@@ -224,9 +235,10 @@ public struct LongScreenshotStitcher {
         return height
     }
 
-    private func detectOverlap(
+    static func detectOverlap(
         between first: PreparedSection,
-        and second: PreparedSection
+        and second: PreparedSection,
+        configuration: Configuration
     ) -> Int {
         let smallestHeight = min(first.height, second.height)
         let maximumByFraction = Int(
@@ -266,7 +278,7 @@ public struct LongScreenshotStitcher {
             startingAt: first.height - bestOverlap,
             length: bestOverlap
         )
-        let hasMeaningfulDetail = detail >= 0.01
+        let hasMeaningfulDetail = detail >= 0.003
         let hasDistinctMatch = secondBestScore.isFinite && secondBestScore - bestScore >= 0.02
         guard hasMeaningfulDetail && (hasDistinctMatch || bestScore <= 0.01) else {
             return 0
@@ -274,7 +286,7 @@ public struct LongScreenshotStitcher {
         return bestOverlap
     }
 
-    private func matchScore(
+    static func matchScore(
         between first: GrayscaleSamples,
         and second: GrayscaleSamples,
         overlap: Int
@@ -303,7 +315,7 @@ public struct LongScreenshotStitcher {
         return difference / Double(sampleCount * width * 255)
     }
 
-    private func detailScore(
+    static func detailScore(
         in samples: GrayscaleSamples,
         startingAt startY: Int,
         length: Int
@@ -338,7 +350,7 @@ public struct LongScreenshotStitcher {
         return variation / Double(comparisons * 255)
     }
 
-    private func makeGrayscaleSamples(
+    static func makeGrayscaleSamples(
         for image: CGImage,
         stitchWidth: Int
     ) -> GrayscaleSamples? {
@@ -379,6 +391,31 @@ public struct LongScreenshotStitcher {
             height: image.height,
             bytesPerRow: bytesPerRow,
             pixels: pixels
+        )
+    }
+}
+
+public enum LongScreenshotOverlapDetector {
+    public static func detectOverlap(
+        between first: CGImage,
+        and second: CGImage,
+        configuration: LongScreenshotStitcherConfiguration = LongScreenshotStitcherConfiguration()
+    ) -> Int {
+        let stitchWidth = min(first.width, second.width)
+        guard stitchWidth > 0,
+              let firstPrepared = LongScreenshotStitcher.prepare(
+                  first, index: 0, stitchWidth: stitchWidth
+              ),
+              let secondPrepared = LongScreenshotStitcher.prepare(
+                  second, index: 1, stitchWidth: stitchWidth
+              )
+        else {
+            return 0
+        }
+        return LongScreenshotStitcher.detectOverlap(
+            between: firstPrepared,
+            and: secondPrepared,
+            configuration: configuration
         )
     }
 }

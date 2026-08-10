@@ -205,10 +205,9 @@
 "Long Screenshot" = "Long Screenshot";
 "Release to start long screenshot" = "Release to start long screenshot";
 "Drag to choose a long screenshot area   ·   Click a window   ·   Esc to cancel" = "Drag to choose a long screenshot area   ·   Click a window   ·   Esc to cancel";
-"Long Screenshot Sections: %d" = "Long Screenshot Sections: %d";
-"Capturing next section…" = "Capturing next section…";
-"Scroll the original app, then capture the next section." = "Scroll the original app, then capture the next section. (Space / Return)";
-"Capture Next Section" = "Capture Next Section";
+"Sections: %d" = "Sections: %d";
+"Recording — scroll to capture, Esc to stop" = "Recording — scroll to capture, Esc to stop";
+"Click Start, scroll the original app, then Stop." = "Click Start, scroll the original app, then Stop.";
 "Undo Last" = "Undo Last";
 "Finish & Copy" = "Finish & Copy";
 "The selected area is too small for a long screenshot." = "The selected area is too small for a long screenshot.";

@@ -30,10 +30,19 @@ enum CaptureCoordinatorError: LocalizedError {
 }
 
 @MainActor
-final class CaptureCoordinator {
+protocol DisplayCapturing: AnyObject {
+    func captureActiveDisplay(
+        excludingWindowIDs: Set<CGWindowID>
+    ) async throws -> CapturedDisplay
+}
+
+@MainActor
+final class CaptureCoordinator: DisplayCapturing {
     private var permissionGate = ScreenCapturePermissionGate()
 
-    func captureActiveDisplay() async throws -> CapturedDisplay {
+    func captureActiveDisplay(
+        excludingWindowIDs: Set<CGWindowID> = []
+    ) async throws -> CapturedDisplay {
 #if DEBUG
         let usesFixture = ProcessInfo.processInfo.environment["KIRI_CAPTURE_FIXTURE"] == "1"
             || CommandLine.arguments.contains("--capture-fixture")
@@ -92,7 +101,11 @@ final class CaptureCoordinator {
             )
         }
 
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let filter = Self.contentFilter(
+            display: display,
+            content: content,
+            excludingWindowIDs: excludingWindowIDs
+        )
         let configuration = SCStreamConfiguration()
         // SCDisplay dimensions are measured in points, while the stream output
         // dimensions are pixels. Capture at the screen's backing resolution so
@@ -119,6 +132,39 @@ final class CaptureCoordinator {
             displayID: displayID,
             backingScale: backingScale
         )
+    }
+
+
+    private static func contentFilter(
+        display: SCDisplay,
+        content: SCShareableContent,
+        excludingWindowIDs: Set<CGWindowID>
+    ) -> SCContentFilter {
+        guard !excludingWindowIDs.isEmpty else {
+            return SCContentFilter(display: display, excludingWindows: [])
+        }
+        let currentProcessID = ProcessInfo.processInfo.processIdentifier
+        let toExclude = content.windows.filter {
+            excludingWindowIDs.contains($0.windowID)
+        }
+        if let application = content.applications.first(where: {
+            $0.processID == currentProcessID
+        }) {
+            // Mirror the recording backend: exclude the Kiri application but
+            // re-include any Kiri window that must stay visible.
+            let kiriWindows = content.windows.filter {
+                $0.owningApplication?.processID == currentProcessID
+            }
+            let exceptedWindows = kiriWindows.filter {
+                !excludingWindowIDs.contains($0.windowID)
+            }
+            return SCContentFilter(
+                display: display,
+                excludingApplications: [application],
+                exceptingWindows: exceptedWindows
+            )
+        }
+        return SCContentFilter(display: display, excludingWindows: toExclude)
     }
 
 #if DEBUG

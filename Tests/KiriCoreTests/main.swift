@@ -85,6 +85,21 @@ let tests = [
     KiriTest(name: "long screenshot handles different sizes and height cap") {
         try longScreenshotHandlesDifferentSizesAndHeightCap()
     },
+    KiriTest(name: "long screenshot overlap detector finds shared rows") {
+        try longScreenshotOverlapDetectorFindsSharedRows()
+    },
+    KiriTest(name: "long screenshot overlap detector rejects distinct content") {
+        try longScreenshotOverlapDetectorReturnsZeroForDistinctContent()
+    },
+    KiriTest(name: "long screenshot overlap detector handles large overlap") {
+        try longScreenshotOverlapDetectorHandlesLargeOverlap()
+    },
+    KiriTest(name: "long screenshot overlap detector handles scrolled content") {
+        try longScreenshotOverlapDetectorHandlesScrolledRealisticContent()
+    },
+    KiriTest(name: "long screenshot stitched output stays top to bottom") {
+        try longScreenshotStitcherOutputStaysTopToBottom()
+    },
     KiriTest(name: "selection reverse drag") {
         try normalizesReverseDrag()
     },

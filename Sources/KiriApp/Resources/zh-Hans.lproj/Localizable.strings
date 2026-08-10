@@ -205,10 +205,9 @@
 "Long Screenshot" = "滚动长截图";
 "Release to start long screenshot" = "松开以开始滚动长截图";
 "Drag to choose a long screenshot area   ·   Click a window   ·   Esc to cancel" = "拖动选择长截图区域   ·   单击选择窗体   ·   Esc 取消";
-"Long Screenshot Sections: %d" = "长截图分段：%d";
-"Capturing next section…" = "正在截取下一段…";
-"Scroll the original app, then capture the next section." = "滚动原应用后，再截取下一段。（Space / Return）";
-"Capture Next Section" = "截取下一段";
+"Sections: %d" = "分段：%d";
+"Recording — scroll to capture, Esc to stop" = "正在录制 —— 滚动截取，Esc 停止";
+"Click Start, scroll the original app, then Stop." = "点击开始后滚动原应用即可截取，完成后点停止。";
 "Undo Last" = "撤销上一段";
 "Finish & Copy" = "完成并复制";
 "The selected area is too small for a long screenshot." = "所选区域太小，无法进行滚动长截图。";
