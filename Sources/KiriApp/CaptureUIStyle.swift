@@ -3,20 +3,26 @@ import AppKit
 enum CaptureUIColors {
     static let accent = NSColor(
         calibratedRed: 0.49,
-        green: 0.37,
+        green: 0.41,
         blue: 0.96,
         alpha: 1
     )
     static let accentStrong = NSColor(
         calibratedRed: 0.39,
-        green: 0.28,
-        blue: 0.90,
+        green: 0.31,
+        blue: 0.86,
         alpha: 1
     )
     static let blossom = NSColor(
-        calibratedRed: 0.98,
-        green: 0.42,
-        blue: 0.67,
+        calibratedRed: 1.0,
+        green: 0.50,
+        blue: 0.66,
+        alpha: 1
+    )
+    static let cyan = NSColor(
+        calibratedRed: 0.31,
+        green: 0.75,
+        blue: 0.94,
         alpha: 1
     )
     static let accentSoft = NSColor(
@@ -29,24 +35,51 @@ enum CaptureUIColors {
     static let secondaryLabel = NSColor.secondaryLabelColor
     static let disabledLabel = NSColor.tertiaryLabelColor
     static let hoverFill = accent.withAlphaComponent(0.10)
-    static let selectedFill = accent.withAlphaComponent(0.20)
-    static let divider = NSColor.separatorColor.withAlphaComponent(0.7)
-    static let surfaceBorder = accent.withAlphaComponent(0.24)
-    static let groupFill = accent.withAlphaComponent(0.065)
-    static let surfaceShadow = NSColor.black.withAlphaComponent(0.24)
+    static let selectedFill = accent.withAlphaComponent(0.18)
+    static let divider = NSColor.separatorColor.withAlphaComponent(0.55)
+    static let canvas = dynamic(light: 0xFFFFFF, dark: 0x15131D)
+    static let card = dynamic(light: 0xFFFFFF, dark: 0x1E1B28)
+    static let elevated = dynamic(light: 0xFFFFFF, dark: 0x282334)
+    static let surfaceBorder = dynamic(light: 0xE5DFF0, dark: 0x40394E)
+    static let groupFill = dynamic(light: 0xF3EFF9, dark: 0x302A3D)
+    static let surfaceShadow = NSColor.black.withAlphaComponent(0.20)
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let match = appearance.bestMatch(from: [.darkAqua, .aqua])
+            return color(hex: match == .darkAqua ? dark : light)
+        }
+    }
+
+    private static func color(hex: UInt32) -> NSColor {
+        NSColor(
+            calibratedRed: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
+        )
+    }
 }
 
 final class CaptureDividerView: NSView {
+    private let dividerSize: NSSize
+
     init(height: CGFloat = 24) {
+        dividerSize = NSSize(width: 1, height: height)
         super.init(frame: CGRect(x: 0, y: 0, width: 1, height: height))
         wantsLayer = true
         layer?.backgroundColor = CaptureUIColors.divider.cgColor
-        setFrameSize(CGSize(width: 1, height: height))
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        dividerSize
     }
 }
 

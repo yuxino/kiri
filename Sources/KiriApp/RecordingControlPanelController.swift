@@ -12,7 +12,7 @@ final class RecordingControlPanelController {
         state.onStop = onStop
 
         panel = NSPanel(
-            contentRect: CGRect(x: 0, y: 0, width: 286, height: 58),
+            contentRect: CGRect(x: 0, y: 0, width: 296, height: 64),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -71,7 +71,7 @@ private struct RecordingControlBar: View {
         HStack(spacing: 10) {
             ZStack {
                 Circle()
-                    .fill(state.isPaused ? Color.orange : Color.red)
+                    .fill(state.isPaused ? KiriUI.Palette.coral : Color.red)
                     .frame(width: 10, height: 10)
                 if !state.isPaused && !state.isBusy {
                     Circle()
@@ -82,7 +82,7 @@ private struct RecordingControlBar: View {
 
             Text(state.isPaused ? L10n.text("Paused") : state.elapsed)
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(state.isPaused ? Color.orange : .primary)
+                .foregroundStyle(state.isPaused ? KiriUI.Palette.coral : .primary)
                 .frame(minWidth: 58, alignment: .leading)
 
             Divider().frame(height: 22)
@@ -101,10 +101,10 @@ private struct RecordingControlBar: View {
                 }
                 .buttonStyle(.plain)
                 .background(
-                    Color(nsColor: CaptureUIColors.accent).opacity(0.11),
+                    KiriUI.Palette.accent.opacity(0.14),
                     in: RoundedRectangle(cornerRadius: 9)
                 )
-                .foregroundStyle(Color(nsColor: CaptureUIColors.accent))
+                .foregroundStyle(KiriUI.Palette.accent)
                 .help(L10n.text(state.isPaused ? "Resume Recording" : "Pause Recording"))
                 .accessibilityLabel(L10n.text(state.isPaused ? "Resume Recording" : "Pause Recording"))
             }
@@ -125,10 +125,10 @@ private struct RecordingControlBar: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
         .overlay {
-            RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(Color(nsColor: CaptureUIColors.accent).opacity(0.22), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(KiriUI.Palette.border.opacity(0.9), lineWidth: 1)
         }
         .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
         .padding(4)

@@ -11,45 +11,51 @@
 
 `kiri` comes from the Japanese word 「切り取り」—to clip or cut out.
 
-The refreshed icon uses a white rounded square, charcoal-lavender line art, and a violet capture frame to sit more naturally beside other macOS Dock icons. The GitHub README and the macOS app share the same icon asset.
+The refreshed icon features a colorful chibi girl with violet-blue hair, a star clip, and a subtle capture frame. Its lavender, sky-blue, and peach palette is shared by the GitHub README and the macOS app.
 
 It is a native macOS visual capture tool. Capture and copy a region in one
 gesture, or annotate only when needed, while kiri keeps a local, searchable copy. Your last capture
 does not disappear just because the clipboard changed.
 
-## Available today
+## Three steps
 
-- Start capture with **⇧⌘A**, which Kiri filters before other apps can act on it
-- Use a Simplified Chinese or English interface that follows the preferred macOS language
-- Freeze the display, preview a window with one violet hover outline and click to select it, or manually drag an exact region; both remain movable and resizable
-- See the full toolbar as soon as the region is drawn, while it remains movable and resizable until a tool is chosen
-- Use pen, rectangle, line, arrow, text, and continuous brush mosaic tools with undo and redo
-- Use the default pointer to select and move existing text, then double-click it to edit again
-- Move pen and mosaic strokes, resize rectangles from eight handles, adjust line and arrow endpoints, or press Delete
-- Continuously adjust pen width, shape width, text size, and mosaic brush size; text stays resizable while typing or after reopening it
-- Choose soft, standard, or strong mosaic pixelation
-- Choose from eight annotation colors; text supports complex input, long content,
-  and Transparent (default), Dark, or Light backgrounds
-- Press Escape to cancel at any capture stage and Return once a region exists to copy immediately
-- Default screenshots copy to the clipboard and return focus to the original app without opening Kiri's library
-- Save, pin, or open the full editor when needed
-- Choose Screenshot or Record in the capture overlay's first-level mode switch instead of finding recording inside screenshot tools
-- Capture scrolling long screenshots from the same first-level mode switch; Kiri follows slow scrolling automatically and updates a live preview
-- Configure remembered countdown, system audio, microphone, pointer, and click-highlight switches before recording
-- Use a centered 3-2-1 countdown that does not dim the selected region, and cancel it with Escape
-- Record high-quality MP4 at the display's Retina scale instead of upscaling a low-resolution capture
-- Pause, resume, or stop from a visible control bar; Kiri controls and paused time are omitted from the final video
-- Show a violet click ripple live while recording and preserve the same feedback in the exported video
-- Recordings save in the background and restore the original app; the library opens only when requested
-- Persist each completed result once and add it to local History
-- Search, favorite, reveal, and copy captures from the local library
-- Move captures directly from each library card to recoverable Trash, restore them, or delete permanently
-- Keep source application, dimensions, type, and creation time as metadata
-- Keep both a Dock icon and a menu bar shortcut while Kiri is running
+1. Press **⇧⌘A** and choose **Screenshot, Record, or OCR** at the bottom.
+2. Click a violet-outlined window or drag an exact region. OCR always requires a manual drag.
+3. Press Return to copy a screenshot, copy reviewed text, or start recording from the setup card.
+
+<p align="center">
+  <img src="Resources/Assets/kiri-library-preview.png" width="820" alt="Kiri library and first-capture screen">
+</p>
+
+## Core capabilities
+
+### Screenshot and annotate
+
+- Freeze the display, select a window with one restrained outline, or drag, move, and resize an exact region.
+- Re-select and edit pen, rectangle, line, arrow, text, and continuous mosaic annotations with undo and redo.
+- Adjust widths, font size, brush diameter, and mosaic strength live; text supports complex input and transparent, dark, or light backgrounds.
+- Copy and return to the original app by default, or save, pin, and continue in the full editor.
+
+### OCR
+
+- Recognize only a manually dragged region; clicking a window never scans the full display.
+- Moving or resizing the region re-runs recognition, and the result remains editable before copying.
+- Process screenshots and text locally with macOS Vision without uploads.
+
+### Region recording
+
+- Record Retina-scale MP4 with optional countdown, system audio, microphone, pointer, and click highlight.
+- Pause, resume, and stop from a floating control bar that is excluded from the exported video.
+- Save in the background and convert recordings up to 15 seconds into looping GIFs.
+
+### Local library
+
+- Keep source app, dimensions, media type, and creation time for images, videos, and GIFs.
+- Search, favorite, copy, open, reveal in Finder, and use recoverable Trash.
+- Follow the preferred macOS language in English or Simplified Chinese, with both Dock and menu bar entry points.
 
 > kiri is an early source preview. Region recording with audio and pointer
-> feedback, short-video GIF export, and scrolling long screenshots are available
-> in preview; manual seam adjustment is still in development.
+> feedback and short-video GIF export are available in preview.
 
 ## Download
 
@@ -100,13 +106,19 @@ Open Settings or Quit Kiri recovery action instead of prompting repeatedly.
 - **Delete**: Remove the annotation selected with the pointer tool
 - **⌘Z / ⇧⌘Z**: Undo / redo
 
+## OCR
+
+1. Press **⇧⌘A** and choose **OCR** in the bottom mode switch.
+2. Manually drag the region to recognize. Kiri does not substitute a window click or scan the whole display.
+3. Review or edit the result, then copy it. Moving or resizing the region runs recognition again.
+
 Captures stay under `~/Library/Application Support/kiri/` and are never
 uploaded automatically.
 
 ## Region recording and GIF (v0.2 preview)
 
-1. Press **⇧⌘A** and select a region.
-2. Choose **Record** in the first-level mode switch, then select the region.
+1. Press **⇧⌘A** and choose **Record** in the first-level mode switch.
+2. Click a window or drag the recording region, then adjust it if needed.
 3. Set countdown, system audio, microphone, pointer, and click highlights in
    the setup card that appears automatically.
 4. Choose **Start Recording**; press Escape during 3-2-1 to cancel.
@@ -116,15 +128,6 @@ uploaded automatically.
 Audio is off by default and Kiri asks for microphone permission only when that
 switch is enabled. Kiri draws click highlights itself; microphone capture
 requires macOS 15 or later.
-
-## Scrolling long screenshots (preview)
-
-1. Press **⇧⌘A**, choose **Long Screenshot** in the first-level mode switch, and select a region.
-2. Choose **Start Capture**, return to the original app, and scroll down slowly. Kiri detects overlap and extends the live preview automatically.
-3. Choose **Stop Capture** when scrolling is done. Use **Undo Last** if needed, then choose **Finish & Copy**. Escape stops or cancels the flow.
-4. Kiri automatically stitches the sections, copies the final PNG, and stores the same long image in the local library.
-
-The compact guide stays nearby but is excluded from screen capture, so it never enters the final image. Leave some overlap between scroll positions; if a jump is too large, Kiri asks you to scroll back slightly. Export now preserves the seams confirmed during capture instead of re-detecting them and risking duplicated viewports. Manual seam adjustment remains planned.
 
 See [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
 [SECURITY.md](SECURITY.md).

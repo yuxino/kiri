@@ -22,7 +22,7 @@ struct KiriApp: App {
             KiriCommands(model: model)
         }
 
-        MenuBarExtra("kiri", systemImage: "viewfinder") {
+        MenuBarExtra("Kiri", systemImage: "viewfinder") {
             MenuBarView(model: model)
         }
     }
@@ -161,15 +161,20 @@ private struct MenuBarView: View {
                 } else if model.isRecordingStarting || model.isCaptureStarting {
                     Label(L10n.text("Preparing Capture…"), systemImage: "hourglass")
                 } else {
-                    Text(L10n.format("Capture  %@", model.captureShortcutLabel))
+                    Label(
+                        L10n.format("Capture  %@", model.captureShortcutLabel),
+                        systemImage: "viewfinder"
+                    )
                 }
             }
             .disabled(model.captureIsUnavailable)
         }
         Divider()
-        Button(L10n.text("Open Library")) {
+        Button {
             openWindow(id: "library")
             NSApplication.shared.activate(ignoringOtherApps: true)
+        } label: {
+            Label(L10n.text("Open Library"), systemImage: "photo.on.rectangle")
         }
         if let error = model.errorMessage {
             Text(error)
@@ -182,8 +187,10 @@ private struct MenuBarView: View {
             }
             Divider()
         }
-        Button(L10n.text("Quit Kiri")) {
+        Button {
             NSApplication.shared.terminate(nil)
+        } label: {
+            Label(L10n.text("Quit Kiri"), systemImage: "power")
         }
         .task {
             model.start()

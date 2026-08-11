@@ -81,12 +81,17 @@ final class RecordingCountdownController {
         let badgeSize = min(96, max(68, min(frame.width, frame.height) - 16))
         badge.layer?.cornerRadius = badgeSize / 2
         badge.layer?.cornerCurve = .continuous
-        badge.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.78).cgColor
-        badge.layer?.borderWidth = 2
-        badge.layer?.borderColor = CaptureUIColors.blossom.withAlphaComponent(0.9).cgColor
+        badge.layer?.backgroundColor = NSColor(
+            calibratedRed: 0.10,
+            green: 0.08,
+            blue: 0.16,
+            alpha: 0.92
+        ).cgColor
+        badge.layer?.borderWidth = 1.5
+        badge.layer?.borderColor = CaptureUIColors.accentSoft.withAlphaComponent(0.92).cgColor
         badge.layer?.shadowColor = NSColor.black.cgColor
-        badge.layer?.shadowOpacity = 0.28
-        badge.layer?.shadowRadius = 18
+        badge.layer?.shadowOpacity = 0.32
+        badge.layer?.shadowRadius = 20
         badge.layer?.shadowOffset = CGSize(width: 0, height: -5)
         badge.translatesAutoresizingMaskIntoConstraints = false
         badge.identifier = NSUserInterfaceItemIdentifier("recording-countdown-badge")

@@ -30,7 +30,6 @@ swiftc \
     Sources/KiriApp/KiriDesignSystem.swift \
     Sources/KiriApp/L10n.swift \
     Sources/KiriApp/LibraryView.swift \
-    Sources/KiriApp/LongScreenshotCaptureController.swift \
     Sources/KiriApp/OCRResultPanel.swift \
     Sources/KiriApp/PinnedImageController.swift \
     Sources/KiriApp/RecordingClickHighlighterController.swift \
@@ -52,6 +51,7 @@ swiftc \
     -framework ImageIO \
     -framework ScreenCaptureKit \
     -framework SwiftUI \
+    -framework Vision \
     -o "$snapshot_temp_dir/kiri-library-snapshot"
 
 mkdir -p "$output_dir"
@@ -63,6 +63,7 @@ render_snapshot() {
     fixture_root="$snapshot_temp_dir/library-$mode"
     output_path="$output_dir/library-$mode.png"
     KIRI_LIBRARY_ROOT="$fixture_root" \
+        KIRI_BRAND_ICON_PATH="$project_root/Resources/Assets/kiri-icon.png" \
         "$snapshot_temp_dir/kiri-library-snapshot" \
         "$fixture_root" \
         "$output_path" \
@@ -79,5 +80,6 @@ render_snapshot loading 880 600
 render_snapshot search 880 600
 render_snapshot trash 880 600
 render_snapshot error 880 600
+render_snapshot editor 960 640
 
 echo "$output_dir"

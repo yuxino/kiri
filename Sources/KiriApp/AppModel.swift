@@ -36,7 +36,6 @@ final class AppModel: ObservableObject {
     private let captureCoordinator = CaptureCoordinator()
     private let shortcutMonitor = GlobalShortcutMonitor()
     private var overlayController: SelectionOverlayController?
-    private var longScreenshotController: LongScreenshotCaptureController?
     private var editorController: EditorWindowController?
     private var pinnedControllers: [UUID: PinnedImageController] = [:]
     private var regionRecorder: RegionRecorder?
@@ -86,7 +85,6 @@ final class AppModel: ObservableObject {
             || isRecordingPaused
             || isRecordingTransitioning
             || isRecordingFinalizing
-            || longScreenshotController != nil
     }
 
     var capturePermissionRecoveryLabel: String? {
@@ -179,20 +177,6 @@ final class AppModel: ObservableObject {
                         self?.keepKiriLibraryHidden(hiddenWindows)
                         self?.activate(returnApplication)
                         self?.copyRecognizedText(text)
-                    },
-                    onLongScreenshot: { [weak self] region, initialSection in
-                        self?.overlayController = nil
-                        self?.keepKiriLibraryHidden(hiddenWindows)
-                        self?.activate(returnApplication)
-                        self?.beginLongScreenshot(
-                            capture: capture,
-                            region: region,
-                            initialSection: initialSection,
-                            initialApplication: initialFrontmostApplication,
-                            returnApplication: returnApplication,
-                            hiddenWindows: hiddenWindows,
-                            sourceApplication: sourceApplication
-                        )
                     },
                     onCancel: { [weak self] in
                         self?.overlayController = nil
@@ -580,132 +564,6 @@ final class AppModel: ObservableObject {
             keepKiriLibraryHidden(hiddenWindows)
             activate(returnApplication)
         }
-    }
-
-    private func beginLongScreenshot(
-        capture: CapturedDisplay,
-        region: CGRect,
-        initialSection: CGImage,
-        initialApplication: NSRunningApplication?,
-        returnApplication: NSRunningApplication?,
-        hiddenWindows: [NSWindow],
-        sourceApplication: String?
-    ) {
-        guard longScreenshotController == nil else { return }
-        guard region.width >= 16,
-              region.height >= 16,
-              initialSection.width >= 1,
-              initialSection.height >= 1 else {
-            cancelCapturePresentation(
-                initialApplication: initialApplication,
-                returnApplication: returnApplication,
-                hiddenWindows: hiddenWindows
-            )
-            errorMessage = LongScreenshotCaptureError.selectionTooSmall.localizedDescription
-            return
-        }
-
-        let controller = LongScreenshotCaptureController(
-            captureCoordinator: captureCoordinator,
-            initialSection: initialSection,
-            region: region,
-            displayFrame: capture.screenFrame,
-            displayID: capture.displayID,
-            onFinish: { [weak self] result in
-                self?.finishLongScreenshot(
-                    result: result,
-                    returnApplication: returnApplication,
-                    hiddenWindows: hiddenWindows,
-                    sourceApplication: sourceApplication
-                )
-            },
-            onCancel: { [weak self] in
-                guard let self else { return }
-                longScreenshotController = nil
-                cancelCapturePresentation(
-                    initialApplication: initialApplication,
-                    returnApplication: returnApplication,
-                    hiddenWindows: hiddenWindows
-                )
-            },
-            onCaptureFailure: { [weak self] error in
-                self?.handleLongScreenshotCaptureError(error)
-            }
-        )
-        longScreenshotController = controller
-        controller.show()
-        activate(returnApplication)
-    }
-
-    private func finishLongScreenshot(
-        result: LongScreenshotCaptureResult,
-        returnApplication: NSRunningApplication?,
-        hiddenWindows: [NSWindow],
-        sourceApplication: String?
-    ) {
-        longScreenshotController = nil
-        keepKiriLibraryHidden(hiddenWindows)
-        activate(returnApplication)
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let output = try await Task.detached(priority: .userInitiated) {
-                    let stitched = try KiriCore.LongScreenshotStitcher.stitch(
-                        result.sections,
-                        overlaps: result.overlaps
-                    )
-                    guard let data = Self.pngData(for: stitched.image) else {
-                        throw LongScreenshotExportError.couldNotEncode
-                    }
-                    return (stitched.image, data)
-                }.value
-
-                let imageObject = Self.nsImage(from: output.0)
-                if !writeToClipboard(imageObject) {
-                    errorMessage = CaptureExportError.clipboardWriteFailed.localizedDescription
-                }
-                _ = try await library.importData(
-                    output.1,
-                    kind: .longImage,
-                    fileExtension: "png",
-                    pixelWidth: output.0.width,
-                    pixelHeight: output.0.height,
-                    sourceApplication: sourceApplication
-                )
-                await refresh()
-                showNotice(title: L10n.text("Long Screenshot Saved"), symbol: "rectangle.portrait.fill")
-            } catch {
-                errorMessage = longScreenshotErrorMessage(error)
-            }
-        }
-    }
-
-    private func handleLongScreenshotCaptureError(_ error: Error) {
-        if let captureError = error as? CaptureCoordinatorError {
-            handleCaptureCoordinatorError(captureError)
-        } else {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    private func longScreenshotErrorMessage(_ error: Error) -> String {
-        let description = error.localizedDescription
-        let marker = String(reflecting: error).lowercased()
-        if marker.contains("tootall")
-            || marker.contains("outputheight")
-            || description.localizedLowercase.contains("too tall") {
-            return L10n.text("The long screenshot is too tall to export.")
-        }
-        if error is KiriCore.LongScreenshotStitcherError {
-            return L10n.text("Could not stitch the long screenshot.")
-        }
-        if error is LongScreenshotExportError {
-            return description
-        }
-        return description.isEmpty
-            ? L10n.text("Could not stitch the long screenshot.")
-            : description
     }
 
     private func keepKiriLibraryHidden(_ windows: [NSWindow]) {
@@ -1150,14 +1008,6 @@ private enum CaptureExportError: LocalizedError {
 
     var errorDescription: String? {
         L10n.text("Could not copy the capture to the clipboard.")
-    }
-}
-
-private enum LongScreenshotExportError: LocalizedError {
-    case couldNotEncode
-
-    var errorDescription: String? {
-        L10n.text("Could not encode the long screenshot as PNG.")
     }
 }
 

@@ -19,6 +19,7 @@ final class PinnedImageController: NSObject {
             defer: false
         )
         panel.level = .floating
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -76,12 +77,12 @@ private final class PinnedImageView: NSView {
     init(image: NSImage) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 14
+        layer?.cornerRadius = 16
         layer?.cornerCurve = .continuous
         layer?.masksToBounds = true
-        layer?.backgroundColor = NSColor(calibratedWhite: 0.08, alpha: 0.98).cgColor
+        layer?.backgroundColor = NSColor(calibratedRed: 0.06, green: 0.055, blue: 0.09, alpha: 0.98).cgColor
         layer?.borderWidth = 1
-        layer?.borderColor = CaptureUIColors.surfaceBorder.withAlphaComponent(0.7).cgColor
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
 
         let imageView = PinnedContentImageView(image: image)
         imageView.imageScaling = .scaleProportionallyUpOrDown
@@ -108,12 +109,12 @@ private final class PinnedImageView: NSView {
         addSubview(imageView)
         addSubview(closeButton)
         NSLayoutConstraint.activate([
-            imageView.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
-            imageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
-            imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
-            closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 9),
-            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -9),
+            imageView.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
+            imageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
+            closeButton.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+            closeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             closeButton.widthAnchor.constraint(equalToConstant: 24),
             closeButton.heightAnchor.constraint(equalToConstant: 24)
         ])

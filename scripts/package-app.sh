@@ -64,6 +64,7 @@ mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$project_root/.build/release/kiri" "$contents_dir/MacOS/kiri"
 cp "$project_root/Sources/KiriApp/Info.plist" "$contents_dir/Info.plist"
 cp "$project_root/Resources/kiri.icns" "$contents_dir/Resources/kiri.icns"
+cp "$project_root/Resources/Assets/kiri-icon.png" "$contents_dir/Resources/kiri-icon.png"
 cp -R "$project_root/Sources/KiriApp/Resources/en.lproj" "$contents_dir/Resources/en.lproj"
 cp -R "$project_root/Sources/KiriApp/Resources/zh-Hans.lproj" "$contents_dir/Resources/zh-Hans.lproj"
 

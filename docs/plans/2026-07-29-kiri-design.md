@@ -63,9 +63,8 @@ an item to an app-managed trash and does not immediately destroy the source.
   JSON in v0.1. The interface is intentionally storage-agnostic so it can move
   to SwiftData if richer queries become necessary.
 
-`CaptureKind` supports image, video, GIF, and long image from the first
-version. Future formats therefore extend capture and rendering services rather
-than changing the library model.
+`CaptureKind` supports image, video, and GIF. Future formats extend capture and
+rendering services without changing the library storage boundary.
 
 ## Reliability and privacy
 
@@ -82,4 +81,3 @@ Core tests cover crop geometry, metadata round-trips, search, favorites, and
 trash restoration. Manual acceptance covers first-run permission, Retina
 selection, mixed-scale displays, clipboard output, keyboard cancellation, and
 library recovery.
-

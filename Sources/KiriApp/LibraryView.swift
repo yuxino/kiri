@@ -5,9 +5,10 @@ import KiriCore
 import SwiftUI
 
 private extension Color {
-    static let kiriAccent = Color(nsColor: CaptureUIColors.accent)
-    static let kiriCanvas = Color(nsColor: .windowBackgroundColor)
-    static let kiriCard = Color(nsColor: .controlBackgroundColor)
+    static let kiriAccent = KiriUI.Palette.accent
+    static let kiriCanvas = KiriUI.Palette.canvas
+    static let kiriCard = KiriUI.Palette.card
+    static let kiriElevated = KiriUI.Palette.elevated
 }
 
 struct LibraryView: View {
@@ -21,7 +22,6 @@ struct LibraryView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
             errorBanner
             Group {
                 if !model.hasLoadedLibrary {
@@ -41,9 +41,11 @@ struct LibraryView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.kiriCanvas)
         }
-        .background(Color.kiriCanvas)
+        .background {
+            Color.kiriCanvas
+            .ignoresSafeArea()
+        }
         .tint(Color(nsColor: CaptureUIColors.accent))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay(alignment: .top) {
@@ -60,17 +62,14 @@ struct LibraryView: View {
         .focusedValue(\.focusLibrarySearch) {
             searchIsFocused = true
         }
-        .confirmationDialog(
-            L10n.text("Empty Trash?"),
-            isPresented: $confirmsEmptyTrash,
-            titleVisibility: .visible
-        ) {
-            Button(L10n.text("Empty Trash"), role: .destructive) {
+        .sheet(isPresented: $confirmsEmptyTrash) {
+            KiriDestructiveConfirmationView(
+                title: L10n.text("Empty Trash?"),
+                message: L10n.text("All captures in Trash will be permanently deleted. This cannot be undone."),
+                confirmTitle: L10n.text("Empty Trash")
+            ) {
                 model.emptyTrash()
             }
-            Button(L10n.text("Cancel"), role: .cancel) {}
-        } message: {
-            Text(L10n.text("All captures in Trash will be permanently deleted. This cannot be undone."))
         }
     }
 
@@ -80,8 +79,13 @@ struct LibraryView: View {
             compactHeader
         }
         .padding(.horizontal, KiriUI.Spacing.page)
-        .padding(.vertical, KiriUI.Spacing.standard)
-        .background(.ultraThinMaterial)
+        .padding(.vertical, 15)
+        .background(.regularMaterial)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(KiriUI.Palette.border.opacity(0.8))
+                .frame(height: 1)
+        }
     }
 
     private var wideHeader: some View {
@@ -137,19 +141,11 @@ struct LibraryView: View {
 
     private var titleBlock: some View {
         HStack(spacing: KiriUI.Spacing.compact) {
-            Image(systemName: model.showingTrash ? "trash" : "viewfinder")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(Color.kiriAccent)
-                .frame(width: 32, height: 32)
-                .background(
-                    Color.kiriAccent.opacity(0.11),
-                    in: RoundedRectangle(cornerRadius: KiriUI.Radius.control)
-                )
-                .accessibilityHidden(true)
+            KiriBrandMark(size: 38)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(L10n.text(model.showingTrash ? "Trash" : "Library"))
-                    .font(.title3.weight(.semibold))
+                    .font(.system(size: 17, weight: .bold, design: .rounded))
                 Text(sectionSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -168,6 +164,7 @@ struct LibraryView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
+        .controlSize(.large)
         .frame(width: KiriUI.Header.sectionPickerWidth)
         .onChange(of: model.showingTrash) {
             model.searchQuery = ""
@@ -193,9 +190,9 @@ struct LibraryView: View {
                         .foregroundStyle(.white.opacity(0.78))
                 }
             }
+            .fixedSize(horizontal: true, vertical: false)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
+        .buttonStyle(KiriPrimaryButtonStyle())
         .disabled(model.captureIsUnavailable)
         .help(L10n.text("Capture or record a region, with optional annotation tools"))
     }
@@ -224,10 +221,15 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
                 .help(L10n.text("Dismiss"))
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 9)
-            .background(Color.orange.opacity(0.1))
-            Divider()
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: KiriUI.Radius.control))
+            .overlay {
+                RoundedRectangle(cornerRadius: KiriUI.Radius.control)
+                    .stroke(Color.orange.opacity(0.22))
+            }
+            .padding(.horizontal, KiriUI.Spacing.page)
+            .padding(.top, KiriUI.Spacing.compact)
         }
     }
 
@@ -254,12 +256,13 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 10)
         .frame(height: KiriUI.Header.controlHeight)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color.kiriElevated)
         .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.control))
         .overlay {
             RoundedRectangle(cornerRadius: KiriUI.Radius.control)
-                .stroke(Color.primary.opacity(0.1))
+                .stroke(searchIsFocused ? Color.kiriAccent.opacity(0.58) : KiriUI.Palette.border)
         }
+        .shadow(color: searchIsFocused ? Color.kiriAccent.opacity(0.10) : .clear, radius: 7)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(L10n.text("Search captures"))
     }
@@ -299,22 +302,19 @@ struct LibraryView: View {
 
     private var onboardingState: some View {
         VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(Color.kiriAccent.opacity(0.12))
-                Image(systemName: "viewfinder")
-                    .font(.system(size: 29, weight: .medium))
-                    .foregroundStyle(Color.kiriAccent)
+            ZStack(alignment: .topTrailing) {
+                KiriBrandMark(size: 72)
                 Image(systemName: "sparkles")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color(nsColor: CaptureUIColors.blossom))
-                    .offset(x: 27, y: -25)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(KiriUI.Palette.coral)
+                    .padding(2)
+                    .background(.thinMaterial, in: Circle())
+                    .offset(x: 8, y: -7)
             }
-            .frame(width: 68, height: 68)
 
             VStack(spacing: 7) {
                 Text(L10n.text("Ready for your first capture"))
-                    .font(.title2.weight(.semibold))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
                 Text(L10n.text("Choose a capture mode, then select the region you need."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -326,18 +326,18 @@ struct LibraryView: View {
                 Label(L10n.text("Capture"), systemImage: "viewfinder")
                     .frame(minWidth: 150)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
+            .buttonStyle(KiriPrimaryButtonStyle())
 
             Text(L10n.format("or press  %@", model.captureShortcutLabel))
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
 
-            Divider()
-                .frame(width: 400)
+            Rectangle()
+                .fill(KiriUI.Palette.border)
+                .frame(width: 400, height: 1)
 
             HStack(spacing: 18) {
-                OnboardingStep(number: "1", title: L10n.text("Mode"), detail: L10n.text("Screenshot · Record · OCR · Long"))
+                OnboardingStep(number: "1", title: L10n.text("Mode"), detail: L10n.text("Screenshot · Record · OCR"))
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -349,14 +349,22 @@ struct LibraryView: View {
             }
         }
         .padding(.horizontal, 40)
-        .padding(.vertical, 32)
-        .background(Color.kiriCard)
-        .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.surface))
-        .overlay {
-            RoundedRectangle(cornerRadius: KiriUI.Radius.surface)
-                .stroke(Color.primary.opacity(0.08))
+        .padding(.vertical, 34)
+        .background {
+            ZStack {
+                Color.kiriCard
+                LinearGradient(
+                    colors: [
+                        KiriUI.Palette.accent.opacity(0.09),
+                        .clear,
+                        KiriUI.Palette.cyan.opacity(0.06)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
         }
-        .shadow(color: .black.opacity(0.04), radius: 18, y: 8)
+        .kiriSurface(radius: KiriUI.Radius.surface, elevated: true)
     }
 
     private var sectionAssets: [CaptureAsset] {
@@ -453,8 +461,7 @@ private struct CaptureCard: View {
             CaptureThumbnail(
                 fileURL: model.assetFileURL(asset),
                 fallbackSystemImage: iconName,
-                reloadToken: model.libraryRevision,
-                fillsPreview: asset.kind == .longImage
+                reloadToken: model.libraryRevision
             )
             .overlay {
                 if isHovered, asset.trashedAt == nil {
@@ -464,7 +471,7 @@ private struct CaptureCard: View {
                         Label(primaryActionTitle, systemImage: primaryActionSymbol)
                             .font(.callout.weight(.semibold))
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(KiriPrimaryButtonStyle())
                     .controlSize(.large)
                     .transition(.scale(scale: 0.96).combined(with: .opacity))
                 }
@@ -472,17 +479,6 @@ private struct CaptureCard: View {
             .overlay(alignment: .topLeading) {
                 kindBadge
                     .padding(KiriUI.Spacing.compact)
-            }
-            .overlay(alignment: .bottom) {
-                if asset.kind == .longImage {
-                    LinearGradient(
-                        colors: [.clear, .black.opacity(0.28)],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .frame(height: 42)
-                    .allowsHitTesting(false)
-                }
             }
             .frame(maxWidth: .infinity)
             .frame(height: KiriUI.Card.thumbnailHeight)
@@ -514,7 +510,8 @@ private struct CaptureCard: View {
                     } label: {
                         Label(primaryActionTitle, systemImage: primaryActionSymbol)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.bordered)
+                    .tint(Color.kiriAccent)
                     .controlSize(.small)
                     .help(primaryActionTitle)
 
@@ -556,12 +553,13 @@ private struct CaptureCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: KiriUI.Radius.card)
                 .stroke(
-                    isHovered ? Color.kiriAccent.opacity(0.42) : Color.primary.opacity(0.09),
-                    lineWidth: isHovered ? 1.5 : 1
+                    isHovered ? Color.kiriAccent.opacity(0.52) : KiriUI.Palette.border,
+                    lineWidth: isHovered ? 1.25 : 1
                 )
         }
-        .shadow(color: .black.opacity(isHovered ? 0.11 : 0.04), radius: isHovered ? 14 : 5, y: 5)
-        .offset(y: isHovered ? -2 : 0)
+        .shadow(color: Color.kiriAccent.opacity(isHovered ? 0.12 : 0), radius: 16, y: 7)
+        .shadow(color: .black.opacity(isHovered ? 0.08 : 0.035), radius: isHovered ? 10 : 5, y: 4)
+        .offset(y: isHovered ? -1 : 0)
         .animation(.easeOut(duration: KiriUI.Motion.hover), value: isHovered)
         .onHover { isHovered = $0 }
         .onDrag {
@@ -569,7 +567,7 @@ private struct CaptureCard: View {
         }
         .contextMenu {
             if asset.trashedAt == nil {
-                if asset.kind == .image || asset.kind == .longImage {
+                if asset.kind == .image {
                     Button(L10n.text("Copy"), systemImage: "doc.on.doc") { model.copy(asset) }
                 }
                 Button(L10n.text("Open"), systemImage: "arrow.up.right.square") { model.open(asset) }
@@ -600,17 +598,14 @@ private struct CaptureCard: View {
                 }
             }
         }
-        .confirmationDialog(
-            L10n.text("Delete this capture permanently?"),
-            isPresented: $confirmsPermanentDelete,
-            titleVisibility: .visible
-        ) {
-            Button(L10n.text("Delete Permanently"), role: .destructive) {
+        .sheet(isPresented: $confirmsPermanentDelete) {
+            KiriDestructiveConfirmationView(
+                title: L10n.text("Delete this capture permanently?"),
+                message: L10n.text("This cannot be undone."),
+                confirmTitle: L10n.text("Delete Permanently")
+            ) {
                 model.permanentlyDelete(asset)
             }
-            Button(L10n.text("Cancel"), role: .cancel) {}
-        } message: {
-            Text(L10n.text("This cannot be undone."))
         }
     }
 
@@ -667,7 +662,6 @@ private struct CaptureCard: View {
         case .image: L10n.text("Image")
         case .video: L10n.text("Video")
         case .gif: "GIF"
-        case .longImage: L10n.text("Long Screenshot")
         }
     }
 
@@ -676,7 +670,6 @@ private struct CaptureCard: View {
         case .image: "photo"
         case .video: "video"
         case .gif: "sparkles.rectangle.stack"
-        case .longImage: "rectangle.portrait"
         }
     }
 
@@ -710,15 +703,15 @@ private struct CaptureCard: View {
     }
 
     private var primaryActionTitle: String {
-        L10n.text(asset.kind == .image || asset.kind == .longImage ? "Copy" : "Open")
+        L10n.text(asset.kind == .image ? "Copy" : "Open")
     }
 
     private var primaryActionSymbol: String {
-        asset.kind == .image || asset.kind == .longImage ? "doc.on.doc" : "play.fill"
+        asset.kind == .image ? "doc.on.doc" : "play.fill"
     }
 
     private func performPrimaryAction() {
-        if asset.kind == .image || asset.kind == .longImage {
+        if asset.kind == .image {
             model.copy(asset)
         } else {
             model.open(asset)
@@ -746,21 +739,28 @@ private struct CaptureThumbnail: View {
     let fileURL: URL
     let fallbackSystemImage: String
     let reloadToken: Int
-    let fillsPreview: Bool
     @State private var image: CGImage?
     @State private var hasFinishedLoading = false
 
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: KiriUI.Radius.preview)
-                .fill(Color.black.opacity(0.055))
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            KiriUI.Palette.accent.opacity(0.075),
+                            KiriUI.Palette.cyan.opacity(0.04)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
 
             if let image {
                 Image(decorative: image, scale: 1)
                     .resizable()
                     .interpolation(.high)
-                    .aspectRatio(contentMode: fillsPreview ? .fill : .fit)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.control))
                     .padding(5)
             } else if hasFinishedLoading {
@@ -833,6 +833,72 @@ private struct LibraryNoticeView: View {
         }
         .shadow(color: .black.opacity(0.12), radius: 12, y: 5)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct KiriDestructiveConfirmationView: View {
+    @Environment(\.dismiss) private var dismiss
+    let title: String
+    let message: String
+    let confirmTitle: String
+    let onConfirm: () -> Void
+
+    var body: some View {
+        VStack(spacing: KiriUI.Spacing.roomy) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(KiriUI.warmGradient.opacity(0.16))
+                    .frame(width: 58, height: 58)
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 23, weight: .semibold))
+                    .foregroundStyle(KiriUI.Palette.coral)
+            }
+            .accessibilityHidden(true)
+
+            VStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                    .multilineTextAlignment(.center)
+                Text(message)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: KiriUI.Spacing.compact) {
+                Button(L10n.text("Cancel")) {
+                    dismiss()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .keyboardShortcut(.cancelAction)
+
+                Button(role: .destructive) {
+                    onConfirm()
+                    dismiss()
+                } label: {
+                    Text(confirmTitle)
+                        .frame(minWidth: 118)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(KiriUI.Palette.coral)
+            }
+        }
+        .padding(26)
+        .frame(width: 370)
+        .background {
+            ZStack {
+                KiriUI.Palette.canvas
+                RadialGradient(
+                    colors: [KiriUI.Palette.coral.opacity(0.08), .clear],
+                    center: .top,
+                    startRadius: 0,
+                    endRadius: 220
+                )
+            }
+        }
     }
 }
 

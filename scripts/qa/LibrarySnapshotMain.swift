@@ -20,6 +20,11 @@ struct LibrarySnapshotMain {
         )
         let outputURL = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[2])
         let mode = ProcessInfo.processInfo.arguments[3]
+        let size = CGSize(width: width, height: height)
+        if mode == "editor" {
+            try await renderEditorSnapshot(outputURL: outputURL, size: size)
+            return
+        }
         try FileManager.default.createDirectory(
             at: libraryRoot,
             withIntermediateDirectories: true
@@ -29,9 +34,9 @@ struct LibrarySnapshotMain {
         var importedAssets: [CaptureAsset] = []
         if !["empty", "loading"].contains(mode) {
             for index in 0..<6 {
-                let isLongImage = index == 1
+                let isTallImage = index == 1
                 let pixelWidth = 900 + index * 80
-                let pixelHeight = isLongImage ? 1_800 : 560 + (index % 3) * 100
+                let pixelHeight = isTallImage ? 1_800 : 560 + (index % 3) * 100
                 let image = makeFixtureImage(
                     width: pixelWidth,
                     height: pixelHeight,
@@ -43,7 +48,7 @@ struct LibrarySnapshotMain {
                 }
                 let asset = try await library.importData(
                     data,
-                    kind: isLongImage ? .longImage : .image,
+                    kind: .image,
                     fileExtension: "png",
                     pixelWidth: pixelWidth,
                     pixelHeight: pixelHeight,
@@ -75,7 +80,6 @@ struct LibrarySnapshotMain {
             throw SnapshotError.invalidMode(mode)
         }
 
-        let size = CGSize(width: width, height: height)
         let hostingView = NSHostingView(
             rootView: LibraryView(model: model)
                 .frame(width: size.width, height: size.height)
@@ -92,6 +96,33 @@ struct LibrarySnapshotMain {
             throw SnapshotError.renderingFailed
         }
         hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw SnapshotError.imageEncodingFailed
+        }
+        try png.write(to: outputURL, options: [.atomic])
+    }
+
+    @MainActor
+    private static func renderEditorSnapshot(outputURL: URL, size: CGSize) async throws {
+        let image = makeFixtureImage(width: 1_280, height: 760, index: 2)
+        let controller = EditorWindowController(
+            image: image,
+            completion: { _, _, _ in },
+            onClose: {}
+        )
+        guard let window = controller.window, let contentView = window.contentView else {
+            throw SnapshotError.renderingFailed
+        }
+        window.setContentSize(size)
+        contentView.frame = CGRect(origin: .zero, size: size)
+        contentView.layoutSubtreeIfNeeded()
+        try? await Task.sleep(for: .milliseconds(150))
+        contentView.layoutSubtreeIfNeeded()
+
+        guard let bitmap = contentView.bitmapImageRepForCachingDisplay(in: contentView.bounds) else {
+            throw SnapshotError.renderingFailed
+        }
+        contentView.cacheDisplay(in: contentView.bounds, to: bitmap)
         guard let png = bitmap.representation(using: .png, properties: [:]) else {
             throw SnapshotError.imageEncodingFailed
         }

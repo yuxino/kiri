@@ -19,7 +19,9 @@ Available in the source preview:
 - [x] Pin captures above other windows
 - [x] Local capture library
 - [x] Search, favorites, recoverable trash, and restore
-- [x] Shared asset model for image, video, GIF, and long image
+- [x] Shared asset model for image, video, and GIF
+- [x] Drag-to-select OCR and local text copy
+- [x] Unified light, dark, compact, empty, loading, error, and Trash UI states
 
 Before a stable v0.1 release:
 
@@ -30,7 +32,7 @@ Before a stable v0.1 release:
 ## v0.2 — video and GIF
 
 - [x] Region recording with ScreenCaptureKit
-- [x] First-level Screenshot / Record mode selector
+- [x] First-level Screenshot / Record / OCR mode selector
 - [x] Cancellable 3-2-1 recording countdown
 - [ ] Full-display recording
 - [x] Optional microphone and system audio
@@ -44,18 +46,8 @@ Before a stable v0.1 release:
 - [ ] Inline video and GIF playback
 - [ ] Recording duration and file-size safeguards
 
-## v0.3 — long capture
-
-- [x] Guided scrolling capture
-- [x] Overlap detection and automatic stitching
-- [x] Long-image PNG export and local library import
-- [ ] Manual seam adjustment
-- [ ] Very tall image preview and export
-- [ ] Memory-bounded stitching for long pages
-
 ## Later
 
-- [ ] OCR and text copy
 - [ ] Tags and smart collections
 - [ ] Optional user-controlled sync
 - [ ] Windows exploration after the native macOS experience is mature

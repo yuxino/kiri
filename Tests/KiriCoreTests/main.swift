@@ -25,6 +25,9 @@ let tests = [
     KiriTest(name: "asset searchable text") {
         try searchableTextIncludesFilenameKindAndApplication()
     },
+    KiriTest(name: "legacy long-image metadata opens as image") {
+        try legacyLongImageKindDecodesAsImage()
+    },
     KiriTest(name: "capture shortcut labels") {
         try captureShortcutHasStableLabel()
     },
@@ -72,39 +75,6 @@ let tests = [
     },
     KiriTest(name: "recording click feedback stays consistent") {
         try recordingOptionsKeepClickFeedbackConsistent()
-    },
-    KiriTest(name: "long screenshot rejects empty input") {
-        try longScreenshotRejectsEmptyInput()
-    },
-    KiriTest(name: "long screenshot no-overlap height sum") {
-        try longScreenshotKeepsHeightWhenThereIsNoOverlap()
-    },
-    KiriTest(name: "long screenshot detects overlap and preserves order") {
-        try longScreenshotDetectsOverlapAndPreservesPixelOrder()
-    },
-    KiriTest(name: "long screenshot handles different sizes and height cap") {
-        try longScreenshotHandlesDifferentSizesAndHeightCap()
-    },
-    KiriTest(name: "long screenshot overlap detector finds shared rows") {
-        try longScreenshotOverlapDetectorFindsSharedRows()
-    },
-    KiriTest(name: "long screenshot overlap detector rejects distinct content") {
-        try longScreenshotOverlapDetectorReturnsZeroForDistinctContent()
-    },
-    KiriTest(name: "long screenshot overlap detector handles large overlap") {
-        try longScreenshotOverlapDetectorHandlesLargeOverlap()
-    },
-    KiriTest(name: "long screenshot overlap detector handles scrolled content") {
-        try longScreenshotOverlapDetectorHandlesScrolledRealisticContent()
-    },
-    KiriTest(name: "long screenshot stitched output stays top to bottom") {
-        try longScreenshotStitcherOutputStaysTopToBottom()
-    },
-    KiriTest(name: "long screenshot uses capture-time overlaps") {
-        try longScreenshotUsesCaptureTimeOverlaps()
-    },
-    KiriTest(name: "long screenshot rejects invalid capture-time overlaps") {
-        try longScreenshotRejectsInvalidCaptureTimeOverlaps()
     },
     KiriTest(name: "selection reverse drag") {
         try normalizesReverseDrag()

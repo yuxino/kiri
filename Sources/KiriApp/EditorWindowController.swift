@@ -9,6 +9,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
     private let canvas: AnnotationCanvasView
     private var toolButtons: [AnnotationTool: CaptureActionButton] = [:]
     private var colorButtons: [AnnotationColorPreset: AnnotationColorSwatchButton] = [:]
+    private var annotationOptionsStack: NSStackView?
+    private var collapsedAnnotationOptionsWidth: NSLayoutConstraint?
     private var colorGroupContainer: CaptureToolGroupView?
     private var sizeControlContainer: NSStackView?
     private var sizeControlTitle: NSTextField?
@@ -37,7 +39,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.title = L10n.text("Kiri Editor")
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
-        window.backgroundColor = NSColor(calibratedWhite: 0.075, alpha: 1)
+        window.titlebarSeparatorStyle = .none
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(calibratedRed: 0.06, green: 0.055, blue: 0.09, alpha: 1)
         window.minSize = CGSize(width: 860, height: 520)
         window.center()
         super.init(window: window)
@@ -61,21 +65,26 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         let root = NSView()
         root.translatesAutoresizingMaskIntoConstraints = false
         root.wantsLayer = true
-        root.layer?.backgroundColor = NSColor(calibratedWhite: 0.075, alpha: 1).cgColor
+        root.layer?.backgroundColor = NSColor(calibratedRed: 0.06, green: 0.055, blue: 0.09, alpha: 1).cgColor
 
-        let toolbarSurface = NSVisualEffectView()
-        toolbarSurface.material = .underWindowBackground
-        toolbarSurface.blendingMode = .withinWindow
-        toolbarSurface.state = .active
+        let toolbarSurface = NSView()
         toolbarSurface.translatesAutoresizingMaskIntoConstraints = false
         toolbarSurface.wantsLayer = true
-        toolbarSurface.layer?.borderWidth = 0
+        toolbarSurface.layer?.backgroundColor = NSColor(
+            calibratedRed: 0.06,
+            green: 0.055,
+            blue: 0.09,
+            alpha: 1
+        ).cgColor
+        toolbarSurface.layer?.borderWidth = 1
+        toolbarSurface.layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
 
         let toolbar = NSStackView()
         toolbar.orientation = .horizontal
         toolbar.alignment = .centerY
         toolbar.spacing = 5
-        toolbar.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        toolbar.detachesHiddenViews = true
+        toolbar.edgeInsets = NSEdgeInsets(top: 9, left: 13, bottom: 9, right: 13)
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         let tools: [(AnnotationTool, String, String, String, Selector)] = [
@@ -105,8 +114,6 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         sizeControlTitle = sizeControl.title
         sizeSlider = sizeControl.slider
         sizeValueLabel = sizeControl.valueLabel
-        toolbar.addArrangedSubview(sizeControl.container)
-        toolbar.addArrangedSubview(CaptureDividerView(height: 24))
 
         let colorGroup = NSStackView()
         colorGroup.orientation = .horizontal
@@ -123,7 +130,6 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         }
         let colorGroupContainer = CaptureToolGroupView(content: colorGroup)
         self.colorGroupContainer = colorGroupContainer
-        toolbar.addArrangedSubview(colorGroupContainer)
         let textBackgroundButton = CaptureActionButton(
             symbol: "character.textbox",
             label: L10n.text("Text Background"),
@@ -132,7 +138,6 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             action: #selector(showTextBackgroundMenu(_:))
         )
         self.textBackgroundButton = textBackgroundButton
-        toolbar.addArrangedSubview(textBackgroundButton)
         let mosaicIntensityButton = CaptureActionButton(
             symbol: "square.grid.3x3.fill",
             label: L10n.text("Mosaic Strength"),
@@ -141,7 +146,16 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             action: #selector(showMosaicIntensityMenu(_:))
         )
         self.mosaicIntensityButton = mosaicIntensityButton
-        toolbar.addArrangedSubview(mosaicIntensityButton)
+
+        let annotationOptionsStack = NSStackView()
+        annotationOptionsStack.orientation = .horizontal
+        annotationOptionsStack.alignment = .centerY
+        annotationOptionsStack.spacing = 5
+        annotationOptionsStack.setContentHuggingPriority(.required, for: .horizontal)
+        annotationOptionsStack.setContentCompressionResistancePriority(.required, for: .horizontal)
+        self.annotationOptionsStack = annotationOptionsStack
+        collapsedAnnotationOptionsWidth = annotationOptionsStack.widthAnchor.constraint(equalToConstant: 0)
+        toolbar.addArrangedSubview(annotationOptionsStack)
         toolbar.addArrangedSubview(CaptureDividerView(height: 24))
 
         let undoButton = historyButton(
@@ -174,7 +188,15 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         clearButton.setActionEnabled(false)
         self.clearButton = clearButton
         toolbar.addArrangedSubview(clearButton)
-        toolbar.addArrangedSubview(NSView())
+
+        let editorTitle = NSTextField(labelWithString: L10n.text("Kiri Editor"))
+        editorTitle.font = .systemFont(ofSize: 11, weight: .semibold)
+        editorTitle.textColor = CaptureUIColors.accentSoft.withAlphaComponent(0.72)
+        editorTitle.alignment = .center
+        editorTitle.lineBreakMode = .byTruncatingTail
+        editorTitle.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        editorTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        toolbar.addArrangedSubview(editorTitle)
 
         let cancelButton = CaptureActionButton(
             symbol: "xmark.circle",
@@ -228,7 +250,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             toolbarSurface.topAnchor.constraint(equalTo: root.topAnchor),
             toolbarSurface.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             toolbarSurface.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            toolbarSurface.heightAnchor.constraint(equalToConstant: 56),
+            toolbarSurface.heightAnchor.constraint(equalToConstant: 58),
             toolbar.topAnchor.constraint(equalTo: toolbarSurface.topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: toolbarSurface.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: toolbarSurface.trailingAnchor),
@@ -239,9 +261,6 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             canvas.bottomAnchor.constraint(equalTo: root.bottomAnchor)
         ])
         updateToolButtons(selected: canvas.tool)
-        updateColorButtons(selected: canvas.colorPreset)
-        updateTextBackgroundControl()
-        updateMosaicIntensityControl()
         updateHistoryControls(canUndo: false, canRedo: false)
         controller.view = root
         return controller
@@ -323,11 +342,31 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         updateColorButtons(selected: canvas.colorPreset)
         updateTextBackgroundControl()
         updateMosaicIntensityControl()
-        textBackgroundButton?.isHidden = selected != .text
-        mosaicIntensityButton?.isHidden = selected != .mosaic
-        sizeControlContainer?.isHidden = selected == .select
-        colorGroupContainer?.isHidden = selected == .select || selected == .mosaic
+        rebuildAnnotationOptions(for: selected)
         configureSizeControl(for: selected)
+    }
+
+    private func rebuildAnnotationOptions(for selected: AnnotationTool) {
+        guard let annotationOptionsStack else { return }
+        for view in annotationOptionsStack.arrangedSubviews {
+            annotationOptionsStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        collapsedAnnotationOptionsWidth?.isActive = selected == .select
+        guard selected != .select else { return }
+
+        if let sizeControlContainer {
+            annotationOptionsStack.addArrangedSubview(sizeControlContainer)
+        }
+        if selected != .mosaic, let colorGroupContainer {
+            annotationOptionsStack.addArrangedSubview(colorGroupContainer)
+        }
+        if selected == .text, let textBackgroundButton {
+            annotationOptionsStack.addArrangedSubview(textBackgroundButton)
+        }
+        if selected == .mosaic, let mosaicIntensityButton {
+            annotationOptionsStack.addArrangedSubview(mosaicIntensityButton)
+        }
     }
 
     private func updateHistoryControls(canUndo: Bool, canRedo: Bool) {

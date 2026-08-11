@@ -21,13 +21,29 @@ func allCaptureKindsRoundTrip() throws {
 
 func searchableTextIncludesFilenameKindAndApplication() throws {
     let asset = CaptureAsset(
-        kind: .longImage,
+        kind: .image,
         filename: "Article.PNG",
         pixelWidth: 1200,
         pixelHeight: 8000,
         sourceApplication: "Safari"
     )
     try expect(asset.searchableText.contains("article.png"), "Search should include filename")
-    try expect(asset.searchableText.contains("longimage"), "Search should include kind")
+    try expect(asset.searchableText.contains("image"), "Search should include kind")
     try expect(asset.searchableText.contains("safari"), "Search should include source app")
+}
+
+func legacyLongImageKindDecodesAsImage() throws {
+    let json = """
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "kind": "longImage",
+      "createdAt": 0,
+      "filename": "legacy.png",
+      "pixelWidth": 1200,
+      "pixelHeight": 8000,
+      "isFavorite": false
+    }
+    """.data(using: .utf8)!
+    let asset = try JSONDecoder().decode(CaptureAsset.self, from: json)
+    try expect(asset.kind == .image, "Legacy long-image metadata should open as a normal image")
 }

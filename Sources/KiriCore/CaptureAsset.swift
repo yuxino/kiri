@@ -4,7 +4,27 @@ public enum CaptureKind: String, Codable, CaseIterable, Sendable {
     case image
     case video
     case gif
-    case longImage
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        if value == "longImage" {
+            self = .image
+            return
+        }
+        guard let kind = Self(rawValue: value) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unknown capture kind: \(value)"
+            )
+        }
+        self = kind
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 public struct CaptureAsset: Codable, Identifiable, Equatable, Sendable {
@@ -50,4 +70,3 @@ public struct CaptureAsset: Codable, Identifiable, Equatable, Sendable {
             .lowercased()
     }
 }
-

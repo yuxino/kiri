@@ -20,7 +20,7 @@ uses generated fixtures instead of the user's capture library.
 
 - Keep each change focused and explain the user-facing behavior.
 - Add or update core tests when changing storage, metadata, or geometry.
-- Do not claim planned recording, GIF, or long-capture features are available.
+- Keep feature claims aligned with current source. Long Screenshot has been removed; OCR requires an explicit dragged region.
 - Preserve local-first behavior. Network features require an explicit user
   action and a documented privacy model.
 - Avoid adding third-party dependencies unless the platform frameworks cannot

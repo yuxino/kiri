@@ -33,7 +33,7 @@ final class RecordingOptionsPopoverController {
         )
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 320, height: 388)
+        popover.contentSize = NSSize(width: 336, height: 414)
         popover.contentViewController = NSHostingController(rootView: view)
     }
 
@@ -69,19 +69,12 @@ private struct RecordingOptionsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 17) {
             HStack(spacing: 12) {
-                Image(systemName: "record.circle.fill")
-                    .font(.system(size: 21, weight: .semibold))
-                    .foregroundStyle(Color(nsColor: CaptureUIColors.blossom))
-                    .frame(width: 42, height: 42)
-                    .background(
-                        Color(nsColor: CaptureUIColors.blossom).opacity(0.12),
-                        in: RoundedRectangle(cornerRadius: 12)
-                    )
+                KiriSymbolMark(symbol: "record.circle.fill", size: 44)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L10n.text("Record Region"))
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
                     Text(L10n.text("MP4 · 30 fps · Saved locally"))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -124,14 +117,7 @@ private struct RecordingOptionsView: View {
                 )
             }
             .padding(.horizontal, 11)
-            .background(
-                Color(nsColor: CaptureUIColors.accent).opacity(0.055),
-                in: RoundedRectangle(cornerRadius: 14)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(Color(nsColor: CaptureUIColors.accent).opacity(0.16))
-            }
+            .kiriSurface(radius: 16)
 
             Button {
                 onStart(options.normalized)
@@ -141,9 +127,7 @@ private struct RecordingOptionsView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 3)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(Color(nsColor: CaptureUIColors.blossom))
+            .buttonStyle(KiriPrimaryButtonStyle())
             .keyboardShortcut(.return, modifiers: [])
 
             Label(L10n.text("Saved locally · Never uploaded"), systemImage: "lock.fill")
@@ -151,8 +135,18 @@ private struct RecordingOptionsView: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
         }
-        .padding(18)
-        .frame(width: 320)
+        .padding(20)
+        .frame(width: 336)
+        .background {
+            ZStack {
+                KiriUI.Palette.canvas
+                LinearGradient(
+                    colors: [KiriUI.Palette.coral.opacity(0.055), .clear, KiriUI.Palette.cyan.opacity(0.035)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            }
+        }
         .onChange(of: options) { _, newValue in
             let normalized = newValue.normalized
             if normalized != newValue {

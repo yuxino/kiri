@@ -66,11 +66,12 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         material = .popover
         blendingMode = .withinWindow
         state = .active
+        appearance = NSAppearance(named: .aqua)
         wantsLayer = true
         layer?.cornerRadius = 16
         layer?.cornerCurve = .continuous
         layer?.borderWidth = 1
-        layer?.borderColor = CaptureUIColors.surfaceBorder.withAlphaComponent(0.75).cgColor
+        layer?.borderColor = NSColor.black.withAlphaComponent(0.10).cgColor
         layer?.shadowColor = NSColor.black.cgColor
         layer?.shadowOpacity = 0.2
         layer?.shadowRadius = 20
@@ -108,13 +109,19 @@ final class OCRResultPanel: NSVisualEffectView, NSTextViewDelegate {
         contentWell.wantsLayer = true
         contentWell.layer?.cornerRadius = 10
         contentWell.layer?.cornerCurve = .continuous
-        contentWell.layer?.backgroundColor = CaptureUIColors.groupFill.cgColor
+        contentWell.layer?.backgroundColor = NSColor(
+            calibratedRed: 0.975,
+            green: 0.968,
+            blue: 0.99,
+            alpha: 1
+        ).cgColor
         contentWell.layer?.borderWidth = 1
-        contentWell.layer?.borderColor = CaptureUIColors.surfaceBorder.withAlphaComponent(0.45).cgColor
+        contentWell.layer?.borderColor = NSColor.black.withAlphaComponent(0.08).cgColor
 
         textView.isRichText = false
         textView.font = .systemFont(ofSize: 13)
         textView.textColor = CaptureUIColors.label
+        textView.insertionPointColor = CaptureUIColors.accent
         textView.drawsBackground = false
         textView.delegate = self
         textView.isAutomaticQuoteSubstitutionEnabled = false
