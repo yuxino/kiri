@@ -12,7 +12,7 @@ final class RecordingControlPanelController {
         state.onStop = onStop
 
         panel = NSPanel(
-            contentRect: CGRect(x: 0, y: 0, width: 270, height: 52),
+            contentRect: CGRect(x: 0, y: 0, width: 286, height: 58),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -68,7 +68,7 @@ private struct RecordingControlBar: View {
     @ObservedObject var state: RecordingControlState
 
     var body: some View {
-        HStack(spacing: 9) {
+        HStack(spacing: 10) {
             ZStack {
                 Circle()
                     .fill(state.isPaused ? Color.orange : Color.red)
@@ -82,7 +82,8 @@ private struct RecordingControlBar: View {
 
             Text(state.isPaused ? L10n.text("Paused") : state.elapsed)
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .frame(minWidth: 54, alignment: .leading)
+                .foregroundStyle(state.isPaused ? Color.orange : .primary)
+                .frame(minWidth: 58, alignment: .leading)
 
             Divider().frame(height: 22)
 
@@ -99,7 +100,11 @@ private struct RecordingControlBar: View {
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .background(.primary.opacity(0.075), in: RoundedRectangle(cornerRadius: 8))
+                .background(
+                    Color(nsColor: CaptureUIColors.accent).opacity(0.11),
+                    in: RoundedRectangle(cornerRadius: 9)
+                )
+                .foregroundStyle(Color(nsColor: CaptureUIColors.accent))
                 .help(L10n.text(state.isPaused ? "Resume Recording" : "Pause Recording"))
                 .accessibilityLabel(L10n.text(state.isPaused ? "Resume Recording" : "Pause Recording"))
             }
@@ -113,18 +118,19 @@ private struct RecordingControlBar: View {
                     .frame(width: 28, height: 28)
             }
             .buttonStyle(.plain)
-            .background(Color.red, in: RoundedRectangle(cornerRadius: 8))
+            .background(Color.red, in: RoundedRectangle(cornerRadius: 9))
             .disabled(state.isBusy)
             .help(L10n.text("Stop and Save Recording"))
             .accessibilityLabel(L10n.text("Stop Recording"))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay {
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color(nsColor: CaptureUIColors.accent).opacity(0.22), lineWidth: 1)
         }
+        .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
         .padding(4)
     }
 }

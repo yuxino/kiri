@@ -6,6 +6,8 @@ import SwiftUI
 
 private extension Color {
     static let kiriAccent = Color(nsColor: CaptureUIColors.accent)
+    static let kiriCanvas = Color(nsColor: .windowBackgroundColor)
+    static let kiriCard = Color(nsColor: .controlBackgroundColor)
 }
 
 struct LibraryView: View {
@@ -39,9 +41,9 @@ struct LibraryView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(Color.kiriCanvas)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color.kiriCanvas)
         .tint(Color(nsColor: CaptureUIColors.accent))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay(alignment: .top) {
@@ -79,6 +81,7 @@ struct LibraryView: View {
         }
         .padding(.horizontal, KiriUI.Spacing.page)
         .padding(.vertical, KiriUI.Spacing.standard)
+        .background(.ultraThinMaterial)
     }
 
     private var wideHeader: some View {
@@ -134,7 +137,7 @@ struct LibraryView: View {
 
     private var titleBlock: some View {
         HStack(spacing: KiriUI.Spacing.compact) {
-            Image(systemName: model.showingTrash ? "trash" : "photo.on.rectangle")
+            Image(systemName: model.showingTrash ? "trash" : "viewfinder")
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(Color.kiriAccent)
                 .frame(width: 32, height: 32)
@@ -312,7 +315,7 @@ struct LibraryView: View {
             VStack(spacing: 7) {
                 Text(L10n.text("Ready for your first capture"))
                     .font(.title2.weight(.semibold))
-                Text(L10n.text("Choose Screenshot or Record, then select the region you need."))
+                Text(L10n.text("Choose a capture mode, then select the region you need."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -334,7 +337,7 @@ struct LibraryView: View {
                 .frame(width: 400)
 
             HStack(spacing: 18) {
-                OnboardingStep(number: "1", title: L10n.text("Mode"), detail: L10n.text("Screenshot or Record"))
+                OnboardingStep(number: "1", title: L10n.text("Mode"), detail: L10n.text("Screenshot · Record · OCR · Long"))
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -347,7 +350,7 @@ struct LibraryView: View {
         }
         .padding(.horizontal, 40)
         .padding(.vertical, 32)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color.kiriCard)
         .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.surface))
         .overlay {
             RoundedRectangle(cornerRadius: KiriUI.Radius.surface)
@@ -450,7 +453,8 @@ private struct CaptureCard: View {
             CaptureThumbnail(
                 fileURL: model.assetFileURL(asset),
                 fallbackSystemImage: iconName,
-                reloadToken: model.libraryRevision
+                reloadToken: model.libraryRevision,
+                fillsPreview: asset.kind == .longImage
             )
             .overlay {
                 if isHovered, asset.trashedAt == nil {
@@ -468,6 +472,17 @@ private struct CaptureCard: View {
             .overlay(alignment: .topLeading) {
                 kindBadge
                     .padding(KiriUI.Spacing.compact)
+            }
+            .overlay(alignment: .bottom) {
+                if asset.kind == .longImage {
+                    LinearGradient(
+                        colors: [.clear, .black.opacity(0.28)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 42)
+                    .allowsHitTesting(false)
+                }
             }
             .frame(maxWidth: .infinity)
             .frame(height: KiriUI.Card.thumbnailHeight)
@@ -536,7 +551,7 @@ private struct CaptureCard: View {
             }
         }
         .padding(KiriUI.Card.padding)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color.kiriCard)
         .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.card))
         .overlay {
             RoundedRectangle(cornerRadius: KiriUI.Radius.card)
@@ -545,8 +560,8 @@ private struct CaptureCard: View {
                     lineWidth: isHovered ? 1.5 : 1
                 )
         }
-        .shadow(color: .black.opacity(isHovered ? 0.10 : 0.035), radius: isHovered ? 12 : 4, y: 4)
-        .scaleEffect(isHovered ? 1.008 : 1)
+        .shadow(color: .black.opacity(isHovered ? 0.11 : 0.04), radius: isHovered ? 14 : 5, y: 5)
+        .offset(y: isHovered ? -2 : 0)
         .animation(.easeOut(duration: KiriUI.Motion.hover), value: isHovered)
         .onHover { isHovered = $0 }
         .onDrag {
@@ -634,16 +649,26 @@ private struct CaptureCard: View {
     }
 
     private var kindBadge: some View {
-        Image(systemName: iconName)
-            .font(.caption.weight(.semibold))
+        Label(kindTitle, systemImage: iconName)
+            .font(.caption2.weight(.semibold))
             .foregroundStyle(Color.kiriAccent)
-            .frame(width: 24, height: 24)
+            .padding(.horizontal, 7)
+            .frame(height: 24)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: KiriUI.Radius.badge))
             .overlay {
                 RoundedRectangle(cornerRadius: KiriUI.Radius.badge)
                     .stroke(Color.primary.opacity(0.12))
             }
-            .accessibilityHidden(true)
+            .accessibilityLabel(kindTitle)
+    }
+
+    private var kindTitle: String {
+        switch asset.kind {
+        case .image: L10n.text("Image")
+        case .video: L10n.text("Video")
+        case .gif: "GIF"
+        case .longImage: L10n.text("Long Screenshot")
+        }
     }
 
     private var iconName: String {
@@ -721,6 +746,7 @@ private struct CaptureThumbnail: View {
     let fileURL: URL
     let fallbackSystemImage: String
     let reloadToken: Int
+    let fillsPreview: Bool
     @State private var image: CGImage?
     @State private var hasFinishedLoading = false
 
@@ -733,7 +759,8 @@ private struct CaptureThumbnail: View {
                 Image(decorative: image, scale: 1)
                     .resizable()
                     .interpolation(.high)
-                    .scaledToFit()
+                    .aspectRatio(contentMode: fillsPreview ? .fill : .fit)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .clipShape(RoundedRectangle(cornerRadius: KiriUI.Radius.control))
                     .padding(5)
             } else if hasFinishedLoading {

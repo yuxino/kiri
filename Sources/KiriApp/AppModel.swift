@@ -611,9 +611,9 @@ final class AppModel: ObservableObject {
             region: region,
             displayFrame: capture.screenFrame,
             displayID: capture.displayID,
-            onFinish: { [weak self] sections in
+            onFinish: { [weak self] result in
                 self?.finishLongScreenshot(
-                    sections: sections,
+                    result: result,
                     returnApplication: returnApplication,
                     hiddenWindows: hiddenWindows,
                     sourceApplication: sourceApplication
@@ -638,7 +638,7 @@ final class AppModel: ObservableObject {
     }
 
     private func finishLongScreenshot(
-        sections: [CGImage],
+        result: LongScreenshotCaptureResult,
         returnApplication: NSRunningApplication?,
         hiddenWindows: [NSWindow],
         sourceApplication: String?
@@ -651,11 +651,14 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             do {
                 let output = try await Task.detached(priority: .userInitiated) {
-                    let result = try KiriCore.LongScreenshotStitcher.stitch(sections)
-                    guard let data = Self.pngData(for: result.image) else {
+                    let stitched = try KiriCore.LongScreenshotStitcher.stitch(
+                        result.sections,
+                        overlaps: result.overlaps
+                    )
+                    guard let data = Self.pngData(for: stitched.image) else {
                         throw LongScreenshotExportError.couldNotEncode
                     }
-                    return (result.image, data)
+                    return (stitched.image, data)
                 }.value
 
                 let imageObject = Self.nsImage(from: output.0)

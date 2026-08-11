@@ -33,7 +33,7 @@ final class RecordingOptionsPopoverController {
         )
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 308, height: 358)
+        popover.contentSize = NSSize(width: 320, height: 388)
         popover.contentViewController = NSHostingController(rootView: view)
     }
 
@@ -69,14 +69,19 @@ private struct RecordingOptionsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
                 Image(systemName: "record.circle.fill")
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(Color(nsColor: CaptureUIColors.blossom))
+                    .frame(width: 42, height: 42)
+                    .background(
+                        Color(nsColor: CaptureUIColors.blossom).opacity(0.12),
+                        in: RoundedRectangle(cornerRadius: 12)
+                    )
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L10n.text("Record Region"))
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                     Text(L10n.text("MP4 · 30 fps · Saved locally"))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
@@ -118,8 +123,15 @@ private struct RecordingOptionsView: View {
                     enabled: options.showsCursor
                 )
             }
-            .padding(.horizontal, 10)
-            .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, 11)
+            .background(
+                Color(nsColor: CaptureUIColors.accent).opacity(0.055),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color(nsColor: CaptureUIColors.accent).opacity(0.16))
+            }
 
             Button {
                 onStart(options.normalized)
@@ -133,9 +145,14 @@ private struct RecordingOptionsView: View {
             .controlSize(.large)
             .tint(Color(nsColor: CaptureUIColors.blossom))
             .keyboardShortcut(.return, modifiers: [])
+
+            Label(L10n.text("Saved locally · Never uploaded"), systemImage: "lock.fill")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
-        .padding(16)
-        .frame(width: 308)
+        .padding(18)
+        .frame(width: 320)
         .onChange(of: options) { _, newValue in
             let normalized = newValue.normalized
             if normalized != newValue {

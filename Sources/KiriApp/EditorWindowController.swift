@@ -34,7 +34,11 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "kiri"
+        window.title = L10n.text("Kiri Editor")
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.backgroundColor = NSColor(calibratedWhite: 0.075, alpha: 1)
+        window.minSize = CGSize(width: 860, height: 520)
         window.center()
         super.init(window: window)
         window.delegate = self
@@ -56,18 +60,22 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         let controller = NSViewController()
         let root = NSView()
         root.translatesAutoresizingMaskIntoConstraints = false
+        root.wantsLayer = true
+        root.layer?.backgroundColor = NSColor(calibratedWhite: 0.075, alpha: 1).cgColor
 
         let toolbarSurface = NSVisualEffectView()
-        toolbarSurface.material = .headerView
+        toolbarSurface.material = .underWindowBackground
         toolbarSurface.blendingMode = .withinWindow
         toolbarSurface.state = .active
         toolbarSurface.translatesAutoresizingMaskIntoConstraints = false
+        toolbarSurface.wantsLayer = true
+        toolbarSurface.layer?.borderWidth = 0
 
         let toolbar = NSStackView()
         toolbar.orientation = .horizontal
         toolbar.alignment = .centerY
-        toolbar.spacing = 4
-        toolbar.edgeInsets = NSEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
+        toolbar.spacing = 5
+        toolbar.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
         toolbar.translatesAutoresizingMaskIntoConstraints = false
 
         let tools: [(AnnotationTool, String, String, String, Selector)] = [
@@ -220,7 +228,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             toolbarSurface.topAnchor.constraint(equalTo: root.topAnchor),
             toolbarSurface.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             toolbarSurface.trailingAnchor.constraint(equalTo: root.trailingAnchor),
-            toolbarSurface.heightAnchor.constraint(equalToConstant: 50),
+            toolbarSurface.heightAnchor.constraint(equalToConstant: 56),
             toolbar.topAnchor.constraint(equalTo: toolbarSurface.topAnchor),
             toolbar.leadingAnchor.constraint(equalTo: toolbarSurface.leadingAnchor),
             toolbar.trailingAnchor.constraint(equalTo: toolbarSurface.trailingAnchor),

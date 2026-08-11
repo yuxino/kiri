@@ -26,10 +26,15 @@ included in a recording.
 
 - Typography: San Francisco system text; title3 semibold for page titles,
   subheadline medium for assets, caption for metadata.
-- Spacing: 8 compact, 12 standard, 18 roomy, and 22 page/grid padding.
-- Radius: 8 controls, 10 previews, 14 cards, and 20 onboarding surfaces.
-- Color: semantic macOS backgrounds, labels, separators, and the user's accent
-  color. No fixed light-only surfaces.
+- Spacing: 8 compact, 12 standard, 18 roomy, and 22–24 page/grid padding.
+- Radius: 10 controls, 12 previews, 16 cards and floating panels, and 22
+  onboarding surfaces.
+- Color: semantic macOS backgrounds and labels with restrained violet accents;
+  recording may use blossom red as a task-specific state color. No fixed
+  light-only surfaces.
+- Elevation: translucent utility surfaces use one subtle violet border and a
+  soft shadow. Selected capture modes use a solid violet pill with white text;
+  ordinary tools remain quieter until selected.
 - Motion: 160 ms hover feedback and 180 ms transient feedback. Motion never
   delays capture completion.
 
@@ -45,6 +50,11 @@ included in a recording.
   recovery action when one exists. No bottom-corner preview.
 - Empty/loading/search/error: each state has distinct copy and a relevant next
   action rather than a blank surface.
+- Capture surfaces: mode picker, annotation toolbar, OCR panel, long-capture
+  guide, recording setup, and recording controls share the same corner,
+  border, spacing, and elevation rhythm.
+- Editor and pinned images: dark image-first canvases keep the content central;
+  controls sit on translucent native surfaces instead of opaque utility chrome.
 
 ## Accessibility and keyboard
 

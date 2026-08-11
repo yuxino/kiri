@@ -10,14 +10,14 @@ struct KiriApp: App {
     var body: some Scene {
         Window("Kiri", id: "library") {
             LibraryView(model: model)
-                .frame(minWidth: 780, minHeight: 520)
+                .frame(minWidth: 820, minHeight: 540)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .task {
                     model.start()
                     await model.refresh()
                 }
         }
-        .defaultSize(width: 880, height: 600)
+        .defaultSize(width: 960, height: 640)
         .commands {
             KiriCommands(model: model)
         }

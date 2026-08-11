@@ -100,6 +100,12 @@ let tests = [
     KiriTest(name: "long screenshot stitched output stays top to bottom") {
         try longScreenshotStitcherOutputStaysTopToBottom()
     },
+    KiriTest(name: "long screenshot uses capture-time overlaps") {
+        try longScreenshotUsesCaptureTimeOverlaps()
+    },
+    KiriTest(name: "long screenshot rejects invalid capture-time overlaps") {
+        try longScreenshotRejectsInvalidCaptureTimeOverlaps()
+    },
     KiriTest(name: "selection reverse drag") {
         try normalizesReverseDrag()
     },

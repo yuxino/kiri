@@ -34,7 +34,7 @@ does not disappear just because the clipboard changed.
 - Default screenshots copy to the clipboard and return focus to the original app without opening Kiri's library
 - Save, pin, or open the full editor when needed
 - Choose Screenshot or Record in the capture overlay's first-level mode switch instead of finding recording inside screenshot tools
-- Capture a guided scrolling long screenshot from the same first-level mode switch, with section capture, undo, finish, and cancel controls
+- Capture scrolling long screenshots from the same first-level mode switch; Kiri follows slow scrolling automatically and updates a live preview
 - Configure remembered countdown, system audio, microphone, pointer, and click-highlight switches before recording
 - Use a centered 3-2-1 countdown that does not dim the selected region, and cancel it with Escape
 - Record high-quality MP4 at the display's Retina scale instead of upscaling a low-resolution capture
@@ -120,11 +120,11 @@ requires macOS 15 or later.
 ## Scrolling long screenshots (preview)
 
 1. Press **⇧⌘A**, choose **Long Screenshot** in the first-level mode switch, and select a region.
-2. Scroll the original app, then click **Capture Next Section**, or press **Space / Return** while the guide is focused.
-3. Use **Undo Last** when needed; choose **Finish & Copy** when done. Press **Escape** to cancel.
+2. Choose **Start Capture**, return to the original app, and scroll down slowly. Kiri detects overlap and extends the live preview automatically.
+3. Choose **Stop Capture** when scrolling is done. Use **Undo Last** if needed, then choose **Finish & Copy**. Escape stops or cancels the flow.
 4. Kiri automatically stitches the sections, copies the final PNG, and stores the same long image in the local library.
 
-The compact guide hides itself before each fresh capture, so Kiri UI is not included in the next section. Keep the pointer on the initially selected display. The current workflow is guided stitching; manual seam adjustment remains planned.
+The compact guide stays nearby but is excluded from screen capture, so it never enters the final image. Leave some overlap between scroll positions; if a jump is too large, Kiri asks you to scroll back slightly. Export now preserves the seams confirmed during capture instead of re-detecting them and risking duplicated viewports. Manual seam adjustment remains planned.
 
 See [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), and
 [SECURITY.md](SECURITY.md).

@@ -24,12 +24,16 @@ enum LongScreenshotCaptureError: LocalizedError {
     }
 }
 
+struct LongScreenshotCaptureResult {
+    let sections: [CGImage]
+    let overlaps: [Int]
+}
+
 @MainActor
 final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
     private static let minimumSelectionSide: CGFloat = 16
     private static let previewThumbnailWidth = 200
-    private static let activePollMilliseconds: Int64 = 140
-    private static let idlePollMilliseconds: Int64 = 500
+    private static let pollMilliseconds: Int64 = 220
     private static let settleDelay: TimeInterval = 0.35
     private static let minimumAdvanceFraction: Double = 0.12
     private static let changedFractionThreshold: Double = 0.02
@@ -43,6 +47,7 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
     // not pin dozens of full-display pixel buffers in memory. Thumbnails drive
     // the live preview.
     private var sectionData: [Data] = []
+    private var detectedOverlaps: [Int] = []
     private var thumbnails: [CGImage] = []
     private var previewImage: CGImage?
     private var lastSection: CGImage?
@@ -53,14 +58,16 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
         sectionData.count
     }
 
-    private let onFinish: ([CGImage]) -> Void
+    private let onFinish: (LongScreenshotCaptureResult) -> Void
     private let onCancel: () -> Void
     private let onCaptureFailure: (Error) -> Void
 
     private var panel: LongScreenshotPanel?
     private var recordingTask: Task<Void, Never>?
+    private var tailCaptureTask: Task<Void, Never>?
     private var recordingEscapeMonitor: Any?
     private var isRecording = false
+    private var isFinalizingTail = false
     private var isClosed = false
     private var lastScrollActivity = Date()
 
@@ -76,7 +83,7 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
         region: CGRect,
         displayFrame: CGRect,
         displayID: CGDirectDisplayID,
-        onFinish: @escaping ([CGImage]) -> Void,
+        onFinish: @escaping (LongScreenshotCaptureResult) -> Void,
         onCancel: @escaping () -> Void,
         onCaptureFailure: @escaping (Error) -> Void
     ) {
@@ -107,7 +114,7 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
 
         let panel = LongScreenshotPanel(
             title: L10n.text("Long Screenshot"),
-            contentRect: CGRect(x: 0, y: 0, width: 340, height: 424)
+            contentRect: CGRect(x: 0, y: 0, width: 360, height: 468)
         )
         panel.onPrimaryAction = { [weak self] in
             guard let self else { return }
@@ -130,7 +137,9 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
         panel.update(
             sectionCount: sectionData.count,
             isRecording: false,
+            isFinalizing: false,
             preview: previewImage,
+            warning: nil,
             error: nil
         )
 
@@ -157,7 +166,7 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
     // MARK: - Recording
 
     func startRecording() {
-        guard !isClosed, !isRecording, lastSection != nil else { return }
+        guard !isClosed, !isRecording, !isFinalizingTail, lastSection != nil else { return }
         isRecording = true
         lastScrollActivity = Date()
         lastPollFrame = lastSection
@@ -165,7 +174,9 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
         panel?.update(
             sectionCount: sectionData.count,
             isRecording: true,
+            isFinalizing: false,
             preview: previewImage,
+            warning: nil,
             error: nil
         )
         installRecordingEscapeMonitor()
@@ -177,24 +188,30 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
     func stopRecording() {
         guard isRecording else { return }
         isRecording = false
+        isFinalizingTail = true
         recordingTask?.cancel()
         recordingTask = nil
+        tailCaptureTask?.cancel()
+        tailCaptureTask = nil
         removeRecordingEscapeMonitor()
         panel?.update(
             sectionCount: sectionData.count,
             isRecording: false,
+            isFinalizing: true,
             preview: previewImage,
+            warning: nil,
             error: nil
         )
         panel?.orderFrontRegardless()
         panel?.makeKey()
-        Task { [weak self] in
+        tailCaptureTask = Task { [weak self] in
             await self?.captureTailSection()
         }
     }
 
     private func captureTailSection() async {
         guard !isClosed else { return }
+        var warning: String?
         do {
             try await Task.sleep(for: .milliseconds(160))
             let panelWindowID = CGWindowID(panel?.windowNumber ?? 0)
@@ -202,7 +219,9 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
                 excludingWindowIDs: panelWindowID > 0 ? [panelWindowID] : []
             )
             let frame = try cropSection(from: capture)
-            guard let last = lastSection else { return }
+            guard let last = lastSection else {
+                throw LongScreenshotCaptureError.sectionUnavailable
+            }
             let overlap = LongScreenshotOverlapDetector.detectOverlap(
                 between: last,
                 and: frame,
@@ -214,19 +233,37 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
                 appendSection(frame, overlap: overlap)
             } else {
                 longScreenshotLog.info("tail capture: no new content (overlap=\(overlap) advance=\(advance))")
+                if Self.changedFraction(between: last, and: frame)
+                    > Self.changedFractionThreshold {
+                    warning = L10n.text("Scroll back a little so the sections overlap, then try again.")
+                }
             }
         } catch {
             longScreenshotLog.error("tail capture failed: \(String(describing: error))")
+            warning = error.localizedDescription
+        }
+        guard !isClosed else { return }
+        isFinalizingTail = false
+        tailCaptureTask = nil
+        panel?.update(
+            sectionCount: sectionData.count,
+            isRecording: false,
+            isFinalizing: false,
+            preview: previewImage,
+            warning: warning,
+            error: nil
+        )
+        panel?.orderFrontRegardless()
+        panel?.makeKey()
+        if warning != nil {
+            NSSound.beep()
         }
     }
 
     private func runRecordingLoop() async {
         while !Task.isCancelled && isRecording && !isClosed {
-            let interval = (panel?.isVisible == true)
-                ? Self.idlePollMilliseconds
-                : Self.activePollMilliseconds
             do {
-                try await Task.sleep(for: .milliseconds(interval))
+                try await Task.sleep(for: .milliseconds(Self.pollMilliseconds))
                 try Task.checkCancellation()
                 guard isRecording, !isClosed else { return }
                 let panelWindowID = CGWindowID(panel?.windowNumber ?? 0)
@@ -248,7 +285,9 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
                 panel?.update(
                     sectionCount: sectionData.count,
                     isRecording: false,
+                    isFinalizing: false,
                     preview: previewImage,
+                    warning: nil,
                     error: error.localizedDescription
                 )
                 panel?.orderFrontRegardless()
@@ -290,8 +329,21 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
 
         if !changed,
            Date().timeIntervalSince(lastScrollActivity) >= Self.settleDelay,
-           panel?.isVisible != true {
-            panel?.orderFrontRegardless()
+           let last = lastSection,
+           Self.changedFraction(between: last, and: frame) > Self.changedFractionThreshold,
+           LongScreenshotOverlapDetector.detectOverlap(
+               between: last,
+               and: frame,
+               configuration: recordConfiguration
+           ) == 0 {
+            panel?.update(
+                sectionCount: sectionData.count,
+                isRecording: true,
+                isFinalizing: false,
+                preview: previewImage,
+                warning: L10n.text("Scroll back a little so the sections overlap, then try again."),
+                error: nil
+            )
         }
     }
 
@@ -309,34 +361,47 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
             overlapFraction: overlapFraction
         )
         sectionData.append(data)
+        detectedOverlaps.append(overlap)
         lastSection = frame
         panel?.update(
             sectionCount: sectionData.count,
             isRecording: isRecording,
+            isFinalizing: isFinalizingTail,
             preview: previewImage,
+            warning: nil,
             error: nil
         )
     }
 
     private func undoLastSection() {
-        guard !isClosed, !isRecording, sectionData.count > 1 else { return }
+        guard !isClosed, !isRecording, !isFinalizingTail, sectionData.count > 1 else { return }
         sectionData.removeLast()
+        detectedOverlaps.removeLast()
         thumbnails.removeLast()
-        previewImage = Self.rebuildPreview(from: thumbnails)
-        lastSection = sectionData.last.flatMap(Self.image(from:))
+        let remainingSections = sectionData.compactMap(Self.image(from:))
+        previewImage = Self.rebuildPreview(
+            from: thumbnails,
+            sectionHeights: remainingSections.map(\.height),
+            overlaps: detectedOverlaps
+        )
+        lastSection = remainingSections.last
         panel?.update(
             sectionCount: sectionData.count,
             isRecording: false,
+            isFinalizing: false,
             preview: previewImage,
+            warning: nil,
             error: nil
         )
     }
 
     func finish() {
-        guard !isClosed, !isRecording, !sectionData.isEmpty else { return }
+        guard !isClosed, !isRecording, !isFinalizingTail, !sectionData.isEmpty else { return }
         isClosed = true
         recordingTask?.cancel()
         recordingTask = nil
+        tailCaptureTask?.cancel()
+        tailCaptureTask = nil
         removeRecordingEscapeMonitor()
         closePanel()
         let images = sectionData.compactMap(Self.image(from:))
@@ -345,15 +410,21 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
             onCancel()
             return
         }
-        onFinish(images)
+        onFinish(LongScreenshotCaptureResult(
+            sections: images,
+            overlaps: detectedOverlaps
+        ))
     }
 
     private func cancel() {
         guard !isClosed else { return }
         isClosed = true
         isRecording = false
+        isFinalizingTail = false
         recordingTask?.cancel()
         recordingTask = nil
+        tailCaptureTask?.cancel()
+        tailCaptureTask = nil
         removeRecordingEscapeMonitor()
         closePanel()
         onCancel()
@@ -363,8 +434,11 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
         guard !isClosed else { return }
         isClosed = true
         isRecording = false
+        isFinalizingTail = false
         recordingTask?.cancel()
         recordingTask = nil
+        tailCaptureTask?.cancel()
+        tailCaptureTask = nil
         removeRecordingEscapeMonitor()
         closePanel()
         onCaptureFailure(error)
@@ -496,16 +570,23 @@ final class LongScreenshotCaptureController: NSObject, NSWindowDelegate {
         return context.makeImage()
     }
 
-    private static func rebuildPreview(from thumbnails: [CGImage]) -> CGImage? {
+    private static func rebuildPreview(
+        from thumbnails: [CGImage],
+        sectionHeights: [Int],
+        overlaps: [Int]
+    ) -> CGImage? {
         guard let first = thumbnails.first else { return nil }
         guard thumbnails.count > 1 else { return first }
-        let configuration = LongScreenshotStitcherConfiguration(
-            maxOverlapFraction: 0.95,
-            minimumOverlapPixels: 2,
-            maximumOutputHeight: 100_000
-        )
-        return try? LongScreenshotStitcher(configuration: configuration)
-            .stitch(thumbnails)
+        guard sectionHeights.count == thumbnails.count else { return nil }
+        let thumbnailOverlaps = overlaps.enumerated().map { index, overlap in
+            let thumbnail = thumbnails[index + 1]
+            let sourceHeight = max(1, sectionHeights[index + 1])
+            return min(thumbnail.height - 1, Int(
+                (Double(overlap) / Double(sourceHeight) * Double(thumbnail.height)).rounded()
+            ))
+        }
+        return try? LongScreenshotStitcher()
+            .stitch(thumbnails, overlaps: thumbnailOverlaps)
             .image
     }
 
@@ -579,6 +660,7 @@ final class LongScreenshotPanel: NSPanel {
     private let previewImageView = NSImageView()
     private let previewScrollView = NSScrollView()
     private var isRecordingState = false
+    private var isFinalizingState = false
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -591,8 +673,11 @@ final class LongScreenshotPanel: NSPanel {
             defer: false
         )
         self.title = title
-        titleVisibility = .visible
+        titleVisibility = .hidden
         titlebarAppearsTransparent = true
+        backgroundColor = .clear
+        isOpaque = false
+        hasShadow = true
         isFloatingPanel = true
         level = .floating
         hidesOnDeactivate = false
@@ -612,13 +697,17 @@ final class LongScreenshotPanel: NSPanel {
         }
         switch event.keyCode {
         case 53:
-            if isRecordingState {
+            if isFinalizingState {
+                return
+            } else if isRecordingState {
                 onPrimaryAction?()
             } else {
                 onCancel?()
             }
         case 36, 76, 49:
-            onPrimaryAction?()
+            if !isFinalizingState {
+                onPrimaryAction?()
+            }
         default:
             super.sendEvent(event)
         }
@@ -632,26 +721,44 @@ final class LongScreenshotPanel: NSPanel {
         onCancel?()
     }
 
-    func update(sectionCount: Int, isRecording: Bool, preview: CGImage?, error: String?) {
+    func update(
+        sectionCount: Int,
+        isRecording: Bool,
+        isFinalizing: Bool,
+        preview: CGImage?,
+        warning: String?,
+        error: String?
+    ) {
         isRecordingState = isRecording
-        sectionLabel.stringValue = L10n.format("Sections: %d", sectionCount)
-        statusLabel.stringValue = isRecording
-            ? L10n.text("Recording — scroll to capture, Esc to stop")
-            : L10n.text("Click Start, scroll the original app, then Stop.")
-        errorLabel.stringValue = error ?? ""
-        errorLabel.isHidden = error == nil
-        primaryButton.title = isRecording
-            ? L10n.text("Stop Recording")
-            : L10n.text("Start Recording")
+        isFinalizingState = isFinalizing
+        sectionLabel.stringValue = L10n.format("%d sections", sectionCount)
+        if isFinalizing {
+            statusLabel.stringValue = L10n.text("Capturing the final section…")
+        } else if isRecording {
+            statusLabel.stringValue = L10n.text("Capturing — scroll slowly; Kiri follows automatically.")
+        } else {
+            statusLabel.stringValue = L10n.text("Click Start, then scroll the original app slowly.")
+        }
+        let issue = error ?? warning
+        errorLabel.stringValue = issue ?? ""
+        errorLabel.textColor = error == nil ? .systemOrange : .systemRed
+        errorLabel.isHidden = issue == nil
+        primaryButton.title = if isFinalizing {
+            L10n.text("Finishing…")
+        } else if isRecording {
+            L10n.text("Stop Capture")
+        } else {
+            L10n.text("Start Capture")
+        }
         primaryButton.image = NSImage(
-            systemSymbolName: isRecording ? "stop.fill" : "play.fill",
+            systemSymbolName: isFinalizing ? "hourglass" : (isRecording ? "stop.fill" : "play.fill"),
             accessibilityDescription: primaryButton.title
         )?.withSymbolConfiguration(
             NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
         )
-        primaryButton.isEnabled = true
-        undoButton.isEnabled = !isRecording && sectionCount > 1
-        finishButton.isEnabled = !isRecording && sectionCount > 0
+        primaryButton.isEnabled = !isFinalizing
+        undoButton.isEnabled = !isRecording && !isFinalizing && sectionCount > 1
+        finishButton.isEnabled = !isRecording && !isFinalizing && sectionCount > 0
         cancelButton.isEnabled = true
         updatePreview(preview)
     }
@@ -693,33 +800,38 @@ final class LongScreenshotPanel: NSPanel {
         effect.material = .popover
         effect.state = .active
         effect.wantsLayer = true
-        effect.layer?.cornerRadius = 12
+        effect.layer?.cornerRadius = 16
         effect.layer?.cornerCurve = .continuous
         effect.layer?.borderWidth = 1
-        effect.layer?.borderColor = CaptureUIColors.surfaceBorder.cgColor
+        effect.layer?.borderColor = CaptureUIColors.surfaceBorder.withAlphaComponent(0.8).cgColor
+        effect.layer?.shadowColor = NSColor.black.cgColor
+        effect.layer?.shadowOpacity = 0.18
+        effect.layer?.shadowRadius = 18
+        effect.layer?.shadowOffset = CGSize(width: 0, height: 8)
 
         let content = NSView()
         content.translatesAutoresizingMaskIntoConstraints = false
         effect.addSubview(content)
         NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: effect.topAnchor, constant: 12),
-            content.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 14),
-            content.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -14),
-            content.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -12)
+            content.topAnchor.constraint(equalTo: effect.topAnchor, constant: 14),
+            content.leadingAnchor.constraint(equalTo: effect.leadingAnchor, constant: 16),
+            content.trailingAnchor.constraint(equalTo: effect.trailingAnchor, constant: -16),
+            content.bottomAnchor.constraint(equalTo: effect.bottomAnchor, constant: -14)
         ])
 
-        sectionLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        sectionLabel.textColor = .secondaryLabelColor
+        sectionLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        sectionLabel.textColor = CaptureUIColors.accent
         sectionLabel.alignment = .right
         sectionLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         sectionLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         let heading = NSTextField(labelWithString: L10n.text("Long Screenshot"))
-        heading.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+        heading.font = NSFont.systemFont(ofSize: 16, weight: .semibold)
 
         statusLabel.font = NSFont.systemFont(ofSize: 12)
         statusLabel.textColor = .secondaryLabelColor
-        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.maximumNumberOfLines = 2
+        statusLabel.lineBreakMode = .byWordWrapping
 
         errorLabel.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         errorLabel.textColor = .systemRed
@@ -735,11 +847,13 @@ final class LongScreenshotPanel: NSPanel {
         previewScrollView.hasHorizontalScroller = false
         previewScrollView.autohidesScrollers = true
         previewScrollView.drawsBackground = true
-        previewScrollView.backgroundColor = NSColor(calibratedWhite: 0.15, alpha: 1)
+        previewScrollView.backgroundColor = NSColor(calibratedWhite: 0.10, alpha: 0.96)
         previewScrollView.wantsLayer = true
-        previewScrollView.layer?.cornerRadius = 8
+        previewScrollView.layer?.cornerRadius = 10
         previewScrollView.layer?.cornerCurve = .continuous
         previewScrollView.layer?.masksToBounds = true
+        previewScrollView.layer?.borderWidth = 1
+        previewScrollView.layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
         previewScrollView.documentView = previewImageView
 
         let headingRow = NSStackView(views: [heading, sectionLabel])
@@ -752,9 +866,10 @@ final class LongScreenshotPanel: NSPanel {
         buttonRow.orientation = .horizontal
         buttonRow.alignment = .centerY
         buttonRow.spacing = 6
+        buttonRow.distribution = .fillEqually
         buttonRow.addArrangedSubview(makeButton(
             primaryButton,
-            title: L10n.text("Start Recording"),
+            title: L10n.text("Start Capture"),
             symbol: "play.fill",
             primary: true,
             action: #selector(primaryAction)
@@ -771,6 +886,7 @@ final class LongScreenshotPanel: NSPanel {
         finishRow.orientation = .horizontal
         finishRow.alignment = .centerY
         finishRow.spacing = 6
+        finishRow.distribution = .fillEqually
         finishRow.addArrangedSubview(makeButton(
             finishButton,
             title: L10n.text("Finish & Copy"),
@@ -796,7 +912,7 @@ final class LongScreenshotPanel: NSPanel {
         ])
         rows.orientation = .vertical
         rows.alignment = .width
-        rows.spacing = 8
+        rows.spacing = 10
         rows.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(rows)
         NSLayoutConstraint.activate([
@@ -804,11 +920,12 @@ final class LongScreenshotPanel: NSPanel {
             rows.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             rows.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             rows.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            headingRow.heightAnchor.constraint(equalToConstant: 20),
+            headingRow.heightAnchor.constraint(equalToConstant: 24),
             headingRow.widthAnchor.constraint(equalTo: rows.widthAnchor),
             previewScrollView.heightAnchor.constraint(equalToConstant: 240),
-            buttonRow.heightAnchor.constraint(equalToConstant: 30),
-            finishRow.heightAnchor.constraint(equalToConstant: 30)
+            statusLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: 30),
+            buttonRow.heightAnchor.constraint(equalToConstant: 32),
+            finishRow.heightAnchor.constraint(equalToConstant: 32)
         ])
 
         contentView = effect
@@ -834,6 +951,7 @@ final class LongScreenshotPanel: NSPanel {
         button.action = action
         button.bezelStyle = primary ? .rounded : .texturedRounded
         button.controlSize = .small
+        button.contentTintColor = primary ? CaptureUIColors.accent : .secondaryLabelColor
         button.setAccessibilityLabel(title)
         button.toolTip = title
         return button

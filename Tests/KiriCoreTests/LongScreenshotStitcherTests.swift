@@ -209,6 +209,45 @@ func longScreenshotStitcherOutputStaysTopToBottom() throws {
     )
 }
 
+func longScreenshotUsesCaptureTimeOverlaps() throws {
+    let first = makeTestImage(width: 4, rows: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100])
+    let second = makeTestImage(width: 4, rows: [30, 40, 50, 60, 70, 80, 90, 100, 110, 120])
+
+    // The default detector intentionally searches only 40% of a viewport, but
+    // live scrolling commonly leaves a much larger overlap. Export must use
+    // the seam measured by the capture session instead of detecting it again.
+    let result = try LongScreenshotStitcher.stitch(
+        [first, second],
+        overlaps: [8]
+    )
+
+    try expect(result.detectedOverlaps == [8], "Capture-time overlap should be preserved")
+    try expect(result.image.height == 12, "A large live overlap should not duplicate a viewport")
+    try expect(
+        testImageRows(result.image) == [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120],
+        "Explicit seams should preserve the captured page order"
+    )
+}
+
+func longScreenshotRejectsInvalidCaptureTimeOverlaps() throws {
+    let first = makeTestImage(width: 4, rows: [10, 20, 30])
+    let second = makeTestImage(width: 4, rows: [20, 30, 40])
+
+    do {
+        _ = try LongScreenshotStitcher.stitch([first, second], overlaps: [])
+        throw TestFailure(description: "A missing capture-time overlap should throw")
+    } catch LongScreenshotStitcherError.invalidOverlapCount {
+        // Expected.
+    }
+
+    do {
+        _ = try LongScreenshotStitcher.stitch([first, second], overlaps: [3])
+        throw TestFailure(description: "An overlap that removes a whole section should throw")
+    } catch LongScreenshotStitcherError.invalidOverlap {
+        return
+    }
+}
+
 private func makeScrollingPage(width: Int, height: Int) -> CGImage {
     let colorSpace = CGColorSpaceCreateDeviceRGB()
     let context = CGContext(

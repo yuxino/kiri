@@ -19,14 +19,21 @@ enum CaptureUIColors {
         blue: 0.67,
         alpha: 1
     )
+    static let accentSoft = NSColor(
+        calibratedRed: 0.67,
+        green: 0.58,
+        blue: 1.0,
+        alpha: 1
+    )
     static let label = NSColor.labelColor
     static let secondaryLabel = NSColor.secondaryLabelColor
     static let disabledLabel = NSColor.tertiaryLabelColor
-    static let hoverFill = accent.withAlphaComponent(0.09)
-    static let selectedFill = accent.withAlphaComponent(0.18)
+    static let hoverFill = accent.withAlphaComponent(0.10)
+    static let selectedFill = accent.withAlphaComponent(0.20)
     static let divider = NSColor.separatorColor.withAlphaComponent(0.7)
     static let surfaceBorder = accent.withAlphaComponent(0.24)
-    static let groupFill = accent.withAlphaComponent(0.055)
+    static let groupFill = accent.withAlphaComponent(0.065)
+    static let surfaceShadow = NSColor.black.withAlphaComponent(0.24)
 }
 
 final class CaptureDividerView: NSView {
@@ -100,7 +107,7 @@ final class CaptureToolGroupView: NSView {
     init(content: NSView) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 10
+        layer?.cornerRadius = 11
         layer?.cornerCurve = .continuous
         refreshAppearance()
 
@@ -292,7 +299,7 @@ final class CaptureActionButton: NSButton {
         toolTip = label
         setAccessibilityLabel(label)
         wantsLayer = true
-        layer?.cornerRadius = 9
+        layer?.cornerRadius = 10
         layer?.cornerCurve = .continuous
         setFrameSize(preferredSize)
         refreshAppearance()
@@ -400,9 +407,9 @@ final class CaptureActionButton: NSButton {
             ? NSColor.white.withAlphaComponent(0.22).cgColor
             : CaptureUIColors.accent.withAlphaComponent(0.32).cgColor
         layer?.shadowColor = CaptureUIColors.accentStrong.cgColor
-        layer?.shadowOpacity = visualStyle == .primary && isEnabled ? 0.22 : 0
-        layer?.shadowRadius = 5
-        layer?.shadowOffset = CGSize(width: 0, height: 2)
+        layer?.shadowOpacity = visualStyle == .primary && isEnabled ? 0.25 : 0
+        layer?.shadowRadius = 7
+        layer?.shadowOffset = CGSize(width: 0, height: 3)
         layer?.transform = pressed
             ? CATransform3DMakeScale(0.94, 0.94, 1)
             : CATransform3DIdentity
@@ -517,7 +524,7 @@ private final class CaptureModeSegmentButton: NSButton {
         toolTip = segment.toolTip
         setAccessibilityLabel(segment.accessibilityLabel)
         wantsLayer = true
-        layer?.cornerRadius = 9
+        layer?.cornerRadius = 10
         layer?.cornerCurve = .continuous
         translatesAutoresizingMaskIntoConstraints = false
         heightAnchor.constraint(equalToConstant: 32).isActive = true
@@ -575,8 +582,8 @@ private final class CaptureModeSegmentButton: NSButton {
         let tint: NSColor
         let background: NSColor
         if isSelectedSegment {
-            tint = CaptureUIColors.accent
-            background = CaptureUIColors.selectedFill
+            tint = .white
+            background = CaptureUIColors.accentStrong
         } else {
             tint = CaptureUIColors.secondaryLabel
             background = hovering ? CaptureUIColors.hoverFill : .clear
@@ -584,7 +591,11 @@ private final class CaptureModeSegmentButton: NSButton {
         contentTintColor = tint
         layer?.backgroundColor = background.cgColor
         layer?.borderWidth = isSelectedSegment ? 1 : 0
-        layer?.borderColor = CaptureUIColors.accent.withAlphaComponent(0.32).cgColor
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.22).cgColor
+        layer?.shadowColor = CaptureUIColors.accentStrong.cgColor
+        layer?.shadowOpacity = isSelectedSegment ? 0.24 : 0
+        layer?.shadowRadius = 7
+        layer?.shadowOffset = CGSize(width: 0, height: 3)
         attributedTitle = NSAttributedString(
             string: segment.title,
             attributes: [

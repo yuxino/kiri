@@ -9,11 +9,11 @@ enum KiriUI {
     }
 
     enum Radius {
-        static let control: CGFloat = 8
-        static let badge: CGFloat = 6
-        static let preview: CGFloat = 10
-        static let card: CGFloat = 14
-        static let surface: CGFloat = 20
+        static let control: CGFloat = 10
+        static let badge: CGFloat = 8
+        static let preview: CGFloat = 12
+        static let card: CGFloat = 16
+        static let surface: CGFloat = 22
     }
 
     enum Header {
@@ -23,8 +23,8 @@ enum KiriUI {
     }
 
     enum Card {
-        static let thumbnailHeight: CGFloat = 182
-        static let padding: CGFloat = 12
+        static let thumbnailHeight: CGFloat = 190
+        static let padding: CGFloat = 14
         static let actionSpacing: CGFloat = 6
         static let metadataSpacing: CGFloat = 6
     }

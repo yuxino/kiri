@@ -24,6 +24,8 @@ public struct LongScreenshotStitcherConfiguration: Equatable, Sendable {
 public enum LongScreenshotStitcherError: LocalizedError, Equatable, Sendable {
     case emptyInput
     case invalidImage(index: Int)
+    case invalidOverlapCount(expected: Int, actual: Int)
+    case invalidOverlap(index: Int, value: Int)
     case outputTooTall(maximumHeight: Int, requiredHeight: Int)
     case outputCreationFailed
 
@@ -33,6 +35,14 @@ public enum LongScreenshotStitcherError: LocalizedError, Equatable, Sendable {
             KiriCoreL10n.text("At least one image is required to create a long screenshot.")
         case let .invalidImage(index):
             KiriCoreL10n.text("The image at position \(index) is invalid.")
+        case let .invalidOverlapCount(expected, actual):
+            KiriCoreL10n.text(
+                "Expected \(expected) long-screenshot overlaps, but received \(actual)."
+            )
+        case let .invalidOverlap(index, value):
+            KiriCoreL10n.text(
+                "The long-screenshot overlap at position \(index) is invalid: \(value)."
+            )
         case let .outputTooTall(maximumHeight, requiredHeight):
             KiriCoreL10n.text(
                 "The stitched screenshot would be \(requiredHeight) pixels tall, exceeding the \(maximumHeight)-pixel limit."
@@ -69,6 +79,23 @@ public struct LongScreenshotStitcher {
     }
 
     public func stitch(_ sections: [CGImage]) throws -> Result {
+        try stitch(sections, detectedOverlaps: nil)
+    }
+
+    /// Stitches sections using overlaps already measured while capturing.
+    ///
+    /// Live capture can accept overlaps much larger than the conservative
+    /// default used for unrelated images. Carrying those measurements through
+    /// export prevents the final pass from re-detecting a different seam and
+    /// duplicating most of every viewport.
+    public func stitch(_ sections: [CGImage], overlaps: [Int]) throws -> Result {
+        try stitch(sections, detectedOverlaps: overlaps)
+    }
+
+    private func stitch(
+        _ sections: [CGImage],
+        detectedOverlaps suppliedOverlaps: [Int]?
+    ) throws -> Result {
         guard !sections.isEmpty else {
             throw Error.emptyInput
         }
@@ -85,16 +112,38 @@ public struct LongScreenshotStitcher {
             return prepared
         }
 
-        var detectedOverlaps: [Int] = []
-        detectedOverlaps.reserveCapacity(max(0, preparedSections.count - 1))
-        for index in 1..<preparedSections.count {
-            detectedOverlaps.append(
-                Self.detectOverlap(
-                    between: preparedSections[index - 1],
-                    and: preparedSections[index],
-                    configuration: configuration
+        let expectedOverlapCount = max(0, preparedSections.count - 1)
+        let detectedOverlaps: [Int]
+        if let suppliedOverlaps {
+            guard suppliedOverlaps.count == expectedOverlapCount else {
+                throw Error.invalidOverlapCount(
+                    expected: expectedOverlapCount,
+                    actual: suppliedOverlaps.count
                 )
-            )
+            }
+            for (index, overlap) in suppliedOverlaps.enumerated() {
+                let maximum = min(
+                    preparedSections[index].height,
+                    preparedSections[index + 1].height
+                ) - 1
+                guard overlap >= 0, overlap <= maximum else {
+                    throw Error.invalidOverlap(index: index, value: overlap)
+                }
+            }
+            detectedOverlaps = suppliedOverlaps
+        } else {
+            var overlaps: [Int] = []
+            overlaps.reserveCapacity(expectedOverlapCount)
+            for index in 1..<preparedSections.count {
+                overlaps.append(
+                    Self.detectOverlap(
+                        between: preparedSections[index - 1],
+                        and: preparedSections[index],
+                        configuration: configuration
+                    )
+                )
+            }
+            detectedOverlaps = overlaps
         }
 
         let outputHeight = try outputHeight(
@@ -165,6 +214,14 @@ public struct LongScreenshotStitcher {
         configuration: Configuration = Configuration()
     ) throws -> Result {
         try Self(configuration: configuration).stitch(sections)
+    }
+
+    public static func stitch(
+        _ sections: [CGImage],
+        overlaps: [Int],
+        configuration: Configuration = Configuration()
+    ) throws -> Result {
+        try Self(configuration: configuration).stitch(sections, overlaps: overlaps)
     }
 
     struct PreparedSection {
