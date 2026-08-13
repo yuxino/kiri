@@ -85,6 +85,7 @@ export function OverlayWindow() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [ocrText, setOcrText] = useState("");
+  const [ocrFailed, setOcrFailed] = useState(false);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [recordOptions, setRecordOptions] = useState<RecordingOptions>({
     usesCountdown: true,
@@ -334,9 +335,13 @@ export function OverlayWindow() {
     const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
     try {
       const text = await api.recognizeText(bytes);
+      setOcrFailed(false);
       setOcrText(text);
       setPhase("ocr-result");
     } catch {
+      // The backend returns "No Text Found" for empty results and
+      // "Text Recognition Failed" for real failures.
+      setOcrFailed(true);
       setOcrText("");
       setPhase("ocr-result");
     } finally {
@@ -540,6 +545,7 @@ export function OverlayWindow() {
       {phase === "ocr-result" && (
         <OcrPanel
           text={ocrText}
+          failed={ocrFailed}
           onCopy={() => {
             void api.copyText(ocrText);
           }}
@@ -726,8 +732,8 @@ function SizeBadge(props: { rect: Rect }) {
   );
 }
 
-function OcrPanel(props: { text: string; onCopy(): void; onClose(): void }) {
-  const { text, onCopy, onClose } = props;
+function OcrPanel(props: { text: string; failed: boolean; onCopy(): void; onClose(): void }) {
+  const { text, failed, onCopy, onClose } = props;
   return (
     <div
       className="kiri-hud"
@@ -744,7 +750,9 @@ function OcrPanel(props: { text: string; onCopy(): void; onClose(): void }) {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ font: "600 12.5px var(--kiri-font-ui)" }}>{t("Recognized Text")}</span>
+        <span style={{ font: "600 12.5px var(--kiri-font-ui)" }}>
+          {failed ? t("Text Recognition Failed") : t("Recognized Text")}
+        </span>
         <button onClick={onClose} style={iconButtonStyle}>
           ✕
         </button>
@@ -762,9 +770,9 @@ function OcrPanel(props: { text: string; onCopy(): void; onClose(): void }) {
           whiteSpace: "pre-wrap",
         }}
       >
-        {text || t("No Text Found")}
+        {text || (failed ? t("Adjust the region and try again") : t("No Text Found"))}
       </div>
-      <button className="kiri-primary-button" onClick={onCopy}>
+      <button className="kiri-primary-button" onClick={onCopy} disabled={!text}>
         {t("Copy")}
       </button>
     </div>
