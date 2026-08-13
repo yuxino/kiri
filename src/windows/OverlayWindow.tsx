@@ -467,6 +467,38 @@ export function OverlayWindow() {
         </>
       )}
 
+      {/* Selection border while annotating: white 4pt + violet 2pt */}
+      {displayRect && phase === "annotating" && (
+        <>
+          <div
+            style={{
+              position: "absolute",
+              left: displayRect.x,
+              top: displayRect.y,
+              width: displayRect.width,
+              height: displayRect.height,
+              border: "4px solid rgba(255,255,255,0.92)",
+              boxSizing: "border-box",
+              pointerEvents: "none",
+              zIndex: 5,
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              left: displayRect.x,
+              top: displayRect.y,
+              width: displayRect.width,
+              height: displayRect.height,
+              border: `2px solid ${ACCENT}`,
+              boxSizing: "border-box",
+              pointerEvents: "none",
+              zIndex: 5,
+            }}
+          />
+        </>
+      )}
+
       {/* Annotation canvas */}
       {annotating && selection && (
         <div
@@ -815,7 +847,7 @@ function RecordOptionsPanel(props: {
         left: Math.max(8, anchor.x),
         top: Math.max(8, anchor.y + anchor.height + 10),
         padding: 12,
-        width: 260,
+        width: 336,
         display: "flex",
         flexDirection: "column",
         gap: 4,
