@@ -90,6 +90,16 @@ pub fn ensure_permissions() -> Result<()> {
     current::ensure_permissions()
 }
 
+/// True when microphone capture is available (macOS 15+; Windows: always).
+pub fn mic_supported() -> bool {
+    current::mic_supported()
+}
+
+/// Makes a window click-through so it never blocks the cursor.
+pub fn set_window_click_through(app: &tauri::AppHandle, label: &str) {
+    current::set_window_click_through(app, label);
+}
+
 pub fn dummy_error() -> anyhow::Error {
     anyhow::anyhow!("unimplemented")
 }

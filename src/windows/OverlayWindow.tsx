@@ -94,6 +94,7 @@ export function OverlayWindow() {
     showsCursor: true,
     highlightsClicks: false,
   });
+  const [micSupported, setMicSupported] = useState(true);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const canvasRef = useRef<AnnotationCanvasHandle>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -111,6 +112,7 @@ export function OverlayWindow() {
     });
     api.startCapture().then((ctx) => setContext(ctx)).catch(() => {});
     api.getRecordingOptions().then((options) => setRecordOptions(options));
+    api.micSupported().then((supported) => setMicSupported(supported));
     return () => {
       unlistenNotice?.();
     };
@@ -558,6 +560,7 @@ export function OverlayWindow() {
         <RecordOptionsPanel
           anchor={selection}
           options={recordOptions}
+          micSupported={micSupported}
           onChange={setRecordOptions}
           onStart={() => {
             void api.startRecordingFlow(selection, recordOptions);
@@ -793,11 +796,12 @@ const iconButtonStyle: React.CSSProperties = {
 function RecordOptionsPanel(props: {
   anchor: Rect;
   options: RecordingOptions;
+  micSupported: boolean;
   onChange(options: RecordingOptions): void;
   onStart(): void;
   onCancel(): void;
 }) {
-  const { anchor, options, onChange, onStart, onCancel } = props;
+  const { anchor, options, micSupported, onChange, onStart, onCancel } = props;
   const toggle = (key: keyof RecordingOptions) => {
     const next = { ...options, [key]: !options[key] };
     if (key === "showsCursor" && !next.showsCursor) next.highlightsClicks = false;
@@ -833,8 +837,10 @@ function RecordOptionsPanel(props: {
       />
       <ToggleRow
         label={t("Microphone")}
+        suffix={micSupported ? undefined : t("Requires macOS 15")}
         checked={options.capturesMicrophone}
         onToggle={() => toggle("capturesMicrophone")}
+        disabled={!micSupported}
       />
       <ToggleRow
         label={t("Show pointer")}
@@ -864,6 +870,7 @@ function ToggleRow(props: {
   checked: boolean;
   onToggle(): void;
   disabled?: boolean;
+  suffix?: string;
 }) {
   return (
     <div
@@ -877,7 +884,14 @@ function ToggleRow(props: {
         cursor: "default",
       }}
     >
-      <span style={{ font: "400 12.5px var(--kiri-font-ui)" }}>{props.label}</span>
+      <span style={{ font: "400 12.5px var(--kiri-font-ui)" }}>
+        {props.label}
+        {props.suffix && (
+          <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 10.5, marginLeft: 6 }}>
+            {props.suffix}
+          </span>
+        )}
+      </span>
       <div
         style={{
           width: 34,

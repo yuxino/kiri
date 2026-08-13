@@ -760,6 +760,7 @@ fn create_ripple_window(
     .visible(false)
     .build()
     .map_err(|e| e.to_string())?;
+    platform::set_window_click_through(app, "ripple");
     let _ = ripple.show();
     Ok(())
 }
@@ -797,6 +798,7 @@ fn start_recorder(
     configuration: &RecordingConfiguration,
     video_tx: mpsc::Sender<Vec<u8>>,
     audio_tx: Option<mpsc::Sender<Vec<u8>>>,
+    mic_tx: Option<mpsc::Sender<Vec<u8>>>,
 ) -> Result<Box<dyn crate::capture::PlatformRecorder + Send>, String> {
     let ripple_excepted = platform::window_capture_id(app, "ripple")
         .into_iter()
@@ -811,17 +813,21 @@ fn start_recorder(
             &ripple_excepted,
             video_tx,
             audio_tx,
+            mic_tx,
         )
         .map(|recorder| Box::new(recorder) as Box<dyn crate::capture::PlatformRecorder + Send>)
         .map_err(|e| e.to_string())
     }
     #[cfg(windows)]
     {
-        let _ = (video_tx, audio_tx);
+        let _ = mic_tx;
         crate::capture::windows::WindowsRecorder::start(
             configuration.display_id,
             configuration.region,
             configuration.backing_scale,
+            configuration.options,
+            video_tx,
+            audio_tx,
         )
         .map(|recorder| Box::new(recorder) as Box<dyn crate::capture::PlatformRecorder + Send>)
         .map_err(|e| e.to_string())
@@ -834,6 +840,7 @@ fn start_encoder(
     out_path: PathBuf,
     video_rx: mpsc::Receiver<Vec<u8>>,
     audio_rx: Option<mpsc::Receiver<Vec<u8>>>,
+    mic_rx: Option<mpsc::Receiver<Vec<u8>>>,
 ) -> Result<crate::record::SegmentEncoder, String> {
     let state = app.state::<AppState>();
     let ffmpeg = state.ffmpeg(&app).map_err(|e| e.to_string())?;
@@ -858,9 +865,17 @@ fn start_encoder(
                 channels: 2,
                 is_float: true,
             }),
+        mic: configuration
+            .options
+            .captures_microphone
+            .then(|| crate::record::AudioSpec {
+                sample_rate: 48_000,
+                channels: 2,
+                is_float: true,
+            }),
         video_encoder: crate::record::pick_video_encoder(&ffmpeg),
     };
-    crate::record::SegmentEncoder::start(&encoder_config, out_path, &ffmpeg, video_rx, audio_rx)
+    crate::record::SegmentEncoder::start(&encoder_config, out_path, &ffmpeg, video_rx, audio_rx, mic_rx)
         .map_err(|e| e.to_string())
 }
 
@@ -917,9 +932,15 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
         .then(|| mpsc::channel::<Vec<u8>>())
         .map(|(tx, rx)| (Some(tx), Some(rx)))
         .unwrap_or((None, None));
+    let (mic_tx, mic_rx) = configuration
+        .options
+        .captures_microphone
+        .then(|| mpsc::channel::<Vec<u8>>())
+        .map(|(tx, rx)| (Some(tx), Some(rx)))
+        .unwrap_or((None, None));
 
-    let recorder = start_recorder(&app, &configuration, video_tx, audio_tx)?;
-    let encoder = start_encoder(&app, &configuration, out_path, video_rx, audio_rx)?;
+    let recorder = start_recorder(&app, &configuration, video_tx, audio_tx, mic_tx)?;
+    let encoder = start_encoder(&app, &configuration, out_path, video_rx, audio_rx, mic_rx)?;
 
     {
         let state = app.state::<AppState>();
@@ -1018,9 +1039,15 @@ pub fn resume_recording(app: AppHandle) -> Result<(), String> {
         .then(|| mpsc::channel::<Vec<u8>>())
         .map(|(tx, rx)| (Some(tx), Some(rx)))
         .unwrap_or((None, None));
+    let (mic_tx, mic_rx) = configuration
+        .options
+        .captures_microphone
+        .then(|| mpsc::channel::<Vec<u8>>())
+        .map(|(tx, rx)| (Some(tx), Some(rx)))
+        .unwrap_or((None, None));
 
-    let recorder = start_recorder(&app, &configuration, video_tx, audio_tx)?;
-    let encoder = start_encoder(&app, &configuration, out_path, video_rx, audio_rx)?;
+    let recorder = start_recorder(&app, &configuration, video_tx, audio_tx, mic_tx)?;
+    let encoder = start_encoder(&app, &configuration, out_path, video_rx, audio_rx, mic_rx)?;
 
     {
         let state = app.state::<AppState>();
@@ -1137,6 +1164,11 @@ fn finalize_recording(app: &AppHandle, segments: Vec<PathBuf>) -> Result<(), Str
 // ---------------------------------------------------------------------------
 // Settings / locale / shortcuts
 // ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn mic_supported() -> bool {
+    platform::mic_supported()
+}
 
 #[tauri::command]
 pub fn get_locale() -> String {

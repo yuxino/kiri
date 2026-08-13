@@ -35,7 +35,10 @@ pub struct EncoderConfig {
     pub height: i64,
     pub fps: u32,
     pub bitrate: i64,
+    /// System audio (pipe:1).
     pub audio: Option<AudioSpec>,
+    /// Microphone (pipe:2, via stderr).
+    pub mic: Option<AudioSpec>,
     pub video_encoder: String,
 }
 
@@ -198,6 +201,7 @@ impl SegmentEncoder {
         ffmpeg: &Path,
         video_rx: mpsc::Receiver<Vec<u8>>,
         audio_rx: Option<mpsc::Receiver<Vec<u8>>>,
+        mic_rx: Option<mpsc::Receiver<Vec<u8>>>,
     ) -> Result<SegmentEncoder> {
         let mut command = ffmpeg_command(ffmpeg);
 
@@ -221,6 +225,14 @@ impl SegmentEncoder {
             None
         };
 
+        // Microphone travels through the child's fd 2 (ffmpeg reads
+        // `pipe:2`); error diagnostics are unavailable while it is on.
+        let mic_pipe = if config.mic.is_some() {
+            Some(os_pipe::pipe()?)
+        } else {
+            None
+        };
+
         if let Some(audio) = &config.audio {
             command.args([
                 "-f",
@@ -233,6 +245,21 @@ impl SegmentEncoder {
                 "1",
                 "-i",
                 "pipe:1",
+            ]);
+        }
+
+        if let Some(mic) = &config.mic {
+            command.args([
+                "-f",
+                mic.ffmpeg_format(),
+                "-ar",
+                &mic.sample_rate.to_string(),
+                "-ac",
+                &mic.channels.to_string(),
+                "-use_wallclock_as_timestamps",
+                "1",
+                "-i",
+                "pipe:2",
             ]);
         }
 
@@ -249,15 +276,35 @@ impl SegmentEncoder {
             "-r",
             &config.fps.to_string(),
         ]);
-        if config.audio.is_some() {
-            command.args(["-c:a", "aac", "-b:a", "192k"]);
+        match (config.audio.is_some(), config.mic.is_some()) {
+            (true, true) => {
+                // Mix system audio + microphone.
+                command.args([
+                    "-filter_complex",
+                    "[1:a][2:a]amix=inputs=2:duration=longest:normalize=0[aout]",
+                    "-map",
+                    "0:v",
+                    "-map",
+                    "[aout]",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                ]);
+            }
+            (true, false) | (false, true) => {
+                command.args(["-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "192k"]);
+            }
+            (false, false) => {}
         }
         command.args(["-movflags", "+faststart"]).arg(&out_path);
 
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::piped());
+        command.stdin(Stdio::null()).stdout(Stdio::null());
+        if mic_pipe.is_some() {
+            command.stderr(Stdio::null());
+        } else {
+            command.stderr(Stdio::piped());
+        }
 
         // Replace stdin/stdout with the OS pipes.
         let (video_rx_pipe, video_tx_pipe) = os_pipe::pipe()?;

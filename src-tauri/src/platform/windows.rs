@@ -94,6 +94,27 @@ pub fn ensure_permissions() -> Result<()> {
     Ok(())
 }
 
+pub fn mic_supported() -> bool {
+    true
+}
+
+pub fn set_window_click_through(app: &tauri::AppHandle, label: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
+    };
+    let Some(window) = app.get_webview_window(label) else {
+        return;
+    };
+    let Ok(hwnd) = window.hwnd() else {
+        return;
+    };
+    unsafe {
+        let hwnd = HWND(hwnd.0 as *mut _);
+        let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        let _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED.0 as isize | WS_EX_TRANSPARENT.0 as isize);
+    }
+}
+
 pub fn set_window_capture_excluded(app: &tauri::AppHandle, label: &str, excluded: bool) {
     let Some(window) = app.get_webview_window(label) else {
         return;

@@ -342,6 +342,7 @@ pub struct AudioFormat {
 struct DelegateState {
     video_tx: mpsc::Sender<Vec<u8>>,
     audio_tx: Option<mpsc::Sender<Vec<u8>>>,
+    mic_tx: Option<mpsc::Sender<Vec<u8>>>,
     video_size: OnceLock<(usize, usize)>,
     audio_format: OnceLock<AudioFormat>,
 }
@@ -356,6 +357,7 @@ pub struct MacRecordingSession {
 }
 
 impl MacRecordingSession {
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         display_id: u32,
         region: Rect,
@@ -364,6 +366,7 @@ impl MacRecordingSession {
         excepted_window_ids: &[u32],
         video_tx: mpsc::Sender<Vec<u8>>,
         audio_tx: Option<mpsc::Sender<Vec<u8>>>,
+        mic_tx: Option<mpsc::Sender<Vec<u8>>>,
     ) -> Result<MacRecordingSession> {
         if region.width < 2.0 || region.height < 2.0 {
             bail!("The recording region is too small.");
@@ -433,6 +436,7 @@ impl MacRecordingSession {
             let state = DelegateState {
                 video_tx,
                 audio_tx,
+                mic_tx,
                 video_size: OnceLock::new(),
                 audio_format: OnceLock::new(),
             };
@@ -467,6 +471,18 @@ impl MacRecordingSession {
                     stream.addStreamOutput_type_sampleHandlerQueue_error(
                         output,
                         SCStreamOutputType::Audio,
+                        Some(&queue),
+                    )
+                } {
+                    let _ = result_tx.send(Err(anyhow!("{error:?}")));
+                    return;
+                }
+            }
+            if options.captures_microphone {
+                if let Err(error) = unsafe {
+                    stream.addStreamOutput_type_sampleHandlerQueue_error(
+                        output,
+                        SCStreamOutputType::Microphone,
                         Some(&queue),
                     )
                 } {
@@ -647,6 +663,12 @@ objc2::define_class!(
             if of_type == SCStreamOutputType::Screen {
                 if let Some(frame) = copy_pixel_buffer(buffer) {
                     let _ = state.video_tx.send(frame);
+                }
+            } else if of_type == SCStreamOutputType::Microphone {
+                if let Some(tx) = &state.mic_tx {
+                    if let Some(bytes) = copy_audio_buffer(buffer) {
+                        let _ = tx.send(bytes);
+                    }
                 }
             } else if let Some(tx) = &state.audio_tx {
                 let format = state.audio_format.get_or_init(|| {

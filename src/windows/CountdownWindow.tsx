@@ -53,7 +53,7 @@ export function CountdownWindow() {
           width: size,
           height: size,
           borderRadius: "50%",
-          background: "#3A2F7A",
+          background: "rgba(26, 20, 41, 0.92)",
           border: "1px solid rgba(255,255,255,0.16)",
           color: "#fff",
           display: "flex",

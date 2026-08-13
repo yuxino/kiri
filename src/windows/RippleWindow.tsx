@@ -51,8 +51,10 @@ export function RippleWindow() {
         const ring = Math.min(t / 340, 1); // 30px ring, 0.34s
         const center = Math.min(t / 240, 1); // 7px center, 0.24s
         const easeOut = (v: number) => 1 - Math.pow(1 - v, 3);
-        const scale = (v: number) => easeOut(v);
-        const alpha = (v: number) => (1 - v) * 0.9;
+        // Scale keyTimes [0, 0.68, 1]; opacity plateau 1 until 0.68, then fade.
+        const scale = (v: number) => easeOut(Math.min(v / 0.68, 1));
+        const alpha = (v: number) =>
+          v < 0.12 ? v / 0.12 : v < 0.68 ? 1 : (1 - (v - 0.68) / 0.32) * 0.9;
         return (
           <div key={ripple.id} style={{ position: "absolute", left: 0, top: 0 }}>
             <Ellipse

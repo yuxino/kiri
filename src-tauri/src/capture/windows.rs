@@ -213,8 +213,8 @@ impl WindowsRecorder {
             CursorCaptureSettings::WithoutCursor
         };
 
-        // Start audio capture (system loopback) when requested.
-        let _audio_streams = start_audio(options, audio_tx);
+        // Start audio capture (system loopback + microphone) when requested.
+        let _audio_streams = start_audio(options, audio_tx, mic_tx);
 
         let cursor = if options.shows_cursor {
             CursorCaptureSettings::Default
@@ -257,6 +257,7 @@ impl PlatformRecorder for WindowsRecorder {
 fn start_audio(
     options: crate::core::policy::RecordingOptions,
     audio_tx: Option<mpsc::Sender<Vec<u8>>>,
+    mic_tx: Option<mpsc::Sender<Vec<u8>>>,
 ) -> Vec<cpal::Stream> {
     let mut streams = Vec::new();
     let Some(tx) = audio_tx else {
@@ -300,6 +301,43 @@ fn start_audio(
                     _ => {}
                 }
                 let _ = (channels, sample_rate);
+            }
+        }
+    }
+    if options.captures_microphone {
+        if let Some(tx) = mic_tx {
+            if let Some(device) = host.default_input_device() {
+                if let Ok(config) = device.default_input_config() {
+                    match config.sample_format() {
+                        cpal::SampleFormat::F32 => {
+                            if let Ok(stream) = device.build_input_stream(
+                                &config.into(),
+                                move |data: &[f32], _| {
+                                    let _ = tx.send(to_bytes(data));
+                                },
+                                |_| {},
+                                None,
+                            ) {
+                                let _ = stream.play();
+                                streams.push(stream);
+                            }
+                        }
+                        cpal::SampleFormat::I16 | cpal::SampleFormat::U16 => {
+                            if let Ok(stream) = device.build_input_stream(
+                                &config.into(),
+                                move |data: &[i16], _| {
+                                    let _ = tx.send(to_bytes_i16(data));
+                                },
+                                |_| {},
+                                None,
+                            ) {
+                                let _ = stream.play();
+                                streams.push(stream);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
     }

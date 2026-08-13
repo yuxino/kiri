@@ -66,6 +66,7 @@ pub fn run() {
             commands::pause_recording,
             commands::resume_recording,
             commands::stop_recording,
+            commands::mic_supported,
             commands::get_locale,
             commands::get_shortcut_label,
             commands::open_settings,

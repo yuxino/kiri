@@ -46,6 +46,18 @@ pub fn ensure_permissions() -> Result<()> {
     Ok(())
 }
 
+pub fn mic_supported() -> bool {
+    use objc2_foundation::NSProcessInfo;
+    let version = NSProcessInfo::processInfo().operatingSystemVersion();
+    version.majorVersion >= 15
+}
+
+pub fn set_window_click_through(app: &tauri::AppHandle, label: &str) {
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.set_ignore_cursor_events(true);
+    }
+}
+
 /// The CGWindowID for one of Kiri's windows (NSWindow.windowNumber).
 pub fn window_capture_id(app: &AppHandle, label: &str) -> Option<u32> {
     let window = app.get_webview_window(label)?;
