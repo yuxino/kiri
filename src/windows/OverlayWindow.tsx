@@ -124,17 +124,13 @@ export function OverlayWindow() {
   }, []);
 
   const complete = useCallback(
-    async (action: "copy" | "save") => {
+    async (action: "copy" | "save" | "pin" | "edit") => {
       const canvas = canvasRef.current;
       if (canvas) {
         const png = await canvas.exportPng();
         if (png) {
           const bytes = Array.from(png);
-          if (action === "save") {
-            void api.confirmCapture(bytes, "save");
-          } else {
-            void api.confirmCapture(bytes, "copy");
-          }
+          void api.confirmCapture(bytes, action);
           return;
         }
       }
@@ -591,6 +587,8 @@ export function OverlayWindow() {
             setSelection(null);
           }}
           onSaveAs={() => void complete("save")}
+          onPin={() => void complete("pin")}
+          onOpenEditor={() => void complete("edit")}
           onClear={() => canvasRef.current?.clearAnnotations()}
         />
       )}
@@ -916,6 +914,8 @@ interface ToolbarProps {
   setMoreMenuOpen(open: boolean): void;
   onReselect(): void;
   onSaveAs(): void;
+  onPin(): void;
+  onOpenEditor(): void;
   onClear(): void;
 }
 
@@ -946,6 +946,8 @@ function Toolbar(props: ToolbarProps) {
     setMoreMenuOpen,
     onReselect,
     onSaveAs,
+    onPin,
+    onOpenEditor,
     onClear,
   } = props;
 
@@ -1078,8 +1080,8 @@ function Toolbar(props: ToolbarProps) {
             >
               <MenuItem label={t("Reselect Region")} onClick={onReselect} />
               <MenuItem label={t("Save As…")} onClick={onSaveAs} />
-              <MenuItem label={t("Pin on Screen")} onClick={() => {}} />
-              <MenuItem label={t("Open in Editor")} onClick={() => {}} />
+              <MenuItem label={t("Pin on Screen")} onClick={onPin} />
+              <MenuItem label={t("Open in Editor")} onClick={onOpenEditor} />
               <MenuItem label={t("Clear Annotations")} onClick={onClear} />
             </div>
           )}

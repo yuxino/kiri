@@ -498,6 +498,12 @@ pub fn confirm_capture(app: AppHandle, request: ConfirmCaptureRequest) -> Result
             let _ = save_file_dialog(app.clone(), "kiri.png".into());
         }
         "pin" => {
+            let store = app.state::<crate::protocol::ProtocolStore>();
+            store
+                .pin_images
+                .lock()
+                .unwrap()
+                .insert(imported.id.to_string(), request.png.clone());
             let label = format!("pin-{}", imported.id);
             let builder = WebviewWindowBuilder::new(
                 &app,
