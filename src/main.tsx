@@ -9,6 +9,29 @@ import { RippleWindow } from "./windows/RippleWindow";
 import { PinWindow } from "./windows/PinWindow";
 import { EditorWindow } from "./windows/EditorWindow";
 
+// Surface runtime errors inside the window instead of a blank page.
+function installErrorDiagnostics() {
+  const show = (message: string) => {
+    document.title = `kiri [error] ${message.slice(0, 80)}`;
+    const box = document.createElement("pre");
+    box.style.cssText =
+      "position:fixed;inset:0;margin:0;padding:24px;background:#1e1b28;color:#fa476e;" +
+      "font:12px ui-monospace,Menlo,monospace;white-space:pre-wrap;z-index:99999";
+    box.textContent = message;
+    document.body.appendChild(box);
+  };
+  window.addEventListener("error", (event) => {
+    show(`window.onerror: ${event.message}\n${event.filename ?? ""}:${event.lineno ?? 0}`);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    const message =
+      reason instanceof Error ? `${reason.message}\n${reason.stack ?? ""}` : String(reason);
+    show(`unhandledrejection: ${message}`);
+  });
+}
+installErrorDiagnostics();
+
 function resolveWindow(): { kind: string; params: URLSearchParams } {
   const params = new URLSearchParams(window.location.search);
   return { kind: params.get("window") ?? "library", params };

@@ -120,9 +120,10 @@ fn shareable_content() -> Result<Retained<SCShareableContent>> {
     let (tx, rx) = mpsc::channel::<std::result::Result<Retained<SCShareableContent>, String>>();
     let block = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
         let result = if error.is_null() && !content.is_null() {
-            Ok(unsafe { Retained::from_raw(content).unwrap() })
+            // Completion handlers deliver autoreleased (+0) objects; retain.
+            Ok(unsafe { Retained::retain(content).unwrap() })
         } else if !error.is_null() {
-            let error = unsafe { Retained::from_raw(error).unwrap() };
+            let error = unsafe { Retained::retain(error).unwrap() };
             Err(error.localizedDescription().to_string())
         } else {
             Err("shareable content failed".to_string())
@@ -296,7 +297,7 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         let result = if error.is_null() && !image.is_null() {
             Ok(unsafe { CFRetained::retain(std::ptr::NonNull::new_unchecked(image)) })
         } else if !error.is_null() {
-            let error = unsafe { Retained::from_raw(error).unwrap() };
+            let error = unsafe { Retained::retain(error).unwrap() };
             Err(error.localizedDescription().to_string())
         } else {
             Err("screenshot failed".to_string())

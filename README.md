@@ -37,8 +37,12 @@ git clone https://github.com/yuxino/kiri.git
 cd kiri
 pnpm install
 cargo test --manifest-path src-tauri/Cargo.toml
-./scripts/package-app.sh
+pnpm tauri build --no-bundle   # or ./scripts/package-app.sh for installers
 ```
+
+> Running the binary produced by a plain `cargo build` shows a blank window:
+> the frontend assets are only embedded when building through `pnpm tauri
+> build` (or `pnpm tauri dev` for development).
 
 macOS packaging also requires Xcode Command Line Tools.
 

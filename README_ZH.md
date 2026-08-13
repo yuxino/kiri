@@ -37,8 +37,11 @@ git clone https://github.com/yuxino/kiri.git
 cd kiri
 pnpm install
 cargo test --manifest-path src-tauri/Cargo.toml
-./scripts/package-app.sh
+pnpm tauri build --no-bundle   # 或 ./scripts/package-app.sh 生成安装包
 ```
+
+> 注意:直接 `cargo build` 出的二进制打开会是空白窗口——前端资源只在
+> `pnpm tauri build`(或开发用的 `pnpm tauri dev`)时才会嵌入。
 
 macOS 打包还需要 Xcode 命令行工具。
 
