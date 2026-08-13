@@ -1,0 +1,173 @@
+/*
+ * Kiri design system — port of KiriDesignSystem.swift / CaptureUIStyle.swift
+ * (docs/adr/0004-kawaii-professional-visual-system.md).
+ * Values are pt-accurate; HEX approximations from the migration spec.
+ */
+
+:root {
+  /* Core palette (CaptureUIColors) */
+  --kiri-accent: #7d69f5;
+  --kiri-accent-strong: #634fdb;
+  --kiri-accent-soft: #ab94ff;
+  --kiri-blossom: #ff80a8;
+  --kiri-coral: #ff80a8;
+  --kiri-cyan: #4fbff0;
+
+  /* Light scheme */
+  --kiri-canvas: #ffffff;
+  --kiri-card: #ffffff;
+  --kiri-elevated: #ffffff;
+  --kiri-surface-border: #e5dff0;
+  --kiri-group-fill: #f3eff9;
+  --kiri-label: #1c1a24;
+  --kiri-secondary-label: #5b5666;
+  --kiri-disabled-label: #a29dac;
+
+  /* Dark scheme */
+  --kiri-canvas-dark: #15131d;
+  --kiri-card-dark: #1e1b28;
+  --kiri-elevated-dark: #282334;
+  --kiri-surface-border-dark: #40394e;
+  --kiri-group-fill-dark: #302a3d;
+  --kiri-label-dark: #f4f2f8;
+  --kiri-secondary-label-dark: #b7b2c2;
+  --kiri-disabled-label-dark: #6f6a7c;
+
+  /* Semantics */
+  --kiri-accent-soft-alpha-10: rgba(125, 105, 245, 0.1);
+  --kiri-accent-alpha-18: rgba(125, 105, 245, 0.18);
+  --kiri-accent-alpha-32: rgba(125, 105, 245, 0.32);
+  --kiri-accent-alpha-92: rgba(125, 105, 245, 0.92);
+  --kiri-white-alpha-14: rgba(255, 255, 255, 0.14);
+  --kiri-white-alpha-16: rgba(255, 255, 255, 0.16);
+  --kiri-white-alpha-22: rgba(255, 255, 255, 0.22);
+  --kiri-white-alpha-24: rgba(255, 255, 255, 0.24);
+  --kiri-white-alpha-92: rgba(255, 255, 255, 0.92);
+  --kiri-white-alpha-96: rgba(255, 255, 255, 0.96);
+  --kiri-black-alpha-76: rgba(0, 0, 0, 0.76);
+  --kiri-black-alpha-18: rgba(0, 0, 0, 0.18);
+
+  /* Spacing */
+  --kiri-space-tight: 6px;
+  --kiri-space-compact: 10px;
+  --kiri-space-standard: 14px;
+  --kiri-space-roomy: 20px;
+  --kiri-space-page: 24px;
+
+  /* Radii */
+  --kiri-radius-control: 11px;
+  --kiri-radius-badge: 9px;
+  --kiri-radius-preview: 14px;
+  --kiri-radius-card: 18px;
+  --kiri-radius-surface: 24px;
+
+  /* Motion */
+  --kiri-motion-hover: 0.14s;
+  --kiri-motion-feedback: 0.2s;
+
+  /* Typography */
+  --kiri-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+
+  /* Gradients */
+  --kiri-brand-gradient: linear-gradient(
+    135deg,
+    var(--kiri-accent-strong) 0%,
+    var(--kiri-accent) 55%,
+    var(--kiri-cyan) 100%
+  );
+  --kiri-warm-gradient: linear-gradient(
+    135deg,
+    var(--kiri-coral) 0%,
+    var(--kiri-accent) 100%
+  );
+
+  /* Annotation color presets */
+  --kiri-annotation-violet: #7d69f5;
+  --kiri-annotation-cherry: #fa476e;
+  --kiri-annotation-orange: #ff7d2e;
+  --kiri-annotation-yellow: #ffd129;
+  --kiri-annotation-mint: #29c78f;
+  --kiri-annotation-blue: #2994ff;
+  --kiri-annotation-white: #ffffff;
+  --kiri-annotation-black: #141414;
+}
+
+/* Editor/capture surfaces are always dark (darkAqua forced in the original). */
+.kiri-dark {
+  --kiri-canvas: var(--kiri-canvas-dark);
+  --kiri-card: var(--kiri-card-dark);
+  --kiri-elevated: var(--kiri-elevated-dark);
+  --kiri-surface-border: var(--kiri-surface-border-dark);
+  --kiri-group-fill: var(--kiri-group-fill-dark);
+  --kiri-label: var(--kiri-label-dark);
+  --kiri-secondary-label: var(--kiri-secondary-label-dark);
+  --kiri-disabled-label: var(--kiri-disabled-label-dark);
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--kiri-font-ui);
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.kiri-canvas-surface {
+  background: var(--kiri-canvas);
+  color: var(--kiri-label);
+}
+
+/* HUD material used by capture overlays (dark, translucent). */
+.kiri-hud {
+  background: rgba(30, 27, 40, 0.86);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--kiri-white-alpha-14);
+  border-radius: 13px;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
+  color: #ffffff;
+}
+
+.kiri-primary-button {
+  font: 600 12.5px var(--kiri-font-ui);
+  color: #ffffff;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: var(--kiri-radius-control);
+  background: var(--kiri-brand-gradient);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 10px rgba(125, 105, 245, 0.24);
+  cursor: default;
+  transition:
+    transform var(--kiri-motion-hover) ease-out,
+    box-shadow var(--kiri-motion-hover) ease-out,
+    filter var(--kiri-motion-hover) ease-out,
+    opacity var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-primary-button:active {
+  transform: scale(0.97);
+  box-shadow: 0 1px 4px rgba(125, 105, 245, 0.12);
+}
+
+.kiri-primary-button:disabled {
+  filter: saturate(0.18);
+  opacity: 0.48;
+}
+
+input,
+textarea {
+  font-family: var(--kiri-font-ui);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+*:focus {
+  outline: none;
+}

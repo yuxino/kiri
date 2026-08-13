@@ -1,7 +1,20 @@
+# macOS
 .DS_Store
 .build/
-dist/
 *.xcodeproj/
 *.xcworkspace/
 xcuserdata/
 
+# Node
+node_modules/
+dist/
+.pnpm-store/
+
+# Rust
+src-tauri/target/
+src-tauri/gen/schemas/
+.cargo/
+
+# IDE
+.idea/
+*.swp
