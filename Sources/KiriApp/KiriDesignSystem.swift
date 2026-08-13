@@ -61,6 +61,7 @@ enum KiriUI {
     )
 }
 
+@MainActor
 private enum KiriBrandArtwork {
     static let image: NSImage? = {
         if let path = ProcessInfo.processInfo.environment["KIRI_BRAND_ICON_PATH"],
