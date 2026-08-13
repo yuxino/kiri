@@ -481,6 +481,6 @@ mod tests {
             .take(5)
             .collect::<Vec<_>>()
             .join("-");
-        assert!(uuid_part.chars().all(|c| c.is_ascii_lowercase() || c == '-'));
+        assert!(uuid_part.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
     }
 }

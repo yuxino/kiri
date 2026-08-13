@@ -193,7 +193,7 @@ impl ClickMonitorHandle for ClickMonitor {
 
 pub fn start_click_monitor(
     callback: Arc<dyn Fn(f64, f64) + Send + Sync>,
-) -> Result<Box<dyn ClickMonitorHandle>> {
+) -> Result<Box<dyn ClickMonitorHandle + Send>> {
     let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flag = stop_flag.clone();
     let thread = thread::spawn(move || {
@@ -207,7 +207,7 @@ pub fn start_click_monitor(
             NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown,
             &block,
         );
-        let run_loop = CFRunLoop::current().expect("no run loop");
+        let _run_loop = CFRunLoop::current().expect("no run loop");
         while !flag.load(std::sync::atomic::Ordering::SeqCst) {
             unsafe { CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, 0.1, true) };
         }

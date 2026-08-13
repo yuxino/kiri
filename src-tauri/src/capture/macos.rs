@@ -4,11 +4,11 @@
 use std::sync::mpsc;
 use std::sync::OnceLock;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, Result};
 use block2::RcBlock;
 use objc2::msg_send;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
+use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2::{AnyThread, DefinedClass};
 use objc2_app_kit::{NSEvent, NSScreen, NSBitmapImageRep};
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
@@ -22,9 +22,9 @@ use objc2_core_video::{
     CVPixelBufferGetWidth, CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags,
     CVPixelBufferUnlockBaseAddress,
 };
-use objc2_foundation::{NSArray, NSData, NSDictionary, NSNumber, NSString, NSError, NSObject};
+use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSError, NSObject};
 use objc2_screen_capture_kit::{
-    SCContentFilter, SCDisplay, SCScreenshotConfiguration, SCScreenshotManager, SCShareableContent,
+    SCContentFilter, SCDisplay, SCScreenshotManager, SCShareableContent,
     SCStream, SCStreamConfiguration, SCStreamDelegate, SCStreamOutput, SCStreamOutputType,
     SCWindow,
 };

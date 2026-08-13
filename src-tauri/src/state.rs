@@ -41,8 +41,26 @@ pub struct CaptureSession {
     pub overlay_labels: Vec<String>,
 }
 
-#[derive(Default)]
+impl Default for RecordingFlow {
+    fn default() -> Self {
+        Self {
+            click_monitor: None,
+            is_starting: false,
+            is_recording: false,
+            is_paused: false,
+            is_transitioning: false,
+            is_finalizing: false,
+            elapsed_before_segment: 0.0,
+            started_at: None,
+            segments: Vec::new(),
+            configuration: None,
+            active: None,
+        }
+    }
+}
+
 pub struct RecordingFlow {
+    pub click_monitor: Option<Box<dyn crate::platform::ClickMonitorHandle + Send>>,
     pub is_starting: bool,
     pub is_recording: bool,
     pub is_paused: bool,
@@ -67,6 +85,15 @@ pub struct RecordingConfiguration {
 pub struct ActiveRecording {
     pub encoder: Option<SegmentEncoder>,
     pub recorder: Option<Box<dyn PlatformRecorder + Send>>,
+}
+
+impl Default for ActiveRecording {
+    fn default() -> Self {
+        Self {
+            encoder: None,
+            recorder: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -107,7 +134,7 @@ pub enum RecoveryAction {
 }
 
 impl AppState {
-    pub fn new(app: &AppHandle) -> anyhow::Result<Self> {
+    pub fn new(_app: &AppHandle) -> anyhow::Result<Self> {
         let (library, root) = open_library()?;
         Ok(Self {
             library: std::sync::Mutex::new(library),

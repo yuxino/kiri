@@ -68,7 +68,7 @@ pub fn ffmpeg_binary(resource_dir: Option<PathBuf>) -> PathBuf {
         }
     }
     if let Some(resource_dir) = resource_dir {
-        let candidate = resource_dir.join(binary_name());
+        let candidate = resource_dir.join("ffmpeg-current").join(binary_name());
         if candidate.exists() {
             return candidate;
         }
@@ -262,11 +262,11 @@ impl SegmentEncoder {
         // Replace stdin/stdout with the OS pipes.
         let (video_rx_pipe, video_tx_pipe) = os_pipe::pipe()?;
         command.stdin(video_rx_pipe);
-        if let Some((audio_rx_pipe, audio_tx_pipe)) = &audio_pipe {
+        if let Some((_audio_rx_pipe, audio_tx_pipe)) = &audio_pipe {
             command.stdout(audio_tx_pipe.try_clone()?);
         }
 
-        let mut child = command.spawn().context("failed to start ffmpeg")?;
+        let child = command.spawn().context("failed to start ffmpeg")?;
         let mut writers = Vec::new();
 
         let spawn_writer = |rx: mpsc::Receiver<Vec<u8>>, mut writer: os_pipe::PipeWriter| {

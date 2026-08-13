@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -757,6 +758,34 @@ fn create_ripple_window(
     Ok(())
 }
 
+/// Converts platform-native global mouse coordinates to global top-left
+/// points: macOS delivers Quartz bottom-left points, Windows delivers
+/// physical pixels (top-left).
+fn normalize_global_point(x: f64, y: f64, scale: f64, main_height: f64) -> (f64, f64) {
+    #[cfg(target_os = "macos")]
+    {
+        // Quartz bottom-left points → top-left points.
+        (x, main_height - y)
+    }
+    #[cfg(windows)]
+    {
+        let _ = main_height;
+        (x / scale, y / scale)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn main_screen_height_points() -> f64 {
+    use objc2_app_kit::NSScreen;
+    let mtm = objc2::MainThreadMarker::new().unwrap();
+    NSScreen::mainScreen(mtm)
+        .map(|s| {
+            let frame = s.frame();
+            frame.origin.y + frame.size.height
+        })
+        .unwrap_or(0.0)
+}
+
 fn start_recorder(
     app: &AppHandle,
     configuration: &RecordingConfiguration,
@@ -847,6 +876,27 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
     create_control_panel(&app)?;
     if configuration.options.highlights_clicks {
         create_ripple_window(&app, &configuration)?;
+        // Install the global click monitor; platform callbacks deliver
+        // platform-native coordinates that we normalize to region-local
+        // points before forwarding to the ripple window.
+        let region = configuration.region;
+        let scale = configuration.backing_scale;
+        let main_height = main_screen_height_points();
+        let app_handle = app.clone();
+        let click_monitor = platform::start_click_monitor(Arc::new(move |x, y| {
+            let (gx, gy) = normalize_global_point(x, y, scale, main_height);
+            let payload = serde_json::json!({
+                "x": gx - region.x,
+                "y": gy - region.y,
+            });
+            let _ = app_handle.emit("ripple-click", payload);
+        }))
+        .ok();
+        {
+            let state = app.state::<AppState>();
+            let mut recording = state.recording.lock().unwrap();
+            recording.click_monitor = click_monitor;
+        }
     }
 
     let out_path = std::env::temp_dir().join(format!(

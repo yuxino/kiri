@@ -1,7 +1,10 @@
 //! Cross-platform helpers: clipboard, focus, file reveal, global click
 //! monitoring, and capture-exclusion of Kiri's own windows.
 
+#[cfg(target_os = "macos")]
 pub mod macos;
+
+#[cfg(windows)]
 pub mod windows;
 
 #[cfg(target_os = "macos")]
@@ -13,7 +16,7 @@ pub use windows as current;
 use std::path::Path;
 use std::sync::Arc;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 
 /// Writes PNG bytes to the system clipboard as an image.
 pub fn write_image_to_clipboard(png: &[u8]) -> Result<()> {
@@ -59,11 +62,11 @@ pub fn frontmost_application() -> Option<(u32, Option<String>)> {
 /// top-left-oriented coordinates.
 pub fn start_click_monitor(
     callback: Arc<dyn Fn(f64, f64) + Send + Sync>,
-) -> Result<Box<dyn ClickMonitorHandle>> {
+) -> Result<Box<dyn ClickMonitorHandle + Send>> {
     current::start_click_monitor(callback)
 }
 
-pub trait ClickMonitorHandle: Send {
+pub trait ClickMonitorHandle: Send + Sync {
     fn stop(self: Box<Self>);
 }
 

@@ -156,9 +156,10 @@ mod tests {
             trashed_at: None,
         };
         let json = serde_json::to_string(&asset).unwrap();
-        assert!(json.contains("\"id\":\""), "{json}");
-        assert!(json.contains("\"createdAt\":1.700000000123e12"));
-        assert!(!json.contains("sourceApplication"), "{json}");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["createdAt"], serde_json::json!(1_700_000_000_123.0));
+        assert!(parsed.get("sourceApplication").is_none(), "{json}");
+        assert!(parsed["id"].as_str().unwrap().chars().all(|c| c.is_ascii_uppercase() || c == '-' || c.is_ascii_digit()));
         let decoded: CaptureAsset = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, asset);
     }

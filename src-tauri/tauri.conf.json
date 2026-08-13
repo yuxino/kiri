@@ -49,6 +49,9 @@
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
       }
+    },
+    "resources": {
+      "binaries/ffmpeg-current/": "ffmpeg-current/"
     }
   }
 }

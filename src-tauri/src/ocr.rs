@@ -61,6 +61,57 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
 }
 
 #[cfg(windows)]
-pub fn recognize_text(_png: &[u8]) -> Result<String> {
-    anyhow::bail!("Windows OCR not implemented yet")
+pub fn recognize_text(png: &[u8]) -> Result<String> {
+    use windows::core::Interface;
+    use windows::Graphics::Imaging::BitmapPixelFormat;
+    use windows::Media::Ocr::OcrEngine;
+    use windows::Storage::Streams::Buffer;
+
+    let image = image::load_from_memory(png).map_err(|error| anyhow!("{error}"))?;
+    let rgba = image.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let raw = rgba.into_raw();
+
+    let buffer = Buffer::Create(raw.len() as u32).map_err(|error| anyhow!("{error}"))?;
+    unsafe {
+        let target = buffer.as_mut().ok_or_else(|| anyhow!("buffer unavailable"))?;
+        std::ptr::copy_nonoverlapping(raw.as_ptr(), target.as_mut_ptr() as *mut u8, raw.len());
+    }
+    buffer
+        .SetLength(raw.len() as u32)
+        .map_err(|error| anyhow!("{error}"))?;
+    let bitmap: windows::Graphics::Imaging::SoftwareBitmap =
+        windows::Graphics::Imaging::SoftwareBitmap::CreateCopyFromBuffer(
+            &buffer,
+            BitmapPixelFormat::Rgba8,
+            width as i32,
+            height as i32,
+        )
+        .map_err(|error| anyhow!("{error}"))?;
+
+    let engine =
+        OcrEngine::TryCreateFromUserProfileLanguages().map_err(|error| anyhow!("{error}"))?;
+    let operation = engine
+        .RecognizeAsync(&bitmap)
+        .map_err(|error| anyhow!("{error}"))?;
+    let result = operation.get().map_err(|error| anyhow!("{error}"))?;
+
+    let mut lines = Vec::new();
+    let ocr_lines = result.Lines().map_err(|error| anyhow!("{error}"))?;
+    for line in ocr_lines {
+        lines.push(line.Text().map_err(|error| anyhow!("{error}"))?.to_string());
+    }
+    let text = lines.join("\n");
+    if text.trim().is_empty() {
+        Err(anyhow!("No Text Found"))
+    } else {
+        Ok(text)
+    }
+}
+
+#[cfg(windows)]
+mod windows_ocr {
+    // Windows.Media.Ocr implementation (compiled on Windows builds).
+    #[allow(dead_code)]
+    pub fn _unused() {}
 }

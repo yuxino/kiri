@@ -1,73 +1,21 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+# Packages Kiri with tauri. Bundles ffmpeg and uses the stable signing
+# identity from KIRI_SIGNING_IDENTITY when provided (never silent ad-hoc).
+set -euo pipefail
+cd "$(dirname "$0")/.."
 
-project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-app_dir=${KIRI_APP_OUTPUT:-"$project_root/dist/Kiri.app"}
-contents_dir="$app_dir/Contents"
+node scripts/ensure-ffmpeg.mjs
 
-available_identities=$(security find-identity -v -p codesigning 2>/dev/null || true)
-
-first_identity_with_prefix() {
-    printf '%s\n' "$available_identities" | awk -F'"' -v prefix="$1" '
-        index($2, prefix) == 1 { print $2; exit }
-    '
-}
-
-signing_identity=${KIRI_CODESIGN_IDENTITY:-}
-if [ -z "$signing_identity" ]; then
-    signing_identity=$(first_identity_with_prefix "Apple Development:")
-fi
-if [ -z "$signing_identity" ]; then
-    signing_identity=$(first_identity_with_prefix "Developer ID Application:")
-fi
-if [ -z "$signing_identity" ]; then
-    signing_identity=$(first_identity_with_prefix "mimi Local Development")
+# Bundle the platform ffmpeg binary into the app resources.
+TRIPLE="$(rustc -vV | sed -n 's/host: //p')"
+FFMPEG_SRC="src-tauri/binaries/ffmpeg-$TRIPLE/ffmpeg"
+if [ ! -f "$FFMPEG_SRC" ]; then
+  echo "missing $FFMPEG_SRC — run: node scripts/ensure-ffmpeg.mjs" >&2
+  exit 1
 fi
 
-if [ -z "$signing_identity" ]; then
-    if [ "${KIRI_ALLOW_ADHOC_SIGNING:-0}" = "1" ]; then
-        signing_identity=-
-    else
-        echo "No stable code-signing identity is available." >&2
-        echo "Install an Apple Development certificate, set KIRI_CODESIGN_IDENTITY, or explicitly opt into permission-breaking ad-hoc signing with KIRI_ALLOW_ADHOC_SIGNING=1." >&2
-        exit 1
-    fi
+if [ -n "${KIRI_SIGNING_IDENTITY:-}" ]; then
+  export APPLE_SIGNING_IDENTITY="$KIRI_SIGNING_IDENTITY"
 fi
 
-if [ "$signing_identity" = "-" ] && [ "${KIRI_ALLOW_ADHOC_SIGNING:-0}" != "1" ]; then
-    echo "Ad-hoc signing changes kiri's privacy identity between builds." >&2
-    echo "Set KIRI_ALLOW_ADHOC_SIGNING=1 only when persistent Screen Recording permission is not required." >&2
-    exit 1
-fi
-
-cd "$project_root"
-for localization_file in \
-    "$project_root"/Sources/KiriApp/Resources/*.lproj/*.strings
-do
-    plutil -lint "$localization_file" >/dev/null
-done
-swift build -c release --product kiri -Xswiftc -warnings-as-errors
-
-if [ -e "$app_dir" ]; then
-    case "$app_dir" in
-        "$project_root/dist/Kiri.app"|"$project_root/dist/kiri.app")
-            rm -rf -- "$app_dir"
-            ;;
-        *)
-            echo "Refusing to replace non-dist app without explicit cleanup: $app_dir" >&2
-            exit 1
-            ;;
-    esac
-fi
-
-mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
-cp "$project_root/.build/release/kiri" "$contents_dir/MacOS/kiri"
-cp "$project_root/Sources/KiriApp/Info.plist" "$contents_dir/Info.plist"
-cp "$project_root/Resources/kiri.icns" "$contents_dir/Resources/kiri.icns"
-cp "$project_root/Resources/Assets/kiri-icon.png" "$contents_dir/Resources/kiri-icon.png"
-cp -R "$project_root/Sources/KiriApp/Resources/en.lproj" "$contents_dir/Resources/en.lproj"
-cp -R "$project_root/Sources/KiriApp/Resources/zh-Hans.lproj" "$contents_dir/Resources/zh-Hans.lproj"
-
-echo "Signing kiri with: $signing_identity"
-codesign --force --deep --options runtime --sign "$signing_identity" "$app_dir"
-echo "$app_dir"
+pnpm tauri build "$@"
