@@ -79,7 +79,8 @@ fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
         // Runs on the CGEventTap callback thread; dispatch to the main thread
         // so AppKit/SCK calls stay on the main thread.
         let handle = handle.clone();
-        let _ = handle.run_on_main_thread(move || {
+        let trigger = handle.clone();
+        let _ = trigger.run_on_main_thread(move || {
             let _ = commands::start_capture(handle);
         });
     }));

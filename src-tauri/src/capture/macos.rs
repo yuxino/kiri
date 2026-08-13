@@ -278,12 +278,15 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
     let own_process_id = std::process::id() as i32;
     let filter = make_filter(&content, &display, own_process_id, &[]);
 
-    let configuration = SCStreamConfiguration::new();
-    let width = ((unsafe { display.width() } as f64) * screen.backing_scale).round().max(1.0) as i64;
-    let height = ((unsafe { display.height() } as f64) * screen.backing_scale).round().max(1.0) as i64;
-    configuration.setWidth(width as usize);
-    configuration.setHeight(height as usize);
-    configuration.setShowsCursor(false);
+    let configuration = unsafe {
+        let configuration = SCStreamConfiguration::new();
+        let width = ((display.width() as f64) * screen.backing_scale).round().max(1.0) as i64;
+        let height = ((display.height() as f64) * screen.backing_scale).round().max(1.0) as i64;
+        configuration.setWidth(width as usize);
+        configuration.setHeight(height as usize);
+        configuration.setShowsCursor(false);
+        configuration
+    };
 
     let (tx, rx) = mpsc::channel::<std::result::Result<Retained<CGImage>, String>>();
     let block = RcBlock::new(move |image: *mut CGImage, error: *mut NSError| {
@@ -389,40 +392,43 @@ impl MacRecordingSession {
         let (result_tx, result_rx) = mpsc::channel::<Result<()>>();
         // Transfer ownership across the thread boundary via a raw pointer;
         // the recorder thread owns the filter exclusively afterwards.
-        let filter_ptr = Retained::into_raw(filter);
+        let filter_ptr = Retained::into_raw(filter) as usize;
 
         let thread = std::thread::spawn(move || {
-            let filter = unsafe { Retained::from_raw(filter_ptr) };
-            let configuration = SCStreamConfiguration::new();
-            // SCK sourceRect is display-local, top-left origin, in points.
-            configuration.setSourceRect(CGRect {
-                origin: CGPoint {
-                    x: region.x,
-                    y: region.y,
-                },
-                size: CGSize {
-                    width: region.width,
-                    height: region.height,
-                },
-            });
-            configuration.setWidth(width as usize);
-            configuration.setHeight(height as usize);
-            configuration.setMinimumFrameInterval(CMTime {
-                value: 1,
-                timescale: crate::core::policy::RecordingPolicy::FRAMES_PER_SECOND as i32,
-                flags: objc2_core_media::CMTimeFlags(1),
-                epoch: 0,
-            });
-            configuration.setQueueDepth(6);
-            configuration.setPixelFormat(0x4247_5241); // kCVPixelFormatType_32BGRA
-            configuration.setCaptureResolution(objc2_screen_capture_kit::SCCaptureResolutionType::Best);
-            configuration.setScalesToFit(false);
-            configuration.setShowsCursor(options.shows_cursor);
-            configuration.setShowMouseClicks(false);
-            configuration.setCapturesAudio(options.captures_system_audio);
-            configuration.setExcludesCurrentProcessAudio(true);
-            configuration.setSampleRate(48_000);
-            configuration.setChannelCount(2);
+            let filter = unsafe { Retained::from_raw(filter_ptr as *mut SCContentFilter).unwrap() };
+            let configuration = unsafe {
+                let configuration = SCStreamConfiguration::new();
+                // SCK sourceRect is display-local, top-left origin, in points.
+                configuration.setSourceRect(CGRect {
+                    origin: CGPoint {
+                        x: region.x,
+                        y: region.y,
+                    },
+                    size: CGSize {
+                        width: region.width,
+                        height: region.height,
+                    },
+                });
+                configuration.setWidth(width as usize);
+                configuration.setHeight(height as usize);
+                configuration.setMinimumFrameInterval(CMTime {
+                    value: 1,
+                    timescale: crate::core::policy::RecordingPolicy::FRAMES_PER_SECOND as i32,
+                    flags: objc2_core_media::CMTimeFlags(1),
+                    epoch: 0,
+                });
+                configuration.setQueueDepth(6);
+                configuration.setPixelFormat(0x4247_5241); // kCVPixelFormatType_32BGRA
+                configuration.setCaptureResolution(objc2_screen_capture_kit::SCCaptureResolutionType::Best);
+                configuration.setScalesToFit(false);
+                configuration.setShowsCursor(options.shows_cursor);
+                configuration.setShowMouseClicks(false);
+                configuration.setCapturesAudio(options.captures_system_audio);
+                configuration.setExcludesCurrentProcessAudio(true);
+                configuration.setSampleRate(48_000);
+                configuration.setChannelCount(2);
+                configuration
+            };
 
             let state = DelegateState {
                 video_tx,
@@ -519,7 +525,7 @@ fn start_capture_sync(stream: &SCStream) -> Result<()> {
         let _ = tx.send(result);
     });
     let block_ref: &block2::Block<dyn Fn(*mut NSError)> = &block;
-    stream.startCaptureWithCompletionHandler(Some(block_ref));
+    unsafe { stream.startCaptureWithCompletionHandler(Some(block_ref)) };
     rx.recv()
         .map_err(|_| anyhow!("start capture callback dropped"))?
         .map_err(|message| anyhow!(message))
@@ -537,7 +543,7 @@ fn stop_capture_sync(stream: &SCStream) -> Result<()> {
         let _ = tx.send(result);
     });
     let block_ref: &block2::Block<dyn Fn(*mut NSError)> = &block;
-    stream.stopCaptureWithCompletionHandler(Some(block_ref));
+    unsafe { stream.stopCaptureWithCompletionHandler(Some(block_ref)) };
     rx.recv()
         .map_err(|_| anyhow!("stop capture callback dropped"))?
         .map_err(|message| anyhow!(message))
@@ -548,7 +554,7 @@ fn stop_capture_sync(stream: &SCStream) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn audio_format_from(buffer: &CMSampleBuffer) -> Option<AudioFormat> {
-    let desc: CFRetained<CMFormatDescription> = buffer.format_description()?;
+    let desc: CFRetained<CMFormatDescription> = unsafe { buffer.format_description() }?;
     let asbd = unsafe { CMAudioFormatDescriptionGetStreamBasicDescription(&desc) };
     if asbd.is_null() {
         return None;
@@ -566,7 +572,7 @@ fn audio_format_from(buffer: &CMSampleBuffer) -> Option<AudioFormat> {
 }
 
 fn copy_pixel_buffer(buffer: &CMSampleBuffer) -> Option<Vec<u8>> {
-    let pixel_buffer: CFRetained<CVPixelBuffer> = buffer.image_buffer()?;
+    let pixel_buffer: CFRetained<CVPixelBuffer> = unsafe { buffer.image_buffer() }?;
     let pixel_buffer_ref: &CVPixelBuffer = &pixel_buffer;
     unsafe { CVPixelBufferLockBaseAddress(pixel_buffer_ref, CVPixelBufferLockFlags::ReadOnly) };
     let result = unsafe {
@@ -590,13 +596,11 @@ fn copy_pixel_buffer(buffer: &CMSampleBuffer) -> Option<Vec<u8>> {
 }
 
 fn copy_audio_buffer(buffer: &CMSampleBuffer) -> Option<Vec<u8>> {
-    let block: CFRetained<CMBlockBuffer> = buffer.data_buffer()?;
+    let block: CFRetained<CMBlockBuffer> = unsafe { buffer.data_buffer() }?;
     let mut data_ptr: *mut std::ffi::c_char = std::ptr::null_mut();
     let mut length = 0usize;
     let mut total = 0usize;
-    let status = unsafe {
-        block.data_pointer(0, &mut length, &mut total, &mut data_ptr)
-    };
+    let status = unsafe { block.data_pointer(0, &mut length, &mut total, &mut data_ptr) };
     if status != 0 || data_ptr.is_null() || length == 0 {
         return None;
     }
@@ -615,7 +619,7 @@ fn deinterleave_f32(planar: &[u8], channels: u32, _format: AudioFormat) -> Vec<u
     interleaved
 }
 
-struct KiriStreamDelegateIvars {
+pub struct KiriStreamDelegateIvars {
     state: usize,
 }
 
@@ -636,7 +640,7 @@ objc2::define_class!(
             buffer: &CMSampleBuffer,
             of_type: SCStreamOutputType,
         ) {
-            if !buffer.data_is_ready() {
+            if !unsafe { buffer.data_is_ready() } {
                 return;
             }
             let state = unsafe { &*(self.ivars().state as *const DelegateState) };

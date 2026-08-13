@@ -1142,8 +1142,12 @@ pub fn quit_app(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_recording_options(app: AppHandle) -> Result<RecordingOptions, String> {
-    let state = app.state::<AppState>();
-    Ok(*state.saved_recording_options.lock().unwrap())
+    let options = {
+        let state = app.state::<AppState>();
+        let guard = state.saved_recording_options.lock().unwrap();
+        *guard
+    };
+    Ok(options)
 }
 
 #[tauri::command]

@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 
 #[cfg(target_os = "macos")]
 pub fn recognize_text(png: &[u8]) -> Result<String> {
+    use objc2::rc::Retained;
     use objc2::AnyThread;
     use objc2_foundation::{NSArray, NSData, NSDictionary, NSString};
     use objc2_vision::{
@@ -32,8 +33,8 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
     let languages = NSArray::from_slice(&[&*zh_hans, &*zh_hant, &*en_us, &*ja_jp]);
     request.setRecognitionLanguages(&languages);
 
-    let request_ref = request.as_super();
-    let requests: objc2_foundation::Retained<NSArray<objc2_vision::VNRequest>> =
+    let request_ref: &objc2_vision::VNRequest = &*request;
+    let requests: Retained<NSArray<objc2_vision::VNRequest>> =
         NSArray::from_slice(&[request_ref]);
     let result = unsafe { handler.performRequests_error(&requests) };
     if result.is_err() {

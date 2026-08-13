@@ -162,7 +162,7 @@ pub fn start_shortcut(action: Box<dyn Fn() + Send>) -> Result<ShortcutHandle> {
     let source = CFMachPort::new_run_loop_source(None, Some(&event_tap), 0)
         .ok_or_else(|| anyhow!("could not create run loop source"))?;
     let run_loop = CFRunLoop::current().ok_or_else(|| anyhow!("no run loop"))?;
-    run_loop.add_source(Some(&source), kCFRunLoopDefaultMode);
+    unsafe { run_loop.add_source(Some(&source), kCFRunLoopDefaultMode) };
     unsafe { CGEvent::tap_enable(&event_tap, true) };
 
     let thread = thread::spawn(move || CFRunLoop::run());
@@ -209,7 +209,7 @@ pub fn start_click_monitor(
         );
         let run_loop = CFRunLoop::current().expect("no run loop");
         while !flag.load(std::sync::atomic::Ordering::SeqCst) {
-            CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, 0.1, true);
+            unsafe { CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, 0.1, true) };
         }
     });
     Ok(Box::new(ClickMonitor {
