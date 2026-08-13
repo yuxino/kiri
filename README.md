@@ -1,3 +1,5 @@
+
+
 <div align="center">
   <img src="Resources/Assets/kiri-icon.png" width="112" alt="kiri app icon">
   <h1>kiri</h1>
@@ -102,6 +104,7 @@ Kiri 每次运行最多调用一次系统授权请求；如果权限尚未生效
 - **V**：切回鼠标工具，选择、移动或调整已有标注；双击文字可重新编辑
 - **P / R / L / A / T / M**：画笔、矩形、直线、箭头、文字、马赛克
 - **Delete**：删除鼠标工具当前选中的标注
+- **⌘F**：聚焦素材库搜索
 - **⌘Z / ⇧⌘Z**：撤销 / 重做
 
 ## 文字识别
