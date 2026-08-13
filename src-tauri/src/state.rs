@@ -45,6 +45,8 @@ impl Default for RecordingFlow {
     fn default() -> Self {
         Self {
             click_monitor: None,
+            return_pid: None,
+            was_kiri_frontmost: false,
             is_starting: false,
             is_recording: false,
             is_paused: false,
@@ -61,6 +63,9 @@ impl Default for RecordingFlow {
 
 pub struct RecordingFlow {
     pub click_monitor: Option<Box<dyn crate::platform::ClickMonitorHandle + Send>>,
+    /// PID of the app that was frontmost before capture (focus restoration).
+    pub return_pid: Option<u32>,
+    pub was_kiri_frontmost: bool,
     pub is_starting: bool,
     pub is_recording: bool,
     pub is_paused: bool,

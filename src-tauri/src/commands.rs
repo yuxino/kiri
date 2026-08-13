@@ -300,8 +300,19 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
     {
         let state = app.state::<AppState>();
         let capture = state.capture.lock().unwrap();
-        if capture.session.is_some() {
-            return Err("A capture session is already active.".into());
+        // The overlay frontend calls start_capture again when it loads; return
+        // the existing session context instead of failing.
+        if let Some(session) = capture.session.as_ref() {
+            let display = &session.display;
+            return Ok(CaptureContextDto {
+                display_width: display.screen_frame.width,
+                display_height: display.screen_frame.height,
+                scale: display.backing_scale,
+                pixel_width: display.pixel_width,
+                pixel_height: display.pixel_height,
+                window_rects: display.window_rects.iter().map(RectDto::from).collect(),
+                source_application: session.source_application.clone(),
+            });
         }
         let recording = state.recording.lock().unwrap();
         if recording.is_recording
@@ -633,7 +644,7 @@ pub struct StartRecordingRequest {
 
 #[tauri::command]
 pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> Result<(), String> {
-    let (display_id, backing_scale, screen_frame) = {
+    let (display_id, backing_scale, screen_frame, return_pid, was_kiri_frontmost) = {
         let state = app.state::<AppState>();
         let mut capture = state.capture.lock().unwrap();
         let Some(session) = capture.session.take() else {
@@ -648,8 +659,17 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
             session.display.display_id,
             session.display.backing_scale,
             session.display.screen_frame,
+            session.return_pid,
+            session.was_kiri_frontmost,
         )
     };
+
+    // Restore focus to the source application (mirrors AppModel.onRecord).
+    if !was_kiri_frontmost {
+        if let Some(pid) = return_pid {
+            platform::activate_application(pid);
+        }
+    }
 
     let options = request.options.normalized();
     crate::state::save_recording_options(&app, &options);
@@ -658,6 +678,8 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
         *recording = RecordingFlow {
+            return_pid,
+            was_kiri_frontmost,
             is_starting: true,
             configuration: Some(RecordingConfiguration {
                 display_id,
@@ -1122,6 +1144,17 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         match result {
             Ok(()) => emit_notice(&handle, "Recording Saved".into(), "video.fill".into()),
             Err(error) => emit_error(&handle, error, None),
+        }
+        // Restore focus to the source application after the recording ends.
+        let (return_pid, was_kiri_frontmost) = {
+            let state = handle.state::<AppState>();
+            let recording = state.recording.lock().unwrap();
+            (recording.return_pid, recording.was_kiri_frontmost)
+        };
+        if !was_kiri_frontmost {
+            if let Some(pid) = return_pid {
+                platform::activate_application(pid);
+            }
         }
     });
     Ok(())

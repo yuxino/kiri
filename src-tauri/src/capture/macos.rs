@@ -237,8 +237,9 @@ fn collect_window_rects(content: &SCShareableContent, display_id: CGDirectDispla
     rects
 }
 
-fn cgimage_to_png(image: &Retained<CGImage>) -> Result<(Vec<u8>, i64, i64)> {
-    let rep = unsafe { NSBitmapImageRep::initWithCGImage(NSBitmapImageRep::alloc(), image) };
+fn cgimage_to_png(image: &CFRetained<CGImage>) -> Result<(Vec<u8>, i64, i64)> {
+    let image_ref: &CGImage = image;
+    let rep = unsafe { NSBitmapImageRep::initWithCGImage(NSBitmapImageRep::alloc(), image_ref) };
     let width = rep.pixelsWide() as i64;
     let height = rep.pixelsHigh() as i64;
     let data = unsafe {
@@ -288,10 +289,12 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         configuration
     };
 
-    let (tx, rx) = mpsc::channel::<std::result::Result<Retained<CGImage>, String>>();
+    // CGImage is a CoreFoundation object: retain with CF semantics (the
+    // handler delivers a borrowed reference).
+    let (tx, rx) = mpsc::channel::<std::result::Result<CFRetained<CGImage>, String>>();
     let block = RcBlock::new(move |image: *mut CGImage, error: *mut NSError| {
         let result = if error.is_null() && !image.is_null() {
-            Ok(unsafe { Retained::from_raw(image).unwrap() })
+            Ok(unsafe { CFRetained::retain(std::ptr::NonNull::new_unchecked(image)) })
         } else if !error.is_null() {
             let error = unsafe { Retained::from_raw(error).unwrap() };
             Err(error.localizedDescription().to_string())

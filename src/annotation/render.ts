@@ -292,7 +292,7 @@ export function renderAll(
   const region = { x: 0, y: 0, width: r.regionSize.width, height: r.regionSize.height };
 
   ctx.fillStyle = "#141414";
-  ctx.fillRect(0, 0, ctx.canvas.width / 1, ctx.canvas.height / 1);
+  ctx.fillRect(0, 0, region.width, region.height);
 
   if (r.exporting) {
     ctx.imageSmoothingEnabled = true;

@@ -24,6 +24,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("library") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .manage(protocol::ProtocolStore::new())
         .register_uri_scheme_protocol("kiri", |ctx, request| {
             protocol::handle(ctx.app_handle(), &request)
@@ -41,6 +47,16 @@ pub fn run() {
 
             register_shortcut(app.handle())?;
             Ok(())
+        })
+.on_window_event(|window, event| {
+            // The library window hides instead of closing (single-instance
+            // Dock/taskbar app); capture sessions close it programmatically.
+            if window.label() == "library" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_assets,
@@ -74,8 +90,17 @@ pub fn run() {
             commands::get_recording_options,
             commands::set_recording_options,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Reopen { .. } = event {
+                // Dock icon click (macOS): bring the library back.
+                if let Some(window) = app.get_webview_window("library") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+        });
 }
 
 #[cfg(target_os = "macos")]

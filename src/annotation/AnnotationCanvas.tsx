@@ -121,6 +121,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       if (!canvas || !sourceCanvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
       const context: RenderContext = {
         ctx,
         sourceImage: sourceCanvas,
