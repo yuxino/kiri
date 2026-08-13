@@ -1,77 +1,39 @@
-
-
 <div align="center">
   <img src="Resources/Assets/kiri-icon.png" width="112" alt="kiri app icon">
   <h1>kiri</h1>
-  <p>轻快、可找回的 macOS 截图工具</p>
+  <p>A fast, native capture workspace for macOS.</p>
   <p>
-    <strong>早期预览版</strong>
-    · <a href="README_EN.md">English</a>
+    <a href="README_ZH.md">简体中文</a>
     · <a href="README_JA.md">日本語</a>
   </p>
 </div>
 
-`kiri` 来自日语「切り取り」，意思是截取、裁切。
+`kiri` comes from the Japanese word 「切り取り」—to clip or cut out.
 
-当前图标是一位紫蓝短发、星星发夹的 Q 版少女头像，以柔和的薰衣草紫、天空蓝和蜜桃粉呼应截图取景框；GitHub README 与 macOS App 使用同一份彩色图标资源。
-
-它是一款原生 macOS 视觉捕获工具：快速截取屏幕区域并复制，也可按需添加标注，
-同时自动把结果放进本地素材库。即使剪贴板内容被覆盖，刚刚的截图仍然可以找回。
-
-## 三步完成
-
-1. 按 **⇧⌘A** 唤起 Kiri，在底部选择 **截图、录屏或文字**。
-2. 单击紫色轮廓选择窗口，或拖出精确区域；文字识别必须手动拖拽选区。
-3. 截图按 Return 复制，文字结果直接复制，录屏从设置卡片开始。
+Capture screenshots, annotate, recognize text, record regions, and keep everything in a local library. No cloud required.
 
 <p align="center">
-  <img src="Resources/Assets/kiri-library-preview.png" width="820" alt="Kiri 素材库与首次使用界面">
+  <img src="Resources/Assets/kiri-library-preview.png" width="820" alt="Kiri library">
 </p>
 
-## 核心能力
+## Features
 
-### 截图与标注
+- **Screenshots** — window or region capture with precise selection.
+- **Annotations** — pen, shapes, arrows, text, and mosaic with undo/redo.
+- **OCR** — local text recognition powered by macOS Vision.
+- **Recording** — region recording with optional audio, pointer, and click highlights.
+- **GIF** — convert short recordings into looping GIFs.
+- **Local library** — search, favorite, copy, reveal, and recover deleted captures.
 
-- 冻结当前屏幕，单层紫色轮廓选择窗口，或手动框选、移动与八向缩放区域。
-- 画笔、矩形、直线、箭头、文字和连续马赛克均可再次选择、编辑、撤销或重做。
-- 线宽、字号、笔刷直径和马赛克强度实时调整；文字支持中文输入与透明、深色、浅色背景。
-- 完成后默认复制到剪贴板并返回原 App，也可保存、贴图或进入完整编辑器。
+## Download
 
-### 文字识别
+Download the latest build from [GitHub Releases](https://github.com/yuxino/kiri/releases/latest), unzip it, and move `Kiri.app` to Applications.
 
-- 只识别手动拖出的区域，单击窗口不会误扫全屏。
-- 调整选区会重新识别；结果可在浮层中校对后复制。
-- 使用 macOS Vision 在本机处理，不上传截图或识别文本。
+Kiri needs **Input Monitoring** for the global shortcut and **Screen & System Audio Recording** for capture. Everything stays on your Mac unless you export it yourself.
 
-### 区域录屏
+## Build from source
 
-- Retina 比例高质量 MP4，可选倒计时、系统声音、麦克风、鼠标与点击高亮。
-- 悬浮控制条支持暂停、继续和停止；控制界面与暂停时间不会进入成片。
-- 录制结束后后台保存，15 秒以内的视频可直接转换为循环 GIF。
-
-### 本地素材库
-
-- 自动记录图片、视频与 GIF 的来源应用、尺寸、类型和创建时间。
-- 支持搜索、收藏、复制、打开、Finder 定位与可恢复废纸篓。
-- 简体中文与英文界面跟随 macOS 首选语言；运行时保留 Dock 与菜单栏入口。
-
-> kiri 目前处于早期源码预览阶段。带音频与鼠标反馈的区域录屏和短视频 GIF
-> 已进入预览。
-
-## 下载与安装
-
-从 [GitHub Releases](https://github.com/yuxino/kiri/releases/latest) 下载
-`Kiri-v0.1.0-macos.zip`，解压后把 `Kiri.app` 拖入“应用程序”文件夹。
-
-v0.1.0 是尚未经过 Apple 公证的早期预览版。macOS 第一次打开时可能需要在 Finder 中
-按住 Control 点击 Kiri，选择“打开”并确认。请始终从本仓库的 Releases 页面下载。
-
-第一次使用 **⇧⌘A** 时，请按提示允许“输入监控”；第一次截图时请允许
-“屏幕与系统音频录制”。权限只用于全局截图快捷键和本地截图，不会上传屏幕内容。
-
-## 从源码运行
-
-需要 macOS 14+ 和 Swift 6。
+Requires macOS 14+ and Swift 6.
 
 ```bash
 git clone https://github.com/yuxino/kiri.git
@@ -81,71 +43,17 @@ swift run kiri-core-tests
 open /Applications/Kiri.app
 ```
 
-安装脚本会生成统一的 `Kiri.app` 并安装到固定的 `/Applications/Kiri.app`。
-更新时会先关闭正在运行的 Kiri 副本。请只运行这份正式安装版；Kiri 也会自动关闭
-误启动的同 bundle ID 旧副本，避免 macOS
-把快捷键和隐私权限关联到临时构建路径。
+## Shortcuts
 
-底层打包脚本会优先选择 Apple Development、Developer ID 或 Kiri 已有的稳定本地证书，
-并拒绝静默使用会破坏录屏授权的临时签名。也可用
-`KIRI_CODESIGN_IDENTITY="证书名称" ./scripts/package-app.sh` 明确指定证书；只有不需要
-持久录屏权限的临时构建才应设置 `KIRI_ALLOW_ADHOC_SIGNING=1`。
+- **⇧⌘A** — open Kiri
+- **Esc** — cancel capture
+- **Return** — copy capture
+- **V** — select / move annotations
+- **P / R / L / A / T / M** — pen / rectangle / line / arrow / text / mosaic
+- **Delete** — delete selected annotation
+- **⌘F** — search the library
+- **⌘Z / ⇧⌘Z** — undo / redo
 
-第一次启动快捷键时，macOS 会要求“输入监控”权限；第一次截图时会要求
-“屏幕与系统音频录制”权限。授权后如果截图仍不可用，请退出并重新打开 Kiri。
-Kiri 每次运行最多调用一次系统授权请求；如果权限尚未生效，
-提示条只会提供“打开设置”或“退出 kiri”，不会在每次截图时重复弹出系统窗口。
-
-## 截图快捷操作
-
-- **⇧⌘A**：在系统范围内启动 Kiri 截图，并独占这组快捷键
-- **Esc**：在选区、标注或文字输入阶段取消整次截图
-- **Return**：提交当前文字并复制截图
-- **V**：切回鼠标工具，选择、移动或调整已有标注；双击文字可重新编辑
-- **P / R / L / A / T / M**：画笔、矩形、直线、箭头、文字、马赛克
-- **Delete**：删除鼠标工具当前选中的标注
-- **⌘F**：聚焦素材库搜索
-- **⌘Z / ⇧⌘Z**：撤销 / 重做
-
-## 文字识别
-
-1. 按 **⇧⌘A**，在底部模式选择器切换到 **文字**。
-2. 手动拖出需要识别的区域。Kiri 不会用单击窗口代替框选，也不会扫描整张屏幕。
-3. 在结果浮层中检查或修改文字，然后复制；拖动或缩放选区会重新识别。
-
-## 素材保存在哪里
-
-kiri 默认把素材保存在：
-
-```text
-~/Library/Application Support/kiri/
-```
-
-所有内容默认只留在本机，不会自动上传。删除的素材会先进入 kiri 自己的废纸篓。
-
-## 区域录屏与 GIF（v0.2 预览）
-
-1. 按 **⇧⌘A**，在底部第一层模式选择器中切换到 **录屏**。
-2. 单击窗口或拖出录制区域，并按需调整范围。
-3. 自动出现录屏设置，按需切换倒计时、系统声音、麦克风、鼠标指针和点击高亮。
-4. 点击 **开始录制**；3·2·1 期间可按 Esc 取消。
-5. 使用悬浮控制条暂停、继续或停止；菜单栏 Kiri 与“截图 / 录屏”菜单提供相同操作。
-6. 停止后 MP4 自动进入素材库；15 秒以内的视频还能选择 **转换为 GIF**。
-
-音频默认关闭并记忆上次选择；只有打开麦克风时才会请求麦克风权限。点击高亮由 Kiri 实时绘制；麦克风录制需要 macOS 15 或更高版本。
-
-## 接下来
-
-- **v0.1**：实体多显示器验收、正式签名与 Apple 公证
-- **v0.2**：完善录屏状态浮层和裁剪
-- **后续**：继续完善录屏、GIF、素材库与标注体验
-
-完整计划见 [ROADMAP.md](ROADMAP.md)。
-
-## 参与 kiri
-
-Issue 和 Pull Request 都欢迎。开始之前请阅读
-[CONTRIBUTING.md](CONTRIBUTING.md)；安全问题请按
-[SECURITY.md](SECURITY.md) 私下报告。
+See [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [SECURITY.md](SECURITY.md).
 
 [MIT](LICENSE) © 2026 yuxino
