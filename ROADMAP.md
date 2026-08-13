@@ -3,51 +3,40 @@
 kiri grows from a reliable still-capture tool into a local visual capture
 workspace. Dates are intentionally omitted until each milestone is stable.
 
-## v0.1 — still capture
+## v0.3 — Tauri multi-platform rewrite
 
-Available in the source preview:
+The macOS + Windows rewrite in Tauri 2 (1:1 migration from the Swift
+original; behavior specs live in `docs/spec/swift/`).
 
-- [x] Native ScreenCaptureKit still capture
-- [x] Region selection and dimension feedback
-- [x] Pen, rectangle, line, arrow, text, and mosaic annotation
-- [x] Select, move, reshape, resize, and delete existing annotations
-- [x] Live size controls and editable text styles
-- [x] Exclusive Shift-Command-A capture shortcut
-- [x] Selection resizing and pixel loupe
-- [x] Offset and mixed-scale display coordinate tests
-- [x] Clipboard and PNG export
-- [x] Pin captures above other windows
-- [x] Local capture library
-- [x] Search, favorites, recoverable trash, and restore
-- [x] Shared asset model for image, video, and GIF
-- [x] Drag-to-select OCR and local text copy
-- [x] Unified light, dark, compact, empty, loading, error, and Trash UI states
+- [x] Tauri 2 + Rust + React project skeleton
+- [x] Platform-independent core (geometry, recording policy, shortcut, library)
+- [x] Frozen-display capture (macOS ScreenCaptureKit, Windows xcap/WGC)
+- [x] Exclusive global shortcut (⇧⌘A / Shift+Ctrl+A)
+- [x] Overlay: mode selector, window hover outline, region drag, 8 handles
+- [x] Annotation canvas: pen, rectangle, line, arrow, text, mosaic
+- [x] Annotation history (undo/redo), inline text editing, live sizing
+- [x] Local library with search, favorites, and recoverable trash
+- [x] Clipboard-first screenshot completion with focus restoration
+- [x] Local OCR (macOS Vision, Windows.Media.Ocr)
+- [x] Region recording (SCK / WGC) with ffmpeg H.264 + AAC pipeline
+- [x] Optional system audio, pointer, and click highlights
+- [x] 3-2-1 countdown, pause/resume segment merging
+- [x] GIF export (≤15 s, 12 fps, 720 px long edge)
+- [x] English + Simplified Chinese, following the OS language
 
-Before a stable v0.1 release:
+Before a stable v0.3 release:
 
-- [ ] Blur annotation
+- [ ] Windows acceptance testing (capture, recording, audio, OCR, ripple)
 - [ ] Mixed-scale multi-display acceptance testing
-- [ ] Signed and notarized release builds
-
-## v0.2 — video and GIF
-
-- [x] Region recording with ScreenCaptureKit
-- [x] First-level Screenshot / Record / OCR mode selector
-- [x] Cancellable 3-2-1 recording countdown
-- [ ] Full-display recording
-- [x] Optional microphone and system audio
-- [x] Optional pointer and live Kiri click highlights
-- [x] Visible pause, resume, and stop controls
-- [x] Pause-aware MP4 segment merging
-- [x] H.264 MP4 export and local library import
-- [ ] MP4 trimming
-- [x] Short recording to optimized GIF
-- [x] Video thumbnails in the local library
-- [ ] Inline video and GIF playback
-- [ ] Recording duration and file-size safeguards
+- [ ] Signed and notarized release builds (macOS) + Authenticode (Windows)
+- [ ] ffmpeg bundled in release artifacts (scripts/ensure-ffmpeg.mjs)
 
 ## Later
 
+- [ ] Blur annotation
+- [ ] Full-display recording
+- [ ] MP4 trimming
+- [ ] Inline video and GIF playback
+- [ ] Recording duration and file-size safeguards
 - [ ] Tags and smart collections
 - [ ] Optional user-controlled sync
-- [ ] Windows exploration after the native macOS experience is mature

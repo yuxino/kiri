@@ -761,7 +761,7 @@ fn create_ripple_window(
 /// Converts platform-native global mouse coordinates to global top-left
 /// points: macOS delivers Quartz bottom-left points, Windows delivers
 /// physical pixels (top-left).
-fn normalize_global_point(x: f64, y: f64, scale: f64, main_height: f64) -> (f64, f64) {
+fn normalize_global_point(x: f64, y: f64, _scale: f64, main_height: f64) -> (f64, f64) {
     #[cfg(target_os = "macos")]
     {
         // Quartz bottom-left points → top-left points.

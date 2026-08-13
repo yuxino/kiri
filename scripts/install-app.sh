@@ -1,41 +1,18 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+# Packages Kiri and installs it to /Applications (macOS).
+set -euo pipefail
+cd "$(dirname "$0")/.."
 
-project_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-built_app="$project_root/dist/Kiri.app"
-installed_app="/Applications/Kiri.app"
-staged_app="/Applications/.Kiri.installing.app"
+./scripts/package-app.sh --bundles app
 
-"$project_root/scripts/package-app.sh"
-
-if [ ! -w /Applications ]; then
-    echo "Kiri needs permission to install in /Applications." >&2
-    exit 1
+APP="src-tauri/target/release/bundle/macos/kiri.app"
+if [ ! -d "$APP" ]; then
+  echo "bundle not found at $APP" >&2
+  exit 1
 fi
 
-kiri_process_pattern='/[Kk]iri[^/]*\.app/Contents/MacOS/kiri$'
-kiri_pids=$(pgrep -f "$kiri_process_pattern" 2>/dev/null || true)
-if [ -n "$kiri_pids" ]; then
-    kill -TERM $kiri_pids 2>/dev/null || true
-    attempts=0
-    while pgrep -f "$kiri_process_pattern" >/dev/null 2>&1 && [ "$attempts" -lt 20 ]; do
-        sleep 0.1
-        attempts=$((attempts + 1))
-    done
-    remaining_pids=$(pgrep -f "$kiri_process_pattern" 2>/dev/null || true)
-    if [ -n "$remaining_pids" ]; then
-        kill -KILL $remaining_pids 2>/dev/null || true
-    fi
+if [ -d "/Applications/Kiri.app" ]; then
+  rm -rf "/Applications/Kiri.app"
 fi
-
-rm -rf -- "$staged_app"
-ditto "$built_app" "$staged_app"
-codesign --verify --deep --strict "$staged_app"
-
-if [ -e "$installed_app" ]; then
-    rm -rf -- "$installed_app"
-fi
-mv "$staged_app" "$installed_app"
-codesign --verify --deep --strict "$installed_app"
-
-echo "$installed_app"
+ditto "$APP" "/Applications/Kiri.app"
+echo "installed /Applications/Kiri.app"

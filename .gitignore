@@ -19,3 +19,4 @@ src-tauri/gen/schemas/
 .idea/
 *.swp
 binaries/ffmpeg-current/
+!binaries/ffmpeg-current/.gitkeep

@@ -1,4 +1,0 @@
-"CFBundleDisplayName" = "Kiri";
-"NSScreenCaptureUsageDescription" = "Kiri 需要访问屏幕，才能截取或录制你选择的区域。";
-"NSInputMonitoringUsageDescription" = "Kiri 仅使用键盘访问权限，将 ⇧⌘A 设为专属截图与录屏快捷键。";
-"NSMicrophoneUsageDescription" = "仅当你在录屏前打开“麦克风”开关时，Kiri 才会录制麦克风声音。";
