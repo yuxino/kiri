@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: corepack enable && pnpm --version
+      - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile || pnpm install
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -57,7 +57,7 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: corepack enable && pnpm --version
+      - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile || pnpm install
       - uses: tauri-apps/tauri-action@v0
         env:
