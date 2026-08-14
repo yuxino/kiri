@@ -387,7 +387,10 @@ export function OverlayWindow() {
       style={{
         position: "fixed",
         inset: 0,
-        background: "#141414",
+        // While the frozen capture is still loading, stay translucent so the
+        // live screen shows through; the window becomes opaque once the
+        // frozen image is ready (mirroring the original's freeze behavior).
+        background: frozenSrc ? "#141414" : "rgba(0,0,0,0.25)",
         overflow: "hidden",
         cursor: phase === "selecting" ? "crosshair" : "default",
       }}

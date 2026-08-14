@@ -432,6 +432,7 @@ fn raise_overlay_window(_window: &tauri::WebviewWindow) {}
 
 #[tauri::command]
 pub fn cancel_capture(app: AppHandle) -> Result<(), String> {
+    log::info!("[dbg] cancel_capture invoked");
     let state = app.state::<AppState>();
     let mut capture = state.capture.lock().unwrap();
     let Some(session) = capture.session.take() else {
