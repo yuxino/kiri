@@ -26,11 +26,11 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+      - run: corepack enable && pnpm --version
       - run: pnpm install --frozen-lockfile || pnpm install
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -53,11 +53,11 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+      - run: corepack enable && pnpm --version
       - run: pnpm install --frozen-lockfile || pnpm install
       - uses: tauri-apps/tauri-action@v0
         env:
