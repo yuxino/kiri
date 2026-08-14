@@ -50,7 +50,7 @@ export function ControlPanelWindow() {
           <ControlButton
             glyph="▶"
             title={t("Resume Recording")}
-            onClick={() => void api.resumeRecording()}
+            onClick={() => void api.resumeRecording().catch(() => {})}
           />
         </>
       ) : state?.isRecording ? (
@@ -66,7 +66,7 @@ export function ControlPanelWindow() {
           <ControlButton
             glyph="⏸"
             title={t("Pause Recording")}
-            onClick={() => void api.pauseRecording()}
+            onClick={() => void api.pauseRecording().catch(() => {})}
           />
         </>
       ) : (
@@ -77,7 +77,7 @@ export function ControlPanelWindow() {
         glyph="■"
         title={t("Stop and Save Recording")}
         danger
-        onClick={() => void api.stopRecording()}
+        onClick={() => void api.stopRecording().catch(() => {})}
       />
     </div>
   );

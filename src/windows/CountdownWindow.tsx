@@ -11,7 +11,7 @@ export function CountdownWindow() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        void api.cancelRecordingFlow();
+        void api.cancelRecordingFlow().catch(() => {});
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -25,7 +25,7 @@ export function CountdownWindow() {
       const next = 3 - Math.floor(elapsed);
       if (next <= 0) {
         clearInterval(timer);
-        void api.beginRecording();
+        void api.beginRecording().catch(() => {});
         return;
       }
       setValue(next);

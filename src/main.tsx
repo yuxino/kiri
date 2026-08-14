@@ -9,25 +9,35 @@ import { RippleWindow } from "./windows/RippleWindow";
 import { PinWindow } from "./windows/PinWindow";
 import { EditorWindow } from "./windows/EditorWindow";
 
-// Surface runtime errors inside the window instead of a blank page.
+// Surface runtime errors as a compact bottom banner (never blocks the UI),
+// and forward the message to the Rust log for diagnosis.
 function installErrorDiagnostics() {
-  const show = (message: string) => {
+  const report = (message: string) => {
+    try {
+      void import("@tauri-apps/api/core").then(({ invoke }) => {
+        invoke("log_frontend_error", { message: message.slice(0, 2000) });
+      });
+    } catch {
+      // not in a Tauri context
+    }
     document.title = `kiri [error] ${message.slice(0, 80)}`;
     const box = document.createElement("pre");
     box.style.cssText =
-      "position:fixed;inset:0;margin:0;padding:24px;background:#1e1b28;color:#fa476e;" +
-      "font:12px ui-monospace,Menlo,monospace;white-space:pre-wrap;z-index:99999";
+      "position:fixed;left:12px;right:12px;bottom:12px;margin:0;padding:10px 14px;" +
+      "background:rgba(30,27,40,0.95);color:#fa476e;border:1px solid rgba(250,71,110,0.5);" +
+      "border-radius:10px;font:11px ui-monospace,Menlo,monospace;white-space:pre-wrap;" +
+      "z-index:99999;max-height:160px;overflow:auto";
     box.textContent = message;
     document.body.appendChild(box);
   };
   window.addEventListener("error", (event) => {
-    show(`window.onerror: ${event.message}\n${event.filename ?? ""}:${event.lineno ?? 0}`);
+    report(`window.onerror: ${event.message}\n${event.filename ?? ""}:${event.lineno ?? 0}`);
   });
   window.addEventListener("unhandledrejection", (event) => {
     const reason = event.reason;
     const message =
       reason instanceof Error ? `${reason.message}\n${reason.stack ?? ""}` : String(reason);
-    show(`unhandledrejection: ${message}`);
+    report(`unhandledrejection: ${message}`);
   });
 }
 installErrorDiagnostics();
@@ -39,6 +49,7 @@ function resolveWindow(): { kind: string; params: URLSearchParams } {
 
 function App() {
   const { kind, params } = resolveWindow();
+  document.title = `${kind}-alive`;
   switch (kind) {
     case "overlay":
       return <OverlayWindow />;

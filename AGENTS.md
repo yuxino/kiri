@@ -98,6 +98,10 @@ pnpm build
 git diff --check
 ```
 
+Debugging without Screen Recording permission: launch with
+`KIRI_CAPTURE_FIXTURE=1` to use a synthetic frozen screen (mirrors the Swift
+original's fixture).
+
 For changes to capture, recording, permissions, focus, keyboard handling, or
 overlay windows, also package and test the fixed-path app:
 

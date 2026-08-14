@@ -73,6 +73,7 @@ function windowCandidate(
 
 export function OverlayWindow() {
   const [context, setContext] = useState<CaptureContextDto | null>(null);
+  const [frozenSrc, setFrozenSrc] = useState<string>("");
   const [phase, setPhase] = useState<Phase>("mode-select");
   const [mode, setMode] = useState<Mode>("screenshot");
   const [selection, setSelection] = useState<Rect | null>(null);
@@ -110,9 +111,23 @@ export function OverlayWindow() {
     onNotice(() => {}).then((unlisten) => {
       unlistenNotice = unlisten;
     });
-    api.startCapture().then((ctx) => setContext(ctx)).catch(() => {});
-    api.getRecordingOptions().then((options) => setRecordOptions(options));
-    api.micSupported().then((supported) => setMicSupported(supported));
+    api.startCapture()
+      .then((ctx) => setContext(ctx))
+      .catch((error) => {
+        void import("@tauri-apps/api/core").then(({ invoke }) => {
+          invoke("log_frontend_error", {
+            message: `overlay startCapture rejected: ${String(error)}`,
+          });
+        });
+      });
+    api.getRecordingOptions().then((options) => setRecordOptions(options)).catch(() => {});
+    api.micSupported().then((supported) => setMicSupported(supported)).catch(() => {});
+    // Load the frozen capture through a blob URL: canvas operations on the
+    // custom-scheme image would taint the canvas and break PNG export.
+    fetch(frozenImageUrl())
+      .then((response) => response.blob())
+      .then((blob) => setFrozenSrc(URL.createObjectURL(blob)))
+      .catch(() => {});
     return () => {
       unlistenNotice?.();
     };
@@ -123,7 +138,7 @@ export function OverlayWindow() {
     : { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
 
   const cancel = useCallback(() => {
-    void api.cancelCapture();
+    void api.cancelCapture().catch(() => {});
   }, []);
 
   const complete = useCallback(
@@ -133,7 +148,7 @@ export function OverlayWindow() {
         const png = await canvas.exportPng();
         if (png) {
           const bytes = Array.from(png);
-          void api.confirmCapture(bytes, action);
+          void api.confirmCapture(bytes, action).catch(() => {});
           return;
         }
       }
@@ -380,14 +395,13 @@ export function OverlayWindow() {
       onPointerMove={phase === "annotating" ? undefined : onPointerMove}
       onPointerUp={phase === "annotating" ? undefined : onPointerUp}
     >
-      {context && (
+      {context && frozenSrc && (
         <img
           ref={imageRef}
-          src={frozenImageUrl()}
+          src={frozenSrc}
           alt=""
           draggable={false}
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
-          onLoad={() => setContext((c) => c)}
         />
       )}
 
@@ -581,7 +595,7 @@ export function OverlayWindow() {
           text={ocrText}
           failed={ocrFailed}
           onCopy={() => {
-            void api.copyText(ocrText);
+            void api.copyText(ocrText).catch(() => {});
           }}
           onClose={cancel}
         />
@@ -595,7 +609,7 @@ export function OverlayWindow() {
           micSupported={micSupported}
           onChange={setRecordOptions}
           onStart={() => {
-            void api.startRecordingFlow(selection, recordOptions);
+            void api.startRecordingFlow(selection, recordOptions).catch(() => {});
           }}
           onCancel={cancel}
         />

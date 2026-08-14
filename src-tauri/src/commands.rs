@@ -297,6 +297,7 @@ fn convert_asset_to_gif(
 
 #[tauri::command]
 pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
+    log::info!("start_capture: beginning capture flow");
     {
         let state = app.state::<AppState>();
         let capture = state.capture.lock().unwrap();
@@ -351,7 +352,11 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
         crate::protocol::set_frozen_png(&store, display.png_data.clone());
     }
 
-    let overlay_label = create_overlay_window(&app, &display).map_err(|e| e.to_string())?;
+    let overlay_label = create_overlay_window(&app, &display).map_err(|error| {
+        log::error!("start_capture: overlay window creation failed: {error}");
+        error.to_string()
+    })?;
+    log::info!("start_capture: overlay window ready ({overlay_label})");
 
     {
         let state = app.state::<AppState>();
@@ -405,11 +410,11 @@ fn create_overlay_window(
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(false)
-    .shadow(false)
-    .visible(false);
+    .shadow(false);
+    // Build visible: creating a hidden webview and showing it immediately can
+    // race WKWebView initialization and leave the page blank on macOS.
     let window = builder.build()?;
     raise_overlay_window(&window);
-    window.show()?;
     window.set_focus()?;
     Ok(label)
 }
@@ -524,8 +529,7 @@ pub fn confirm_capture(app: AppHandle, request: ConfirmCaptureRequest) -> Result
             .title("kiri")
             .decorations(false)
             .always_on_top(true)
-            .shadow(false)
-            .visible(false);
+            .shadow(false);
             let _ = builder.build();
         }
         "edit" => {
@@ -538,10 +542,8 @@ pub fn confirm_capture(app: AppHandle, request: ConfirmCaptureRequest) -> Result
             .title("Kiri Editor")
             .inner_size(880.0, 620.0)
             .min_inner_size(860.0, 520.0)
-            .center()
-            .visible(false);
+            .center();
             if let Ok(window) = builder.build() {
-                let _ = window.show();
                 let _ = window.set_focus();
             }
         }
@@ -717,11 +719,9 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
     .transparent(true)
     .always_on_top(true)
     .skip_taskbar(true)
-    .shadow(false)
-    .visible(false);
+    .shadow(false);
     let window = builder.build().map_err(|e| e.to_string())?;
     platform::set_window_capture_excluded(&app, &label, true);
-    let _ = window.show();
     let _ = window.set_focus();
     Ok(())
 }
@@ -751,11 +751,9 @@ fn create_control_panel(app: &AppHandle) -> Result<(), String> {
     .always_on_top(true)
     .skip_taskbar(true)
     .shadow(false)
-    .visible(false)
     .build()
     .map_err(|e| e.to_string())?;
     platform::set_window_capture_excluded(app, "control-panel", true);
-    let _ = panel.show();
     let _ = panel.set_focus();
     Ok(())
 }
@@ -779,11 +777,10 @@ fn create_ripple_window(
     .always_on_top(true)
     .skip_taskbar(true)
     .shadow(false)
-    .visible(false)
     .build()
     .map_err(|e| e.to_string())?;
     platform::set_window_click_through(app, "ripple");
-    let _ = ripple.show();
+    let _ = ripple.set_focus();
     Ok(())
 }
 
@@ -1197,6 +1194,11 @@ fn finalize_recording(app: &AppHandle, segments: Vec<PathBuf>) -> Result<(), Str
 // ---------------------------------------------------------------------------
 // Settings / locale / shortcuts
 // ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn log_frontend_error(message: String) {
+    log::error!("[frontend] {message}");
+}
 
 #[tauri::command]
 pub fn mic_supported() -> bool {

@@ -37,12 +37,19 @@ export function EditorWindow(props: { id: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const img = new Image();
-    img.src = `kiri://asset/${props.id}`;
-    img.onload = () => {
-      setImage(img);
-      setImageSize({ w: img.naturalWidth, h: img.naturalHeight });
-    };
+    // Blob URL keeps the canvas CORS-clean for export.
+    fetch(`kiri://asset/${props.id}`)
+      .then((response) => response.blob())
+      .then((blob) => {
+        const src = URL.createObjectURL(blob);
+        const img = new Image();
+        img.src = src;
+        img.onload = () => {
+          setImage(img);
+          setImageSize({ w: img.naturalWidth, h: img.naturalHeight });
+        };
+      })
+      .catch(() => {});
   }, [props.id]);
 
   // Aspect-fit rect for the image within the container.
@@ -94,12 +101,16 @@ export function EditorWindow(props: { id: string }) {
   async function complete(copyToClipboard: boolean) {
     const png = await canvasRef.current?.exportPng();
     if (!png) return;
-    const savePath = copyToClipboard ? null : await api.saveFileDialog(`kiri-${props.id}.png`);
-    void api.updateAsset(props.id, {
-      png: Array.from(png),
-      copyToClipboard,
-      savePath: savePath ?? null,
-    });
+    try {
+      const savePath = copyToClipboard ? null : await api.saveFileDialog(`kiri-${props.id}.png`);
+      await api.updateAsset(props.id, {
+        png: Array.from(png),
+        copyToClipboard,
+        savePath: savePath ?? null,
+      });
+    } catch {
+      return;
+    }
     if (!copyToClipboard) closeWindow();
   }
 

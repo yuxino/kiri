@@ -49,29 +49,32 @@ fn content_type_for(path: &str) -> &'static str {
 }
 
 pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
-    let path = request.uri().path().trim_start_matches('/').to_string();
+    let uri = request.uri();
+    let host = uri.host().unwrap_or("").to_string();
+    let path = uri.path().trim_start_matches('/').to_string();
     let state = app.state::<AppState>();
     let store = app.state::<ProtocolStore>();
 
-    // Frozen capture image.
-    if path == "capture/frozen.png" {
+    // Frozen capture image: kiri://capture/frozen.png
+    if host == "capture" && path == "frozen.png" {
         if let Some(bytes) = store.frozen_png.lock().unwrap().clone() {
             return respond_png(bytes);
         }
         return not_found();
     }
 
-    // Pinned images.
-    if let Some(rest) = path.strip_prefix("pin/") {
-        let id = rest.trim_end_matches(".png");
+    // Pinned images: kiri://pin/<id>.png
+    if host == "pin" {
+        let id = path.trim_end_matches(".png");
         if let Some(bytes) = store.pin_images.lock().unwrap().get(id).cloned() {
             return respond_png(bytes);
         }
         return not_found();
     }
 
-    // Library assets by id.
-    if let Some(rest) = path.strip_prefix("asset/") {
+    // Library assets by id: kiri://asset/<id>
+    if host == "asset" {
+        let rest = &path;
         if let Ok(id) = uuid::Uuid::parse_str(rest) {
             let library = state.library.lock().unwrap();
             if let Some(asset) = library.asset_by_id(&id).cloned() {

@@ -71,6 +71,56 @@ struct ActiveScreen {
     backing_scale: f64,
 }
 
+fn make_fixture() -> Result<CapturedDisplay> {
+    let screen = active_screen()?;
+    let scale = screen.backing_scale;
+    let width = (screen.frame.width * scale).round() as u32;
+    let height = (screen.frame.height * scale).round() as u32;
+
+    // Two "windows" in display-local points (like the Swift fixture).
+    let window_one = Rect::new(90.0, 75.0, (620.0_f64).min(screen.frame.width - 180.0), (420.0_f64).min(screen.frame.height - 180.0));
+    let window_two = Rect::new(
+        (240.0_f64).min(screen.frame.width * 0.42),
+        155.0,
+        (520.0_f64).min(screen.frame.width * 0.48),
+        (360.0_f64).min(screen.frame.height - 240.0),
+    );
+
+    let mut image = image::RgbaImage::new(width, height);
+    // Dark desktop background (Swift fixture: 0.12, 0.14, 0.19).
+    for pixel in image.pixels_mut() {
+        *pixel = image::Rgba([31, 36, 48, 255]);
+    }
+    let draw_window = |image: &mut image::RgbaImage, rect: &Rect, color: [u8; 3]| {
+        let x0 = (rect.x * scale) as u32;
+        let y0 = (rect.y * scale) as u32;
+        let w = (rect.width * scale) as u32;
+        let h = (rect.height * scale) as u32;
+        for y in y0..(y0 + h).min(height) {
+            for x in x0..(x0 + w).min(width) {
+                image.put_pixel(x, y, image::Rgba([color[0], color[1], color[2], 255]));
+            }
+        }
+    };
+    draw_window(&mut image, &window_two, [43, 56, 79]);
+    draw_window(&mut image, &window_one, [242, 242, 247]);
+
+    let mut png_bytes = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .map_err(|e| anyhow!("{e}"))?;
+
+    Ok(CapturedDisplay {
+        png_data: png_bytes,
+        pixel_width: width as i64,
+        pixel_height: height as i64,
+        screen_frame: screen.frame,
+        window_rects: vec![window_two, window_one],
+        display_id: screen.display_id,
+        backing_scale: scale,
+    })
+}
+
 fn active_screen() -> Result<ActiveScreen> {
     let mtm = objc2::MainThreadMarker::new().unwrap();
     let mouse = NSEvent::mouseLocation();
@@ -258,6 +308,12 @@ fn cgimage_to_png(image: &CFRetained<CGImage>) -> Result<(Vec<u8>, i64, i64)> {
 }
 
 pub fn capture_active_display() -> Result<CapturedDisplay> {
+    // Debug/testing fixture (mirrors the Swift original's KIRI_CAPTURE_FIXTURE):
+    // synthesizes a frozen screen so the full capture flow can be exercised
+    // without Screen Recording permission.
+    if std::env::var("KIRI_CAPTURE_FIXTURE").as_deref() == Ok("1") {
+        return make_fixture();
+    }
     match check_capture_permission() {
         PermissionState::Authorized => {}
         PermissionState::RestartRequired => {

@@ -39,13 +39,13 @@ export function LibraryWindow() {
   }, [query, showingTrash]);
 
   useEffect(() => {
-    void refresh();
+    void refresh().catch(() => {});
   }, [refresh]);
 
   useEffect(() => {
     const unsubs: Promise<() => void>[] = [];
     unsubs.push(
-      onLibraryChanged(() => void refresh()).then((fn) => () => fn()),
+      onLibraryChanged(() => void refresh().catch(() => {})).then((fn) => () => fn()),
       onNotice((n) => {
         setNotice(n);
         setTimeout(() => {
@@ -107,18 +107,18 @@ export function LibraryWindow() {
         }}
       >
         {asset.kind === "image" && (
-          <MenuRow label={t("Copy")} onClick={() => void api.copyAsset(asset.id)} />
+          <MenuRow label={t("Copy")} onClick={() => void api.copyAsset(asset.id).catch(() => {})} />
         )}
-        <MenuRow label={t("Open")} onClick={() => void api.openAsset(asset.id)} />
-        <MenuRow label={t("Show in Finder")} onClick={() => void api.revealAsset(asset.id)} />
+        <MenuRow label={t("Open")} onClick={() => void api.openAsset(asset.id).catch(() => {})} />
+        <MenuRow label={t("Show in Finder")} onClick={() => void api.revealAsset(asset.id).catch(() => {})} />
         {asset.gifEligible && (
-          <MenuRow label={t("Convert to GIF")} onClick={() => void api.convertToGif(asset.id)} />
+          <MenuRow label={t("Convert to GIF")} onClick={() => void api.convertToGif(asset.id).catch(() => {})} />
         )}
         {showingTrash ? (
           <>
             <MenuRow
               label={t("Restore")}
-              onClick={() => void api.restoreAsset(asset.id)}
+              onClick={() => void api.restoreAsset(asset.id).catch(() => {})}
             />
             <MenuRow
               label={t("Delete Permanently")}
@@ -128,7 +128,7 @@ export function LibraryWindow() {
                   title: t("Delete this capture permanently?"),
                   message: t("This cannot be undone."),
                   confirmLabel: t("Delete Permanently"),
-                  onConfirm: () => void api.permanentlyDelete(asset.id),
+                  onConfirm: () => void api.permanentlyDelete(asset.id).catch(() => {}),
                 })
               }
             />
@@ -136,7 +136,7 @@ export function LibraryWindow() {
         ) : (
           <MenuRow
             label={t("Move to Trash")}
-            onClick={() => void api.moveToTrash(asset.id)}
+            onClick={() => void api.moveToTrash(asset.id).catch(() => {})}
           />
         )}
       </div>
@@ -229,7 +229,7 @@ export function LibraryWindow() {
                 title: t("Empty Trash?"),
                 message: t("All captures in Trash will be permanently deleted. This cannot be undone."),
                 confirmLabel: t("Empty Trash"),
-                onConfirm: () => void api.emptyTrash(),
+                onConfirm: () => void api.emptyTrash().catch(() => {}),
               })
             }
           >
@@ -258,7 +258,7 @@ export function LibraryWindow() {
               menuOpen={menuFor === asset.id}
               onMenu={() => openMenu(asset.id)}
               menu={itemMenu(asset)}
-              onDoubleClick={() => void api.openAsset(asset.id)}
+              onDoubleClick={() => void api.openAsset(asset.id).catch(() => {})}
               onDragStart={(e) => {
                 // Drag-out exports the file (HTML5 drag handled by Tauri).
                 void (
@@ -329,8 +329,8 @@ export function LibraryWindow() {
               className="kiri-primary-button"
               style={{ minHeight: 30 }}
               onClick={() => {
-                if (error.recovery === "quitKiri") void api.quitApp();
-                else void api.openSettings(error.recovery!);
+                if (error.recovery === "quitKiri") void api.quitApp().catch(() => {});
+                else void api.openSettings(error.recovery!).catch(() => {});
                 setError(null);
               }}
             >
@@ -502,7 +502,7 @@ function AssetCard(props: {
         </span>
         <button
           title={asset.isFavorite ? t("Remove Favorite") : t("Favorite")}
-          onClick={() => void api.setFavorite(asset.id, !asset.isFavorite)}
+          onClick={() => void api.setFavorite(asset.id, !asset.isFavorite).catch(() => {})}
           style={{
             width: 26,
             height: 26,

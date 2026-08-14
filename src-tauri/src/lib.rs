@@ -35,6 +35,12 @@ pub fn run() {
             protocol::handle(ctx.app_handle(), &request)
         })
         .setup(|app| {
+            {
+                use tauri::Listener;
+                let handle = app.handle().clone();
+                let _ = handle.listen("tauri://load-error", |event| {
+                });
+            }
             let state = AppState::new(app.handle())?;
             let options = state::load_recording_options(app.handle());
             *state.saved_recording_options.lock().unwrap() = options;
@@ -51,6 +57,13 @@ pub fn run() {
 .on_window_event(|window, event| {
             // The library window hides instead of closing (single-instance
             // Dock/taskbar app); capture sessions close it programmatically.
+            match event {
+                tauri::WindowEvent::CloseRequested { .. } => {
+                }
+                tauri::WindowEvent::Destroyed => {
+                }
+                _ => {}
+            }
             if window.label() == "library" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
@@ -83,6 +96,7 @@ pub fn run() {
             commands::resume_recording,
             commands::stop_recording,
             commands::mic_supported,
+            commands::log_frontend_error,
             commands::get_locale,
             commands::get_shortcut_label,
             commands::open_settings,
