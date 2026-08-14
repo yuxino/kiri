@@ -36,18 +36,6 @@ pub fn store_pin_image(store: &ProtocolStore, id: &str, png: Vec<u8>) {
     store.pin_images.lock().unwrap().insert(id.to_string(), png);
 }
 
-fn content_type_for(path: &str) -> &'static str {
-    if path.ends_with(".png") {
-        "image/png"
-    } else if path.ends_with(".gif") {
-        "image/gif"
-    } else if path.ends_with(".mp4") {
-        "video/mp4"
-    } else {
-        "application/octet-stream"
-    }
-}
-
 pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let uri = request.uri();
     let host = uri.host().unwrap_or("").to_string();
@@ -76,28 +64,41 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     if host == "asset" {
         let rest = &path;
         if let Ok(id) = uuid::Uuid::parse_str(rest) {
-            let library = state.library.lock().unwrap();
-            if let Some(asset) = library.asset_by_id(&id).cloned() {
-                let file_path: PathBuf = state.library_root.join("Assets").join(&asset.filename);
-                if asset.kind == CaptureKind::Image {
-                    if let Ok(bytes) = std::fs::read(&file_path) {
-                        return respond(bytes, "image/png");
+            // Resolve the file path while holding the lock, then drop it
+            // before running ffmpeg (thumbnail generation can take ~100ms).
+            let (kind, file_path) = {
+                let library = state.library.lock().unwrap();
+                match library.asset_by_id(&id).cloned() {
+                    Some(asset) => {
+                        let path = state.library_root.join("Assets").join(&asset.filename);
+                        (asset.kind, path)
                     }
+                    None => return not_found(),
                 }
-                // Video / GIF: serve a first-frame thumbnail.
-                let cache_key = asset.id.to_string();
-                if let Some(bytes) = store.video_thumbnails.lock().unwrap().get(&cache_key).cloned() {
+            };
+            if kind == CaptureKind::Image {
+                if let Ok(bytes) = std::fs::read(&file_path) {
                     return respond(bytes, "image/png");
                 }
-                if let Ok(ffmpeg) = crate::record::ensure_ffmpeg(None) {
-                    if let Some(thumbnail) = crate::thumbnail::video_first_frame(&ffmpeg, &file_path) {
-                        store
-                            .video_thumbnails
-                            .lock()
-                            .unwrap()
-                            .insert(cache_key, thumbnail.clone());
-                        return respond(thumbnail, "image/png");
-                    }
+            }
+            // Video / GIF: serve a first-frame thumbnail (cached in memory).
+            let cache_key = id.to_string();
+            if let Some(bytes) = store.video_thumbnails.lock().unwrap().get(&cache_key).cloned() {
+                return respond(bytes, "image/png");
+            }
+            let ffmpeg = state
+                .ffmpeg_path
+                .get()
+                .cloned()
+                .or_else(|| crate::record::ensure_ffmpeg(None).ok());
+            if let Some(ffmpeg) = ffmpeg {
+                if let Some(thumbnail) = crate::thumbnail::video_first_frame(&ffmpeg, &file_path) {
+                    store
+                        .video_thumbnails
+                        .lock()
+                        .unwrap()
+                        .insert(cache_key, thumbnail.clone());
+                    return respond(thumbnail, "image/png");
                 }
             }
         }
@@ -105,6 +106,12 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     }
 
     not_found()
+}
+
+/// Removed helpers kept referenced by tests/other code.
+#[allow(dead_code)]
+fn _content_type_hint(_: &str) -> &'static str {
+    "image/png"
 }
 
 fn respond(bytes: Vec<u8>, content_type: &str) -> Response<Vec<u8>> {

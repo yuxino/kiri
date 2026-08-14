@@ -356,6 +356,9 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
         log::error!("start_capture: overlay window creation failed: {error}");
         error.to_string()
     })?;
+    // Make the app active so the overlay webview receives keyboard input
+    // (Esc/Return/tool keys) while the user interacts with it.
+    platform::activate_self();
     log::info!("start_capture: overlay window ready ({overlay_label})");
 
     {
@@ -390,21 +393,16 @@ fn create_overlay_window(
     display: &crate::capture::CapturedDisplay,
 ) -> anyhow::Result<String> {
     let label = "overlay".to_string();
-    let physical = |value: f64| (value * display.backing_scale).round();
+    // Tauri inner_size/position are LOGICAL (points on macOS, DIPs on
+    // Windows); the frontend works in display points 1:1.
     let builder = WebviewWindowBuilder::new(
         app,
         label.clone(),
         WebviewUrl::App("index.html?window=overlay".into()),
     )
     .title("kiri")
-    .inner_size(
-        physical(display.screen_frame.width),
-        physical(display.screen_frame.height),
-    )
-    .position(
-        physical(display.screen_frame.x),
-        physical(display.screen_frame.y),
-    )
+    .inner_size(display.screen_frame.width, display.screen_frame.height)
+    .position(display.screen_frame.x, display.screen_frame.y)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
@@ -691,12 +689,18 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
                     request.region.width,
                     request.region.height,
                 ),
+                screen_frame,
                 backing_scale,
                 options,
             }),
             ..Default::default()
         };
         emit_recording_state(&app, &recording);
+    }
+
+    if !options.uses_countdown {
+        // No countdown requested: start recording immediately.
+        return begin_recording(app);
     }
 
     let label = "countdown".to_string();
@@ -706,15 +710,14 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
         request.region.width,
         request.region.height,
     );
-    let physical = |v: f64| (v * backing_scale).round();
     let builder = WebviewWindowBuilder::new(
         &app,
         label.clone(),
         WebviewUrl::App("index.html?window=countdown".into()),
     )
     .title("kiri")
-    .inner_size(physical(region_screen.width), physical(region_screen.height))
-    .position(physical(region_screen.x), physical(region_screen.y))
+    .inner_size(region_screen.width, region_screen.height)
+    .position(region_screen.x, region_screen.y)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
@@ -763,15 +766,15 @@ fn create_ripple_window(
     configuration: &RecordingConfiguration,
 ) -> Result<(), String> {
     let region = configuration.region;
-    let scale = configuration.backing_scale;
+    let frame = configuration.screen_frame;
     let ripple = WebviewWindowBuilder::new(
         app,
         "ripple".to_string(),
         WebviewUrl::App("index.html?window=ripple".into()),
     )
     .title("kiri")
-    .inner_size((region.width * scale) as f64, (region.height * scale) as f64)
-    .position((region.x * scale) as f64, (region.y * scale) as f64)
+    .inner_size(region.width, region.height)
+    .position(frame.x + region.x, frame.y + region.y)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
@@ -782,34 +785,6 @@ fn create_ripple_window(
     platform::set_window_click_through(app, "ripple");
     let _ = ripple.set_focus();
     Ok(())
-}
-
-/// Converts platform-native global mouse coordinates to global top-left
-/// points: macOS delivers Quartz bottom-left points, Windows delivers
-/// physical pixels (top-left).
-fn normalize_global_point(x: f64, y: f64, _scale: f64, main_height: f64) -> (f64, f64) {
-    #[cfg(target_os = "macos")]
-    {
-        // Quartz bottom-left points → top-left points.
-        (x, main_height - y)
-    }
-    #[cfg(windows)]
-    {
-        let _ = main_height;
-        (x / scale, y / scale)
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn main_screen_height_points() -> f64 {
-    use objc2_app_kit::NSScreen;
-    let mtm = objc2::MainThreadMarker::new().unwrap();
-    NSScreen::mainScreen(mtm)
-        .map(|s| {
-            let frame = s.frame();
-            frame.origin.y + frame.size.height
-        })
-        .unwrap_or(0.0)
 }
 
 fn start_recorder(
@@ -839,7 +814,6 @@ fn start_recorder(
     }
     #[cfg(windows)]
     {
-        let _ = mic_tx;
         crate::capture::windows::WindowsRecorder::start(
             configuration.display_id,
             configuration.region,
@@ -847,6 +821,7 @@ fn start_recorder(
             configuration.options,
             video_tx,
             audio_tx,
+            mic_tx,
         )
         .map(|recorder| Box::new(recorder) as Box<dyn crate::capture::PlatformRecorder + Send>)
         .map_err(|e| e.to_string())
@@ -906,7 +881,10 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
 
     let configuration = {
         let state = app.state::<AppState>();
-        let recording = state.recording.lock().unwrap();
+        let mut recording = state.recording.lock().unwrap();
+        if recording.is_recording || recording.is_paused {
+            return Ok(());
+        }
         let Some(configuration) = recording.configuration.clone() else {
             return Err("No recording configuration.".into());
         };
@@ -916,27 +894,6 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
     create_control_panel(&app)?;
     if configuration.options.highlights_clicks {
         create_ripple_window(&app, &configuration)?;
-        // Install the global click monitor; platform callbacks deliver
-        // platform-native coordinates that we normalize to region-local
-        // points before forwarding to the ripple window.
-        let region = configuration.region;
-        let scale = configuration.backing_scale;
-        let main_height = main_screen_height_points();
-        let app_handle = app.clone();
-        let click_monitor = platform::start_click_monitor(Arc::new(move |x, y| {
-            let (gx, gy) = normalize_global_point(x, y, scale, main_height);
-            let payload = serde_json::json!({
-                "x": gx - region.x,
-                "y": gy - region.y,
-            });
-            let _ = app_handle.emit("ripple-click", payload);
-        }))
-        .ok();
-        {
-            let state = app.state::<AppState>();
-            let mut recording = state.recording.lock().unwrap();
-            recording.click_monitor = click_monitor;
-        }
     }
 
     let out_path = std::env::temp_dir().join(format!(
@@ -1129,6 +1086,12 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         let _ = window.close();
     }
 
+    // Capture focus-restore info before the recording state is reset.
+    let (return_pid, was_kiri_frontmost) = {
+        let state = app.state::<AppState>();
+        let recording = state.recording.lock().unwrap();
+        (recording.return_pid, recording.was_kiri_frontmost)
+    };
     let handle = app.clone();
     std::thread::spawn(move || {
         let result = finalize_recording(&handle, final_segments);
@@ -1142,12 +1105,6 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
             Ok(()) => emit_notice(&handle, "Recording Saved".into(), "video.fill".into()),
             Err(error) => emit_error(&handle, error, None),
         }
-        // Restore focus to the source application after the recording ends.
-        let (return_pid, was_kiri_frontmost) = {
-            let state = handle.state::<AppState>();
-            let recording = state.recording.lock().unwrap();
-            (recording.return_pid, recording.was_kiri_frontmost)
-        };
         if !was_kiri_frontmost {
             if let Some(pid) = return_pid {
                 platform::activate_application(pid);
@@ -1169,15 +1126,17 @@ fn finalize_recording(app: &AppHandle, segments: Vec<PathBuf>) -> Result<(), Str
         uuid::Uuid::new_v4().to_string().to_lowercase()
     ));
     crate::record::merge_segments(&segments, &merged_path, &ffmpeg).map_err(|e| e.to_string())?;
+    let (pixel_width, pixel_height, duration) = crate::record::probe_video(&ffmpeg, &merged_path)
+        .unwrap_or((0, 0, None));
     let mut library = state.library.lock().unwrap();
     let imported = library
         .import_file(
             &merged_path,
             CaptureKind::Video,
             "mp4",
-            0,
-            0,
-            Some(0.0),
+            pixel_width,
+            pixel_height,
+            duration,
             None,
         )
         .map_err(|e| e.to_string())?;

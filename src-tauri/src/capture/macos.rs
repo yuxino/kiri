@@ -405,6 +405,7 @@ struct DelegateState {
     mic_tx: Option<mpsc::Sender<Vec<u8>>>,
     video_size: OnceLock<(usize, usize)>,
     audio_format: OnceLock<AudioFormat>,
+    mic_format: OnceLock<AudioFormat>,
 }
 
 /// A recording session running the SCK stream on a dedicated thread.
@@ -499,6 +500,7 @@ impl MacRecordingSession {
                 mic_tx,
                 video_size: OnceLock::new(),
                 audio_format: OnceLock::new(),
+                mic_format: OnceLock::new(),
             };
             let state_ptr = Box::into_raw(Box::new(state)) as usize;
 
@@ -726,8 +728,22 @@ objc2::define_class!(
                 }
             } else if of_type == SCStreamOutputType::Microphone {
                 if let Some(tx) = &state.mic_tx {
+                    let format = state.mic_format.get_or_init(|| {
+                        audio_format_from(buffer).unwrap_or(AudioFormat {
+                            sample_rate: 48_000.0,
+                            channels: 2,
+                            bits_per_channel: 32,
+                            is_float: true,
+                            is_non_interleaved: false,
+                        })
+                    });
                     if let Some(bytes) = copy_audio_buffer(buffer) {
-                        let _ = tx.send(bytes);
+                        let payload = if format.is_float && format.is_non_interleaved {
+                            deinterleave_f32(&bytes, format.channels, *format)
+                        } else {
+                            bytes
+                        };
+                        let _ = tx.send(payload);
                     }
                 }
             } else if let Some(tx) = &state.audio_tx {

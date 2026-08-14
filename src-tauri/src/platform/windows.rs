@@ -94,6 +94,10 @@ pub fn ensure_permissions() -> Result<()> {
     Ok(())
 }
 
+pub fn activate_self() {
+    // set_focus on the overlay window already foregrounds it.
+}
+
 pub fn mic_supported() -> bool {
     true
 }

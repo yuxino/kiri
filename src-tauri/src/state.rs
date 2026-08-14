@@ -22,6 +22,8 @@ pub struct AppState {
     pub saved_recording_options: std::sync::Mutex<RecordingOptions>,
     pub library_root: PathBuf,
     pub gif_conversion_ids: std::sync::Mutex<HashSet<uuid::Uuid>>,
+    /// App-lifetime global click monitor (ripple source), installed once.
+    pub click_monitor: std::sync::Mutex<Option<Box<dyn crate::platform::ClickMonitorHandle + Send>>>,
 }
 
 #[derive(Default)]
@@ -44,7 +46,6 @@ pub struct CaptureSession {
 impl Default for RecordingFlow {
     fn default() -> Self {
         Self {
-            click_monitor: None,
             return_pid: None,
             was_kiri_frontmost: false,
             is_starting: false,
@@ -62,7 +63,6 @@ impl Default for RecordingFlow {
 }
 
 pub struct RecordingFlow {
-    pub click_monitor: Option<Box<dyn crate::platform::ClickMonitorHandle + Send>>,
     /// PID of the app that was frontmost before capture (focus restoration).
     pub return_pid: Option<u32>,
     pub was_kiri_frontmost: bool,
@@ -83,6 +83,8 @@ pub struct RecordingConfiguration {
     pub display_id: u32,
     /// Display-local, top-left orientation, in points.
     pub region: crate::core::geometry::Rect,
+    /// Global display frame in points (top-left orientation).
+    pub screen_frame: crate::core::geometry::Rect,
     pub backing_scale: f64,
     pub options: RecordingOptions,
 }
@@ -149,6 +151,7 @@ impl AppState {
             saved_recording_options: std::sync::Mutex::new(RecordingOptions::default()),
             library_root: root,
             gif_conversion_ids: Default::default(),
+            click_monitor: std::sync::Mutex::new(None),
         })
     }
 

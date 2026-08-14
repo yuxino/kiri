@@ -190,6 +190,7 @@ impl WindowsRecorder {
         options: crate::core::policy::RecordingOptions,
         video_tx: mpsc::Sender<Vec<u8>>,
         audio_tx: Option<mpsc::Sender<Vec<u8>>>,
+        mic_tx: Option<mpsc::Sender<Vec<u8>>>,
     ) -> Result<WindowsRecorder> {
         if region.width < 2.0 || region.height < 2.0 {
             bail!("The recording region is too small.");
@@ -266,12 +267,20 @@ fn start_audio(
     let host = cpal::default_host();
     if options.captures_system_audio {
         if let Some(device) = host.default_output_device() {
-            if let Ok(config) = device.default_input_config() {
-                let sample_format = config.sample_format();
-                let channels = config.channels() as usize;
-                let sample_rate = config.sample_rate().0;
+            // Prefer 48 kHz stereo f32 to match the ffmpeg pipe contract.
+            let chosen = device
+                .supported_input_configs()
+                .ok()
+                .and_then(|configs| {
+                    configs
+                        .filter(|c| c.channels() == 2)
+                        .map(|c| c.with_sample_rate(cpal::SampleRate(48_000)))
+                        .find(|c| c.sample_format() == cpal::SampleFormat::F32)
+                })
+                .or_else(|| device.default_input_config().ok());
+            if let Some(config) = chosen {
                 let tx_clone = tx.clone();
-                match sample_format {
+                match config.sample_format() {
                     cpal::SampleFormat::F32 => {
                         if let Ok(stream) = device.build_input_stream(
                             &config.into(),
@@ -300,14 +309,26 @@ fn start_audio(
                     }
                     _ => {}
                 }
-                let _ = (channels, sample_rate);
             }
         }
     }
     if options.captures_microphone {
         if let Some(tx) = mic_tx {
             if let Some(device) = host.default_input_device() {
-                if let Ok(config) = device.default_input_config() {
+                // Prefer a 48 kHz stereo f32 stream so the ffmpeg pipe
+                // contract (48k/2ch/f32) always matches; fall back to the
+                // device default config otherwise.
+                let chosen = device
+                    .supported_input_configs()
+                    .ok()
+                    .and_then(|configs| {
+                        configs
+                            .filter(|c| c.channels() == 2)
+                            .map(|c| c.with_sample_rate(cpal::SampleRate(48_000)))
+                            .find(|c| c.sample_format() == cpal::SampleFormat::F32)
+                    })
+                    .or_else(|| device.default_input_config().ok());
+                if let Some(config) = chosen {
                     match config.sample_format() {
                         cpal::SampleFormat::F32 => {
                             if let Ok(stream) = device.build_input_stream(

@@ -14,7 +14,7 @@ mod record;
 mod state;
 mod thumbnail;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::state::AppState;
 
@@ -35,12 +35,6 @@ pub fn run() {
             protocol::handle(ctx.app_handle(), &request)
         })
         .setup(|app| {
-            {
-                use tauri::Listener;
-                let handle = app.handle().clone();
-                let _ = handle.listen("tauri://load-error", |event| {
-                });
-            }
             let state = AppState::new(app.handle())?;
             let options = state::load_recording_options(app.handle());
             *state.saved_recording_options.lock().unwrap() = options;
@@ -52,6 +46,7 @@ pub fn run() {
                 });
 
             register_shortcut(app.handle())?;
+            install_click_monitor(app.handle())?;
             Ok(())
         })
 .on_window_event(|window, event| {
@@ -141,7 +136,81 @@ fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 #[cfg(windows)]
 fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
-    // TODO(win): RegisterHotKey(Shift+Ctrl+A) on a dedicated message thread.
-    let _ = app;
+    use crate::platform::windows;
+    let handle = app.clone();
+    let shortcut = windows::start_shortcut(Box::new(move || {
+        let handle = handle.clone();
+        let _ = std::thread::spawn(move || {
+            let _ = commands::start_capture(handle);
+        });
+    }));
+    match shortcut {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            log::warn!("shortcut registration failed: {error}");
+            Ok(())
+        }
+    }
+}
+
+/// Installs the app-lifetime global click monitor once. The callback reads the
+/// current recording region from state and forwards normalized, region-local
+/// click positions to the ripple window (mirrors the Swift original's single
+/// global monitor).
+fn install_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
+    #[cfg(target_os = "macos")]
+    let main_height = {
+        use objc2_app_kit::NSScreen;
+        let mtm = objc2::MainThreadMarker::new().unwrap();
+        NSScreen::mainScreen(mtm)
+            .map(|screen| {
+                let frame = screen.frame();
+                frame.origin.y + frame.size.height
+            })
+            .unwrap_or(0.0)
+    };
+    #[cfg(windows)]
+    let main_height = 0.0;
+
+    let handle = app.clone();
+    let callback: std::sync::Arc<dyn Fn(f64, f64) + Send + Sync> =
+        std::sync::Arc::new(move |x, y| {
+            // Read the active recording configuration.
+            let (active, region, frame, scale) = {
+                let state = handle.state::<AppState>();
+                let recording = state.recording.lock().unwrap();
+                let config = recording.configuration.as_ref();
+                (
+                    recording.is_recording
+                        && config
+                            .map(|c| c.options.highlights_clicks)
+                            .unwrap_or(false),
+                    config.map(|c| c.region),
+                    config.map(|c| c.screen_frame),
+                    config.map(|c| c.backing_scale),
+                )
+            };
+            if !active {
+                return;
+            }
+            let (region, frame, scale) = match (region, frame, scale) {
+                (Some(r), Some(f), Some(s)) => (r, f, s),
+                _ => return,
+            };
+            // Platform callbacks deliver platform-native global coordinates:
+            // macOS Quartz bottom-left points; Windows physical pixels.
+            #[cfg(target_os = "macos")]
+            let (gx, gy) = (x, main_height - y);
+            #[cfg(windows)]
+            let (gx, gy) = (x / scale, y / scale);
+            let payload = serde_json::json!({
+                "x": gx - frame.x - region.x,
+                "y": gy - frame.y - region.y,
+            });
+            let _ = handle.emit("ripple-click", payload);
+        });
+    let monitor = platform::start_click_monitor(callback).map_err(|e| tauri::Error::Anyhow(e.into()))?;
+    let state = app.state::<AppState>();
+    *state.click_monitor.lock().unwrap() = Some(monitor);
     Ok(())
 }

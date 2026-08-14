@@ -355,6 +355,101 @@ impl SegmentEncoder {
 }
 
 // ---------------------------------------------------------------------------
+// Media probing (ffprobe equivalent via `ffmpeg -i` output parsing)
+// ---------------------------------------------------------------------------
+
+/// Parses `ffmpeg -i` stderr for video dimensions and duration.
+pub fn probe_video(ffmpeg: &Path, video: &Path) -> Option<(i64, i64, Option<f64>)> {
+    let output = Command::new(ffmpeg)
+        .arg("-hide_banner")
+        .arg("-i")
+        .arg(video)
+        .arg("-f")
+        .arg("null")
+        .arg("-")
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&output.stderr).to_string();
+
+    // "Stream #0:0[0x1](und): Video: h264 ... 1920x1080 [SAR ...]" or
+    // "... (1920x1080), ..." on some builds.
+    let mut width = 0i64;
+    let mut height = 0i64;
+    for line in text.lines() {
+        if !line.contains("Video:") {
+            continue;
+        }
+        if let Some(captured) = find_dimensions(line) {
+            width = captured.0;
+            height = captured.1;
+            break;
+        }
+    }
+
+    // "Duration: 00:00:12.34, start: ..."
+    let mut duration = None;
+    for line in text.lines() {
+        let Some(rest) = line.trim().strip_prefix("Duration:") else {
+            continue;
+        };
+        let value = rest.split(',').next().unwrap_or("").trim();
+        if let Some(seconds) = parse_duration(value) {
+            duration = Some(seconds);
+        }
+        break;
+    }
+
+    if width > 0 && height > 0 {
+        Some((width, height, duration))
+    } else {
+        None
+    }
+}
+
+fn find_dimensions(line: &str) -> Option<(i64, i64)> {
+    // Pattern: " 1920x1080 " with optional spaces; or "(1920x1080)".
+    for (index, _) in line.match_indices('x') {
+        let before = &line[..index];
+        let after = &line[index + 1..];
+        let width_start = before
+            .char_indices()
+            .rev()
+            .find(|(_, c)| !c.is_ascii_digit())
+            .map(|(i, _)| i + 1)
+            .unwrap_or(0);
+        let height_end = after
+            .char_indices()
+            .find(|(_, c)| !c.is_ascii_digit())
+            .map(|(i, _)| i)
+            .unwrap_or(after.len());
+        let width_str = &before[width_start..];
+        let height_str = &after[..height_end];
+        if !width_str.is_empty() && !height_str.is_empty() {
+            if let (Ok(w), Ok(h)) = (width_str.parse::<i64>(), height_str.parse::<i64>()) {
+                if w >= 16 && h >= 16 && w <= 16_384 && h <= 16_384 {
+                    return Some((w, h));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn parse_duration(value: &str) -> Option<f64> {
+    // Formats: HH:MM:SS.micro or MM:SS.micro
+    let parts: Vec<&str> = value.split(':').collect();
+    let (seconds_part, minutes_part, hours_part) = match parts.len() {
+        3 => (parts[2], parts[1], Some(parts[0])),
+        2 => (parts[1], parts[0], None),
+        _ => return None,
+    };
+    let seconds = seconds_part.parse::<f64>().ok()?;
+    let minutes = minutes_part.parse::<f64>().ok()?;
+    let hours = hours_part.map(|h| h.parse::<f64>().ok()).unwrap_or(Some(0.0))?;
+    Some(hours * 3600.0 + minutes * 60.0 + seconds)
+}
+
+// ---------------------------------------------------------------------------
 // Segment merging (RecordingSegmentMerger equivalent)
 // ---------------------------------------------------------------------------
 

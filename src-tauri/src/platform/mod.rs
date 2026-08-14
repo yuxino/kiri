@@ -90,6 +90,11 @@ pub fn ensure_permissions() -> Result<()> {
     current::ensure_permissions()
 }
 
+/// Brings the app itself to the foreground (so overlay webviews get keys).
+pub fn activate_self() {
+    current::activate_self();
+}
+
 /// True when microphone capture is available (macOS 15+; Windows: always).
 pub fn mic_supported() -> bool {
     current::mic_supported()
