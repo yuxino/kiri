@@ -52,6 +52,12 @@ type Mode = "screenshot" | "record" | "ocr";
 const ACCENT = "#7D69F5";
 
 // --- window hover candidate (WindowSelectionGeometry.candidate port) ---
+function reportFrontend(message: string) {
+  void import("@tauri-apps/api/core").then(({ invoke }) => {
+    invoke("log_frontend_error", { message });
+  });
+}
+
 function windowCandidate(
   p: Point,
   windowsFrontToBack: Rect[],
@@ -144,17 +150,23 @@ export function OverlayWindow() {
   const complete = useCallback(
     async (action: "copy" | "save" | "pin" | "edit") => {
       const canvas = canvasRef.current;
-      if (canvas) {
-        const png = await canvas.exportPng();
-        if (png) {
-          const bytes = Array.from(png);
-          void api.confirmCapture(bytes, action).catch(() => {});
-          return;
-        }
+      if (!canvas) {
+        reportFrontend(`complete(${action}): annotation canvas not mounted`);
+        return;
       }
-      cancel();
+      const png = await canvas.exportPng();
+      if (!png) {
+        reportFrontend(`complete(${action}): exportPng returned no data`);
+        return;
+      }
+      const bytes = Array.from(png);
+      try {
+        await api.confirmCapture(bytes, action);
+      } catch (error) {
+        reportFrontend(`confirm_capture(${action}) rejected: ${String(error)}`);
+      }
     },
-    [cancel],
+    [],
   );
 
   // --- keyboard ---

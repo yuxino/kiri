@@ -470,6 +470,24 @@ pub fn confirm_capture(app: AppHandle, request: ConfirmCaptureRequest) -> Result
     let Some(session) = capture.session.take() else {
         return Err("No active capture session.".into());
     };
+    // Errors must be visible: show the library window before emitting.
+    let session_failure = match confirm_capture_inner(&app, &state, session, request) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    if let Some(window) = app.get_webview_window("library") {
+        let _ = window.show();
+    }
+    Err(session_failure)
+}
+
+fn confirm_capture_inner(
+    app: &AppHandle,
+    state: &AppState,
+    mut session: CaptureSession,
+    request: ConfirmCaptureRequest,
+) -> Result<(), String> {
+    log::info!("confirm_capture: action={} bytes={}", request.action, request.png.len());
 
     for label in &session.overlay_labels {
         if let Some(window) = app.get_webview_window(label) {

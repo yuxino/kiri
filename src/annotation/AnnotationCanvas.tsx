@@ -552,7 +552,14 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         commitTextEditing: () => commitText(),
         exportPng: async () => {
           commitText();
-          if (!sourceCanvas) return null;
+          const img = imageRef.current;
+          if (!img || !img.complete || img.naturalWidth === 0) {
+            // Wait briefly for the frozen image to decode.
+            await new Promise((resolve) => setTimeout(resolve, 300));
+          }
+          if (!sourceCanvas || !imageRef.current || imageRef.current.naturalWidth === 0) {
+            return null;
+          }
           const out = document.createElement("canvas");
           const scaleX = sourceCanvas.width / region.width;
           const scaleY = sourceCanvas.height / region.height;
