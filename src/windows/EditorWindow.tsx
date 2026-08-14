@@ -247,7 +247,11 @@ export function EditorWindow(props: { id: string }) {
           {t("Save As…")}
         </button>
         <EditorToolButton icon="ellipsis.circle" title={t("Cancel (Esc)")} onClick={closeWindow} />
-        <button className="kiri-primary-button" style={{ minHeight: 32 }} onClick={() => void complete(true)}>
+        <button
+          className="kiri-primary-button"
+          style={{ minHeight: 32, borderRadius: 10 }}
+          onClick={() => void complete(true)}
+        >
           {t("Copy")}
         </button>
       </div>

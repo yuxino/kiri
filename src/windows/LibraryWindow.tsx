@@ -809,19 +809,30 @@ function AssetCard(props: {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: "rgba(20,16,32,0.35)",
+              // Slightly translucent scrim so the button reads clearly over
+              // any thumbnail; rounded to match the thumbnail's 14px radius.
+              background: "rgba(18,14,30,0.32)",
+              borderRadius: 14,
+              backdropFilter: "blur(1.5px)",
+              WebkitBackdropFilter: "blur(1.5px)",
               transition: "opacity 0.14s ease-out",
             }}
           >
             <button
               className="kiri-button kiri-button--primary"
-              style={{ minHeight: 34, padding: "0 16px" }}
+              style={{
+                minHeight: 38,
+                padding: "0 18px",
+                borderRadius: 19,
+                gap: 7,
+                boxShadow: "0 6px 16px rgba(125,105,245,0.35)",
+              }}
               onClick={(e) => {
                 e.stopPropagation();
                 void api.copyAsset(asset.id).catch(() => {});
               }}
             >
-              <KiriIcon name="doc.on.doc" size={13} />
+              <KiriIcon name="doc.on.doc" size={14} />
               {t("Copy")}
             </button>
           </div>
