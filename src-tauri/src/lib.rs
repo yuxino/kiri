@@ -255,7 +255,9 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = Menu::with_items(app, &[&open_library, &capture, &quit])?;
 
     // Menu-bar icon mirrors the Swift original's MenuBarExtra viewfinder
-    // symbol (a capture-frame glyph), not the chibi app icon.
+    // symbol (a capture-frame glyph, `systemImage: "viewfinder"`), not the
+    // chibi app icon. Rendered as a black template image so macOS tints it
+    // automatically for light/dark menu bars, exactly like the Swift symbol.
     let icon = {
         let bytes = include_bytes!("../icons/tray-viewfinder.png");
         tauri::image::Image::from_bytes(bytes).ok()
@@ -263,6 +265,7 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let mut builder = TrayIconBuilder::new()
         .menu(&menu)
         .tooltip("Kiri")
+        .icon_as_template(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open-library" => {
                 if let Some(window) = app.get_webview_window("library") {
