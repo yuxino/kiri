@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Result};
-use windows_capture::capture::{Context, GraphicsCaptureApi, GraphicsCaptureApiHandler};
+use windows_capture::capture::{Context, CaptureControl, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::monitor::Monitor;
@@ -18,6 +18,8 @@ use crate::core::geometry::Rect;
 
 use super::{CapturedDisplay, PlatformRecorder};
 
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
 // ---------------------------------------------------------------------------
 // Frozen display capture (xcap / WGC)
 // ---------------------------------------------------------------------------
@@ -28,18 +30,26 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
     let monitor = monitors
         .iter()
         .find(|monitor| {
-            cursor_x >= monitor.x()
-                && cursor_x < monitor.x() + monitor.width() as i32
-                && cursor_y >= monitor.y()
-                && cursor_y < monitor.y() + monitor.height() as i32
+            let (Ok(mx), Ok(my), Ok(mw), Ok(mh)) = (
+                monitor.x(),
+                monitor.y(),
+                monitor.width(),
+                monitor.height(),
+            ) else {
+                return false;
+            };
+            cursor_x >= mx
+                && cursor_x < mx + mw as i32
+                && cursor_y >= my
+                && cursor_y < my + mh as i32
         })
         .or_else(|| monitors.first())
         .ok_or_else(|| anyhow!("The active display could not be captured."))?;
 
     let image = monitor.capture_image()?;
-    let scale = monitor.scale_factor().unwrap_or(1.0).max(1.0);
-    let width = monitor.width() as i64;
-    let height = monitor.height() as i64;
+    let scale = monitor.scale_factor().unwrap_or(1.0).max(1.0) as f64;
+    let width = monitor.width()? as i64;
+    let height = monitor.height()? as i64;
 
     let mut png_bytes = Vec::new();
     image.write_to(
@@ -52,17 +62,34 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
     let own_pid = std::process::id();
     let mut window_rects = Vec::new();
     for window in xcap::Window::all()? {
-        if window.pid() == own_pid || !window.is_visible() {
+        let (Ok(pid), Ok(x), Ok(y), Ok(w), Ok(h)) = (
+            window.pid(),
+            window.x(),
+            window.y(),
+            window.width(),
+            window.height(),
+        ) else {
+            continue;
+        };
+        if pid == own_pid || window.is_minimized().unwrap_or(false) {
             continue;
         }
-        let x = window.x() as f64;
-        let y = window.y() as f64;
-        let w = window.width() as f64;
-        let h = window.height() as f64;
-        let mx = monitor.x() as f64;
-        let my = monitor.y() as f64;
-        let mw = monitor.width() as f64;
-        let mh = monitor.height() as f64;
+        let x = x as f64;
+        let y = y as f64;
+        let w = w as f64;
+        let h = h as f64;
+        let (Ok(mx), Ok(my), Ok(mw), Ok(mh)) = (
+            monitor.x(),
+            monitor.y(),
+            monitor.width(),
+            monitor.height(),
+        ) else {
+            continue;
+        };
+        let mx = mx as f64;
+        let my = my as f64;
+        let mw = mw as f64;
+        let mh = mh as f64;
         let min_x = x.max(mx);
         let min_y = y.max(my);
         let max_x = (x + w).min(mx + mw);
@@ -95,7 +122,7 @@ fn cursor_position() -> Result<(i32, i32)> {
     use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     use windows::Win32::Foundation::POINT;
     let mut point = POINT { x: 0, y: 0 };
-    unsafe { GetCursorPos(&mut point) }.ok()?;
+    unsafe { GetCursorPos(&mut point) }.map_err(|e| anyhow!("GetCursorPos failed: {e}"))?;
     Ok((point.x, point.y))
 }
 
@@ -103,9 +130,10 @@ fn monitor_index(monitor: &xcap::Monitor) -> Result<u32> {
     // xcap monitors order matches EnumDisplayMonitors ordering; reuse the
     // enumeration index for the WGC Monitor::from_index lookup.
     let monitors = xcap::Monitor::all()?;
+    let target_id = monitor.id().map_err(|e| anyhow!("{e}"))?;
     monitors
         .iter()
-        .position(|m| m.id() == monitor.id())
+        .position(|m| m.id().map(|id| id == target_id).unwrap_or(false))
         .map(|i| i as u32)
         .ok_or_else(|| anyhow!("display unavailable"))
 }
@@ -114,7 +142,6 @@ fn monitor_index(monitor: &xcap::Monitor) -> Result<u32> {
 // Recording (WGC frames + WASAPI audio)
 // ---------------------------------------------------------------------------
 
-#[derive(Default)]
 struct WinHandlerState {
     video_tx: Option<mpsc::Sender<Vec<u8>>>,
     region_px: Rect,
@@ -179,7 +206,7 @@ impl GraphicsCaptureApiHandler for WinCaptureHandler {
 }
 
 pub struct WindowsRecorder {
-    control: windows_capture::graphics_capture_api::CaptureControl<WinCaptureHandler, Box<dyn std::error::Error + Send + Sync>>,
+    control: Option<CaptureControl<WinCaptureHandler, Box<dyn std::error::Error + Send + Sync>>>,
 }
 
 impl WindowsRecorder {
@@ -244,13 +271,19 @@ impl WindowsRecorder {
             .map_err(|e| anyhow!("{e}"))?;
         let _ = slot;
 
-        Ok(WindowsRecorder { control })
+        Ok(WindowsRecorder {
+            control: Some(control),
+        })
     }
 }
 
 impl PlatformRecorder for WindowsRecorder {
     fn stop(&mut self) -> Result<()> {
-        self.control.stop();
+        // `CaptureControl::stop` consumes itself, so take it out of the slot
+        // and drop it after the capture thread has been joined.
+        if let Some(control) = self.control.take() {
+            control.stop().map_err(|e| anyhow!("{e}"))?;
+        }
         Ok(())
     }
 }
@@ -274,7 +307,7 @@ fn start_audio(
                 .and_then(|configs| {
                     configs
                         .filter(|c| c.channels() == 2)
-                        .map(|c| c.with_sample_rate(cpal::SampleRate(48_000)))
+                        .map(|c| c.with_sample_rate(48_000))
                         .find(|c| c.sample_format() == cpal::SampleFormat::F32)
                 })
                 .or_else(|| device.default_input_config().ok());
@@ -283,7 +316,7 @@ fn start_audio(
                 match config.sample_format() {
                     cpal::SampleFormat::F32 => {
                         if let Ok(stream) = device.build_input_stream(
-                            &config.into(),
+                            config.into(),
                             move |data: &[f32], _| {
                                 let _ = tx_clone.send(to_bytes(data));
                             },
@@ -296,7 +329,7 @@ fn start_audio(
                     }
                     cpal::SampleFormat::I16 | cpal::SampleFormat::U16 => {
                         if let Ok(stream) = device.build_input_stream(
-                            &config.into(),
+                            config.into(),
                             move |data: &[i16], _| {
                                 let _ = tx_clone.send(to_bytes_i16(data));
                             },
@@ -324,7 +357,7 @@ fn start_audio(
                     .and_then(|configs| {
                         configs
                             .filter(|c| c.channels() == 2)
-                            .map(|c| c.with_sample_rate(cpal::SampleRate(48_000)))
+                            .map(|c| c.with_sample_rate(48_000))
                             .find(|c| c.sample_format() == cpal::SampleFormat::F32)
                     })
                     .or_else(|| device.default_input_config().ok());
@@ -332,7 +365,7 @@ fn start_audio(
                     match config.sample_format() {
                         cpal::SampleFormat::F32 => {
                             if let Ok(stream) = device.build_input_stream(
-                                &config.into(),
+                                config.into(),
                                 move |data: &[f32], _| {
                                     let _ = tx.send(to_bytes(data));
                                 },
@@ -345,7 +378,7 @@ fn start_audio(
                         }
                         cpal::SampleFormat::I16 | cpal::SampleFormat::U16 => {
                             if let Ok(stream) = device.build_input_stream(
-                                &config.into(),
+                                config.into(),
                                 move |data: &[i16], _| {
                                     let _ = tx.send(to_bytes_i16(data));
                                 },

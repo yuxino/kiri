@@ -130,6 +130,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
                 // Dock icon click (macOS): bring the library back.
                 if let Some(window) = app.get_webview_window("library") {
@@ -137,6 +138,8 @@ pub fn run() {
                     let _ = window.set_focus();
                 }
             }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
         });
 }
 
@@ -202,7 +205,7 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
             if !active {
                 return;
             }
-            let (region, frame, _scale) = match (region, frame, scale) {
+            let (region, frame, scale) = match (region, frame, scale) {
                 (Some(r), Some(f), Some(s)) => (r, f, s),
                 _ => return,
             };
@@ -212,6 +215,8 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
             let (gx, gy) = (x, main_height - y);
             #[cfg(windows)]
             let (gx, gy) = (x / scale, y / scale);
+            #[cfg(target_os = "macos")]
+            let _ = scale;
             let payload = serde_json::json!({
                 "x": gx - frame.x - region.x,
                 "y": gy - frame.y - region.y,

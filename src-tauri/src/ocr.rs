@@ -62,24 +62,21 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
 
 #[cfg(windows)]
 pub fn recognize_text(png: &[u8]) -> Result<String> {
-    use windows::core::Interface;
     use windows::Graphics::Imaging::BitmapPixelFormat;
     use windows::Media::Ocr::OcrEngine;
-    use windows::Storage::Streams::Buffer;
+    use windows::Storage::Streams::DataWriter;
 
     let image = image::load_from_memory(png).map_err(|error| anyhow!("{error}"))?;
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
     let raw = rgba.into_raw();
 
-    let buffer = Buffer::Create(raw.len() as u32).map_err(|error| anyhow!("{error}"))?;
-    unsafe {
-        let target = buffer.as_mut().ok_or_else(|| anyhow!("buffer unavailable"))?;
-        std::ptr::copy_nonoverlapping(raw.as_ptr(), target.as_mut_ptr() as *mut u8, raw.len());
-    }
-    buffer
-        .SetLength(raw.len() as u32)
-        .map_err(|error| anyhow!("{error}"))?;
+    // Write the pixel bytes into an IBuffer via DataWriter (the windows crate
+    // no longer exposes Buffer::as_mut for raw writes).
+    let writer = DataWriter::new().map_err(|error| anyhow!("{error}"))?;
+    writer.WriteBytes(&raw).map_err(|error| anyhow!("{error}"))?;
+    let buffer = writer.DetachBuffer().map_err(|error| anyhow!("{error}"))?;
+
     let bitmap: windows::Graphics::Imaging::SoftwareBitmap =
         windows::Graphics::Imaging::SoftwareBitmap::CreateCopyFromBuffer(
             &buffer,
@@ -94,7 +91,7 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
     let operation = engine
         .RecognizeAsync(&bitmap)
         .map_err(|error| anyhow!("{error}"))?;
-    let result = operation.get().map_err(|error| anyhow!("{error}"))?;
+    let result = operation.join().map_err(|error| anyhow!("{error}"))?;
 
     let mut lines = Vec::new();
     let ocr_lines = result.Lines().map_err(|error| anyhow!("{error}"))?;

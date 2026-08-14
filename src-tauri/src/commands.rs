@@ -17,8 +17,10 @@ use crate::core::shortcut::KIRI_CAPTURE;
 use crate::platform;
 use crate::state::{
     emit_error, emit_library_changed, emit_notice, emit_recording_state, ActiveRecording, AppState,
-    CaptureSession, RecoveryAction, RecordingConfiguration, RecordingFlow,
+    CaptureSession, RecordingConfiguration, RecordingFlow,
 };
+#[cfg(target_os = "macos")]
+use crate::state::RecoveryAction;
 
 // ---------------------------------------------------------------------------
 // DTOs
@@ -531,7 +533,7 @@ pub fn confirm_capture(app: AppHandle, request: ConfirmCaptureRequest) -> Result
 fn confirm_capture_inner(
     app: &AppHandle,
     state: &AppState,
-    mut session: CaptureSession,
+    session: CaptureSession,
     request: ConfirmCaptureRequest,
 ) -> Result<(), String> {
     log::info!("confirm_capture: action={} bytes={}", request.action, request.png.len());
@@ -947,6 +949,7 @@ fn start_recorder(
     audio_tx: Option<mpsc::Sender<Vec<u8>>>,
     mic_tx: Option<mpsc::Sender<Vec<u8>>>,
 ) -> Result<Box<dyn crate::capture::PlatformRecorder + Send>, String> {
+    #[cfg(target_os = "macos")]
     let ripple_excepted = platform::window_capture_id(app, "ripple")
         .into_iter()
         .collect::<Vec<_>>();
@@ -1044,7 +1047,7 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
 
     let configuration = {
         let state = app.state::<AppState>();
-        let mut recording = state.recording.lock().unwrap();
+        let recording = state.recording.lock().unwrap();
         if recording.is_recording || recording.is_paused {
             return Ok(());
         }

@@ -8,12 +8,11 @@ use std::thread;
 use anyhow::Result;
 use tauri::Manager;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
-use windows::Win32::UI::Input::KeyboardAndMouse::{RegisterHotKey, MOD_CONTROL, MOD_NOREPEAT, MOD_SHIFT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, EnumWindows, GetForegroundWindow, GetMessageW,
     GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
     SetForegroundWindow, SetWindowDisplayAffinity, SetWindowsHookExW, ShowWindow, TranslateMessage,
-    MSG, MSLLHOOKSTRUCT, SW_RESTORE, WH_MOUSE_LL, WM_HOTKEY, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
+    MSG, MSLLHOOKSTRUCT, SW_RESTORE, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
     WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
 };
 
