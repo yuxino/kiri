@@ -219,27 +219,32 @@ function ControlButton(props: {
           : "rgba(125,105,245,0.14)",
         color: props.danger ? "#fff" : ACCENT,
         fontSize: 13,
-        cursor: "default",
+        cursor: "pointer",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
         transition:
-          "background 0.14s ease-out, transform 0.14s ease-out, box-shadow 0.14s ease-out",
+          "background 0.14s ease-out, transform 0.14s ease-out, box-shadow 0.14s ease-out, color 0.14s ease-out",
       }}
       onMouseEnter={(e) => {
-        // Consistent hover language: deepen the fill, lift slightly.
+        // Consistent hover language: deepen the fill, lift slightly, and
+        // brighten the icon so the control reads as interactive.
         e.currentTarget.style.background = props.danger
           ? "#FF4D42"
-          : "rgba(125,105,245,0.30)";
+          : "rgba(125,105,245,0.32)";
         e.currentTarget.style.boxShadow = props.danger
           ? "0 2px 10px rgba(255, 59, 48, 0.5)"
           : "0 1px 6px rgba(0,0,0,0.3)";
+        e.currentTarget.style.color = props.danger ? "#fff" : "#8f7bff";
+        e.currentTarget.style.transform = "scale(1.04)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = props.danger
           ? RED
           : "rgba(125,105,245,0.14)";
         e.currentTarget.style.boxShadow = "none";
+        e.currentTarget.style.color = props.danger ? "#fff" : ACCENT;
+        e.currentTarget.style.transform = "scale(1)";
       }}
       onMouseDown={(e) => {
         e.currentTarget.style.transform = "scale(0.92)";
