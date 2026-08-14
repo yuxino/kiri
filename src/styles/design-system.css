@@ -274,3 +274,20 @@ textarea {
 .kiri-icon-button:active {
   transform: scale(0.92);
 }
+
+/* Context menu (library cards) — frosty elevated panel with a quick
+   scale/fade entrance, mirroring native context menus. */
+@keyframes kiri-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.kiri-card-menu {
+  transform-origin: top left;
+}

@@ -62,6 +62,9 @@ export function LibraryWindow() {
   const [error, setError] = useState<ErrorDto | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  // Menu anchor in viewport coordinates (mouse position on right-click, or
+  // the ⋯ button's corner), so the menu appears where the user looked.
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [shortcutLabel, setShortcutLabel] = useState("");
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video" | "gif">("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
@@ -153,7 +156,15 @@ export function LibraryWindow() {
   const isEmpty = query.trim() === "" && assets.length === 0 && loaded;
   const isFilterEmpty = !isSearchEmpty && !isEmpty && filteredAssets.length === 0 && loaded;
 
-  const openMenu = (id: string) => setMenuFor((current) => (current === id ? null : id));
+  const openMenu = (id: string, x: number, y: number) => {
+    if (menuFor === id) {
+      setMenuFor(null);
+      setMenuPos(null);
+      return;
+    }
+    setMenuFor(id);
+    setMenuPos({ x, y });
+  };
 
   // Clicking anywhere outside a card menu closes it (matches native menus).
   useEffect(() => {
@@ -161,84 +172,120 @@ export function LibraryWindow() {
       const target = e.target as HTMLElement | null;
       if (target && target.closest(".kiri-card-menu")) return;
       setMenuFor(null);
+      setMenuPos(null);
     };
     window.addEventListener("mousedown", close);
     return () => window.removeEventListener("mousedown", close);
   }, []);
+
+  // Keep the open menu inside the window (flip when near the right/bottom
+  // edge) — mirrors how native context menus avoid the screen edges.
+  // Heights vary (image cards get "Copy"; trash gets "Delete Permanently"),
+  // so estimate generously and clamp to the viewport.
+  const menuStyle = useMemo(() => {
+    if (!menuPos) return undefined;
+    const MENU_W = 196;
+    const MENU_H = 280;
+    const pad = 10;
+    const right = menuPos.x + MENU_W;
+    const bottom = menuPos.y + 8 + MENU_H;
+    const flipX = right > window.innerWidth - pad;
+    const flipY = bottom > window.innerHeight - pad;
+    const left = flipX ? Math.max(pad, menuPos.x - MENU_W) : menuPos.x;
+    const top = flipY
+      ? Math.max(pad, menuPos.y - MENU_H)
+      : Math.min(menuPos.y + 8, window.innerHeight - MENU_H - pad);
+    return { left, top };
+  }, [menuPos]);
+
+  // Run a menu action then close the menu (native menus dismiss on click).
+  const closeMenu = useCallback(() => {
+    setMenuFor(null);
+    setMenuPos(null);
+  }, []);
+  const run = useCallback(
+    (fn: () => void) => () => {
+      fn();
+      closeMenu();
+    },
+    [closeMenu],
+  );
 
   const itemMenu = useCallback(
     (asset: AssetDto) => (
       <div
         className="kiri-card-menu"
         style={{
-          position: "absolute",
-          right: 0,
-          bottom: 44,
-          background: "var(--kiri-elevated)",
+          position: "fixed",
+          ...(menuStyle ?? { left: 0, top: 0 }),
+          background: "color-mix(in srgb, var(--kiri-elevated) 92%, transparent)",
+          backdropFilter: "blur(24px) saturate(1.5)",
+          WebkitBackdropFilter: "blur(24px) saturate(1.5)",
           border: "1px solid var(--kiri-surface-border)",
-          borderRadius: 12,
+          borderRadius: 14,
           padding: 6,
-          minWidth: 180,
-          boxShadow: "0 8px 18px rgba(0,0,0,0.10)",
-          zIndex: 5,
+          minWidth: 196,
+          boxShadow: "0 10px 24px rgba(0,0,0,0.22), 0 2px 6px rgba(0,0,0,0.10)",
+          zIndex: 100,
           display: "flex",
           flexDirection: "column",
+          animation: "kiri-menu-in 0.12s ease-out",
         }}
       >
         {asset.kind === "image" && (
-          <MenuRow icon="doc.on.doc" label={t("Copy")} onClick={() => void api.copyAsset(asset.id).catch(() => {})} />
+          <MenuRow icon="doc.on.doc" label={t("Copy")} onClick={run(() => void api.copyAsset(asset.id).catch(() => {}))} />
         )}
         <MenuRow
           icon="character.textbox"
           label={t("Rename")}
-          onClick={() => {
+          onClick={run(() => {
             window.dispatchEvent(new CustomEvent(`kiri-rename:${asset.id}`));
-          }}
+          })}
         />
         <MenuRow
           icon="tag"
           label={t("Add Tag…")}
-          onClick={() => {
+          onClick={run(() => {
             window.dispatchEvent(new CustomEvent(`kiri-addtag:${asset.id}`));
-          }}
+          })}
         />
-        <MenuRow icon="photo.on.rectangle" label={t("Open")} onClick={() => void api.openAsset(asset.id).catch(() => {})} />
-        <MenuRow icon="folder" label={t("Show in Finder")} onClick={() => void api.revealAsset(asset.id).catch(() => {})} />
+        <MenuRow icon="photo.on.rectangle" label={t("Open")} onClick={run(() => void api.openAsset(asset.id).catch(() => {}))} />
+        <MenuRow icon="folder" label={t("Show in Finder")} onClick={run(() => void api.revealAsset(asset.id).catch(() => {}))} />
         {asset.gifEligible && (
-          <MenuRow icon="sparkles.rectangle.stack" label={t("Convert to GIF")} onClick={() => void api.convertToGif(asset.id).catch(() => {})} />
+          <MenuRow icon="sparkles.rectangle.stack" label={t("Convert to GIF")} onClick={run(() => void api.convertToGif(asset.id).catch(() => {}))} />
         )}
-        <div style={{ height: 1, background: "var(--kiri-surface-border)", margin: "4px 0", opacity: 0.7 }} />
+        <div style={{ height: 1, background: "var(--kiri-surface-border)", margin: "5px 8px", opacity: 0.8 }} />
         {showingTrash ? (
           <>
             <MenuRow
               icon="arrow.uturn.backward"
               label={t("Restore")}
-              onClick={() => void api.restoreAsset(asset.id).catch(() => {})}
+              onClick={run(() => void api.restoreAsset(asset.id).catch(() => {}))}
             />
             <MenuRow
               icon="trash.fill"
               label={t("Delete Permanently")}
               destructive
-              onClick={() =>
+              onClick={run(() =>
                 setConfirm({
                   title: t("Delete this capture permanently?"),
                   message: t("This cannot be undone."),
                   confirmLabel: t("Delete Permanently"),
                   onConfirm: () => void api.permanentlyDelete(asset.id).catch(() => {}),
-                })
-              }
+                }),
+              )}
             />
           </>
         ) : (
           <MenuRow
             icon="trash.fill"
             label={t("Move to Trash")}
-            onClick={() => void api.moveToTrash(asset.id).catch(() => {})}
+            onClick={run(() => void api.moveToTrash(asset.id).catch(() => {}))}
           />
         )}
       </div>
     ),
-    [showingTrash],
+    [showingTrash, menuStyle, run],
   );
 
   return (
@@ -479,7 +526,7 @@ export function LibraryWindow() {
                     key={asset.id}
                     asset={asset}
                     menuOpen={menuFor === asset.id}
-                    onMenu={() => openMenu(asset.id)}
+                    onMenu={(x, y) => openMenu(asset.id, x, y)}
                     menu={itemMenu(asset)}
                     onDoubleClick={() => void api.openAsset(asset.id).catch(() => {})}
                     onDragStart={(e) => {
@@ -650,7 +697,7 @@ function recoveryLabel(recovery: string): string {
 function AssetCard(props: {
   asset: AssetDto;
   menuOpen: boolean;
-  onMenu(): void;
+  onMenu(x: number, y: number): void;
   menu: React.ReactNode;
   onDoubleClick(): void;
   onDragStart(e: React.DragEvent): void;
@@ -683,10 +730,10 @@ function AssetCard(props: {
       onDragStart={onDragStart}
       onDoubleClick={onDoubleClick}
       onContextMenu={(e) => {
-        // Right-click shows the localized action menu (same as ⋯), never
-        // the webview's system context menu.
+        // Right-click shows the localized action menu at the cursor
+        // (same as ⋯), never the webview's system context menu.
         e.preventDefault();
-        onMenu();
+        onMenu(e.clientX, e.clientY);
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -864,7 +911,12 @@ function AssetCard(props: {
         <button
           className="kiri-icon-button"
           title={t("More Actions")}
-          onClick={onMenu}
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            // Anchor the menu below the ⋯ button; edge-flip handled in
+            // menuStyle (left-aligned so a near-right flip stays sane).
+            onMenu(rect.left, rect.bottom + 4);
+          }}
           style={{
             width: 26,
             height: 26,
@@ -971,25 +1023,41 @@ function MenuRow(props: { label: string; icon?: IconName; onClick(): void; destr
         background: "transparent",
         border: "none",
         textAlign: "left",
-        padding: "6px 10px",
-        borderRadius: 8,
+        padding: "7px 10px",
+        borderRadius: 9,
         color: props.destructive ? "#FA476E" : "var(--kiri-label)",
         font: "400 12.5px var(--kiri-font-ui)",
         cursor: "default",
         display: "flex",
         alignItems: "center",
-        gap: 9,
-        transition: "background 0.14s ease-out",
+        gap: 10,
+        transition: "background 0.12s ease-out, transform 0.06s ease-out",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = "var(--kiri-group-fill)";
+        e.currentTarget.style.background =
+          "color-mix(in srgb, var(--kiri-accent) 18%, transparent)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = "transparent";
       }}
+      onMouseDown={(e) => {
+        e.currentTarget.style.transform = "translateY(0.5px)";
+      }}
+      onMouseUp={(e) => {
+        e.currentTarget.style.transform = "none";
+      }}
     >
       {props.icon && (
-        <span style={{ width: 15, display: "flex", justifyContent: "center", opacity: 0.75 }}>
+        <span
+          style={{
+            width: 15,
+            display: "flex",
+            justifyContent: "center",
+            color: props.destructive ? "#FA476E" : "var(--kiri-accent)",
+            opacity: 0.9,
+            flexShrink: 0,
+          }}
+        >
           <KiriIcon name={props.icon} size={14} />
         </span>
       )}
