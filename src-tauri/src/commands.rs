@@ -539,7 +539,7 @@ fn confirm_capture_inner(
                 .insert(imported.id.to_string(), request.png.clone());
             let label = format!("pin-{}", imported.id);
             let builder = WebviewWindowBuilder::new(
-                &app,
+                app,
                 label,
                 WebviewUrl::App(format!("index.html?window=pin&id={}", imported.id).into()),
             )
@@ -552,7 +552,7 @@ fn confirm_capture_inner(
         "edit" => {
             let label = format!("editor-{}", imported.id);
             let builder = WebviewWindowBuilder::new(
-                &app,
+                app,
                 label,
                 WebviewUrl::App(format!("index.html?window=editor&id={}", imported.id).into()),
             )

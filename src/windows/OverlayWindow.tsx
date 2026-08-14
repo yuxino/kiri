@@ -260,41 +260,38 @@ export function OverlayWindow() {
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
       const p = clampPoint(toPoint(e), bounds);
-      if (phaseRef.current === "mode-select") {
+      const interactive = phaseRef.current === "mode-select" || phaseRef.current === "selecting";
+      if (!interactive) return;
+      // Hover outline while not dragging.
+      if (!drag && !resizeHandle && !moveDrag) {
         setHoverWindow(context ? windowCandidate(p, context.windowRects, bounds) : null);
         return;
       }
-      if (phaseRef.current === "selecting") {
-        if (!drag && !resizeHandle && !moveDrag) {
-          setHoverWindow(context ? windowCandidate(p, context.windowRects, bounds) : null);
-          return;
-        }
-        setHoverWindow(null);
-        if (resizeHandle && drag && selectionRef.current) {
-          const resizedRect = resized(selectionRef.current, resizeHandle as never, p, bounds, 16);
-          setSelection(resizedRect);
+      setHoverWindow(null);
+      if (resizeHandle && drag && selectionRef.current) {
+        const resizedRect = resized(selectionRef.current, resizeHandle as never, p, bounds, 16);
+        setSelection(resizedRect);
+        setDrag({ ...drag, current: p, moved: true });
+        return;
+      }
+      if (moveDrag) {
+        const by = { x: p.x - moveDrag.start.x, y: p.y - moveDrag.start.y };
+        const movedRect = {
+          x: Math.min(Math.max(moveDrag.original.x + by.x, minX(bounds)), maxX(bounds) - moveDrag.original.width),
+          y: Math.min(Math.max(moveDrag.original.y + by.y, minY(bounds)), maxY(bounds) - moveDrag.original.height),
+          width: moveDrag.original.width,
+          height: moveDrag.original.height,
+        };
+        setSelection(movedRect);
+        return;
+      }
+      if (drag) {
+        const moved = Math.hypot(p.x - drag.start.x, p.y - drag.start.y) >= 3;
+        if (moved) {
+          setSelection(normalized(drag.start, p));
           setDrag({ ...drag, current: p, moved: true });
-          return;
-        }
-        if (moveDrag) {
-          const by = { x: p.x - moveDrag.start.x, y: p.y - moveDrag.start.y };
-          const movedRect = {
-            x: Math.min(Math.max(moveDrag.original.x + by.x, minX(bounds)), maxX(bounds) - moveDrag.original.width),
-            y: Math.min(Math.max(moveDrag.original.y + by.y, minY(bounds)), maxY(bounds) - moveDrag.original.height),
-            width: moveDrag.original.width,
-            height: moveDrag.original.height,
-          };
-          setSelection(movedRect);
-          return;
-        }
-        if (drag) {
-          const moved = Math.hypot(p.x - drag.start.x, p.y - drag.start.y) >= 3;
-          if (moved) {
-            setSelection(normalized(drag.start, p));
-            setDrag({ ...drag, current: p, moved: true });
-          } else {
-            setDrag({ ...drag, current: p });
-          }
+        } else {
+          setDrag({ ...drag, current: p });
         }
       }
     },
