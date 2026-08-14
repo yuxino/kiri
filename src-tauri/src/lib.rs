@@ -129,6 +129,17 @@ fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
         Ok(_) => Ok(()),
         Err(error) => {
             log::warn!("shortcut registration failed: {error}");
+            // Surface the failure: show the library window and an error
+            // banner with a recovery action so the user knows why the
+            // shortcut is dead (mirrors the Swift app's menu-bar error).
+            if let Some(window) = app.get_webview_window("library") {
+                let _ = window.show();
+            }
+            crate::state::emit_error(
+                app,
+                error.to_string(),
+                Some(crate::state::RecoveryAction::OpenInputMonitoringSettings),
+            );
             Ok(())
         }
     }
