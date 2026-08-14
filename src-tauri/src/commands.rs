@@ -4,10 +4,9 @@
 
 use std::path::PathBuf;
 use std::sync::mpsc;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::capture::current as capture_backend;
@@ -18,7 +17,7 @@ use crate::core::shortcut::KIRI_CAPTURE;
 use crate::platform;
 use crate::state::{
     emit_error, emit_library_changed, emit_notice, emit_recording_state, ActiveRecording, AppState,
-    CaptureSession, RecordingConfiguration, RecordingFlow,
+    CaptureSession, RecoveryAction, RecordingConfiguration, RecordingFlow,
 };
 
 // ---------------------------------------------------------------------------
@@ -64,6 +63,8 @@ pub struct AssetDto {
     pub kind: String,
     pub created_at: f64,
     pub filename: String,
+    pub title: Option<String>,
+    pub tags: Vec<String>,
     pub pixel_width: i64,
     pub pixel_height: i64,
     pub duration: Option<f64>,
@@ -80,6 +81,8 @@ fn asset_dto(asset: &CaptureAsset, root: &std::path::Path) -> AssetDto {
         kind: asset.kind.as_str().to_string(),
         created_at: asset.created_at,
         filename: asset.filename.clone(),
+        title: asset.title.clone(),
+        tags: asset.tags.clone(),
         pixel_width: asset.pixel_width,
         pixel_height: asset.pixel_height,
         duration: asset.duration,
@@ -107,6 +110,28 @@ pub fn list_assets(
     let assets = library.search(&query, showing_trash);
     let root = state.library_root.clone();
     Ok(assets.iter().map(|asset| asset_dto(asset, &root)).collect())
+}
+
+
+/// Average brightness (0-255) of a PNG buffer; None if undecodable.
+fn png_average(png: &[u8]) -> Option<(u32, u32, f64)> {
+    let image = image::load_from_memory(png).ok()?;
+    let rgba = image.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let mut sum = 0.0f64;
+    let mut count = 0.0f64;
+    let step = ((w * h) / 4000).max(1);
+    for (i, pixel) in rgba.pixels().enumerate() {
+        if i % step as usize != 0 {
+            continue;
+        }
+        sum += (pixel[0] as f64 + pixel[1] as f64 + pixel[2] as f64) / 3.0;
+        count += 1.0;
+    }
+    Some((w, h, sum / count.max(1.0)))
 }
 
 fn with_asset_mutation(
@@ -298,6 +323,28 @@ fn convert_asset_to_gif(
 #[tauri::command]
 pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
     log::info!("start_capture: beginning capture flow");
+
+    // Pre-flight the capture permission so failures surface as a visible,
+    // actionable banner in the library window instead of a silent no-op
+    // (spec §6: missing permission opens a clear system-settings guide).
+    #[cfg(target_os = "macos")]
+    if std::env::var("KIRI_CAPTURE_FIXTURE").as_deref() != Ok("1") {
+        use crate::capture::current::PermissionState;
+        match crate::capture::current::check_capture_permission() {
+            PermissionState::Authorized => {}
+            PermissionState::RestartRequired => {
+                let message = "Screen Recording access was granted. Quit and reopen Kiri once to finish enabling capture.";
+                emit_error(&app, message.into(), Some(RecoveryAction::QuitKiri));
+                return Err(message.into());
+            }
+            PermissionState::SettingsRequired => {
+                let message = "Screen Recording is off. Enable Kiri in System Settings, then quit and reopen it once.";
+                emit_error(&app, message.into(), Some(RecoveryAction::OpenSettings));
+                return Err(message.into());
+            }
+        }
+    }
+
     {
         let state = app.state::<AppState>();
         let capture = state.capture.lock().unwrap();
@@ -498,16 +545,16 @@ fn confirm_capture_inner(
     let action = request.action.clone();
     if action == "copy" {
         if let Err(error) = platform::write_image_to_clipboard(&request.png) {
-            emit_error(
-                &app,
-                format!("Could not copy the capture to the clipboard.: {error}"),
-                None,
-            );
+            log::error!("confirm_capture: clipboard write failed: {error}");
+            emit_error(&app, "Could not copy the capture to the clipboard.".into(), None);
         } else {
             emit_notice(&app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
         }
     }
 
+    if let Some((w, h, avg)) = png_average(&request.png) {
+        log::info!("confirm_capture: exported png {w}x{h} avg-brightness={avg:.1}");
+    }
     let image = image::load_from_memory(&request.png).map_err(|e| e.to_string())?;
     let (pixel_width, pixel_height) = (image.width() as i64, image.height() as i64);
     let mut library = state.library.lock().unwrap();
@@ -528,7 +575,18 @@ fn confirm_capture_inner(
 
     match action.as_str() {
         "save" => {
-            let _ = save_file_dialog(app.clone(), "kiri.png".into());
+            // Spec §5.4: default name kiri-<timestamp>.png; write the PNG to
+            // the chosen location after the save panel closes.
+            let now = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
+            let default_name = format!("kiri-{now}.png");
+            if let Ok(Some(path)) = save_file_dialog(app.clone(), default_name) {
+                if let Err(error) = std::fs::write(&path, &request.png) {
+                    log::error!("confirm_capture: save failed: {error}");
+                    emit_error(&app, "Could not save the capture.".into(), None);
+                } else {
+                    emit_notice(&app, "Saved".into(), "checkmark.circle.fill".into());
+                }
+            }
         }
         "pin" => {
             let store = app.state::<crate::protocol::ProtocolStore>();
@@ -546,7 +604,8 @@ fn confirm_capture_inner(
             .title("kiri")
             .decorations(false)
             .always_on_top(true)
-            .shadow(false);
+            .shadow(false)
+            .transparent(true);
             let _ = builder.build();
         }
         "edit" => {
@@ -629,6 +688,34 @@ pub fn update_asset(app: AppHandle, id: String, request: UpdateAssetRequest) -> 
             emit_notice(&app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
         }
     }
+    emit_library_changed(&app);
+    Ok(())
+}
+
+/// Sets a friendly display title for a capture (metadata only; the on-disk
+/// filename is unchanged so existing libraries stay compatible).
+#[tauri::command]
+pub fn rename_asset(app: AppHandle, id: String, title: String) -> Result<(), String> {
+    let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    let trimmed = title.trim().to_string();
+    let state = app.state::<AppState>();
+    let mut library = state.library.lock().unwrap();
+    library
+        .set_title(if trimmed.is_empty() { None } else { Some(trimmed) }, &parsed)
+        .map_err(|e| e.to_string())?;
+    drop(library);
+    emit_library_changed(&app);
+    Ok(())
+}
+
+/// Replaces the tag list of a capture (metadata only).
+#[tauri::command]
+pub fn set_tags(app: AppHandle, id: String, tags: Vec<String>) -> Result<(), String> {
+    let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    let state = app.state::<AppState>();
+    let mut library = state.library.lock().unwrap();
+    library.set_tags(tags, &parsed).map_err(|e| e.to_string())?;
+    drop(library);
     emit_library_changed(&app);
     Ok(())
 }
@@ -729,14 +816,27 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
         request.region.width,
         request.region.height,
     );
+    log::info!(
+        "create countdown window: screen_frame=({:.0},{:.0}) region=({:.0},{:.0}) → window at ({:.0},{:.0} {:.0}x{:.0})",
+        screen_frame.x,
+        screen_frame.y,
+        request.region.x,
+        request.region.y,
+        region_screen.x,
+        region_screen.y,
+        region_screen.width,
+        region_screen.height,
+    );
     let builder = WebviewWindowBuilder::new(
         &app,
         label.clone(),
         WebviewUrl::App("index.html?window=countdown".into()),
     )
     .title("kiri")
-    .inner_size(region_screen.width, region_screen.height)
-    .position(region_screen.x, region_screen.y)
+    // Cover the whole display so the countdown badge is centered on the
+    // SCREEN, not on the selected region (the user's expectation).
+    .inner_size(screen_frame.width, screen_frame.height)
+    .position(screen_frame.x, screen_frame.y)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
@@ -744,7 +844,9 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
     .shadow(false);
     let window = builder.build().map_err(|e| e.to_string())?;
     platform::set_window_capture_excluded(&app, &label, true);
-    let _ = window.set_focus();
+    // Spec (recording §5.1): the countdown window is level .screenSaver.
+    raise_overlay_window(&window);
+    let _ = window.show();
     Ok(())
 }
 
@@ -753,6 +855,14 @@ pub fn cancel_recording_flow(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("countdown") {
         let _ = window.close();
     }
+    {
+        let state = app.state::<AppState>();
+        let monitor = state.click_monitor.lock().unwrap().take();
+        drop(state);
+        if let Some(monitor) = monitor {
+            monitor.stop();
+        }
+    }
     let state = app.state::<AppState>();
     let mut recording = state.recording.lock().unwrap();
     *recording = RecordingFlow::default();
@@ -760,7 +870,22 @@ pub fn cancel_recording_flow(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn create_control_panel(app: &AppHandle) -> Result<(), String> {
+fn create_control_panel(app: &AppHandle, configuration: &RecordingConfiguration) -> Result<(), String> {
+    let frame = configuration.screen_frame;
+    // Default position: bottom-right, lifted clear of the Dock (64pt from
+    // the bottom). The user can drag the panel; the frontend persists the
+    // chosen position.
+    let panel_x = frame.x + frame.width - 296.0 - 24.0;
+    let panel_y = frame.y + frame.height - 64.0 - 64.0;
+    log::info!(
+        "create_control_panel: screen_frame=({:.0},{:.0} {:.0}x{:.0}) → panel at ({:.0},{:.0})",
+        frame.x,
+        frame.y,
+        frame.width,
+        frame.height,
+        panel_x,
+        panel_y,
+    );
     let panel = WebviewWindowBuilder::new(
         app,
         "control-panel".to_string(),
@@ -768,6 +893,11 @@ fn create_control_panel(app: &AppHandle) -> Result<(), String> {
     )
     .title("kiri")
     .inner_size(296.0, 64.0)
+    // Spec (recording §6.4): x = screenFrame.midX - 148 (horizontally
+    // centered on the display), y = screenFrame.maxY - 64 - 18 (18pt from
+    // the bottom edge; AppKit coordinates are bottom-left origin, matching
+    // how the overlay window positions itself on screen_frame).
+    .position(panel_x, panel_y)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
@@ -776,6 +906,11 @@ fn create_control_panel(app: &AppHandle) -> Result<(), String> {
     .build()
     .map_err(|e| e.to_string())?;
     platform::set_window_capture_excluded(app, "control-panel", true);
+    // Keep the panel above every app window. It takes keyboard focus so the
+    // recording hotkeys work (Space = pause/resume, Esc = stop); the panel
+    // itself is the only window the user interacts with while recording.
+    raise_overlay_window(&panel);
+    let _ = panel.show();
     let _ = panel.set_focus();
     Ok(())
 }
@@ -786,7 +921,7 @@ fn create_ripple_window(
 ) -> Result<(), String> {
     let region = configuration.region;
     let frame = configuration.screen_frame;
-    let ripple = WebviewWindowBuilder::new(
+    let _ripple = WebviewWindowBuilder::new(
         app,
         "ripple".to_string(),
         WebviewUrl::App("index.html?window=ripple".into()),
@@ -802,7 +937,6 @@ fn create_ripple_window(
     .build()
     .map_err(|e| e.to_string())?;
     platform::set_window_click_through(app, "ripple");
-    let _ = ripple.set_focus();
     Ok(())
 }
 
@@ -888,12 +1022,22 @@ fn start_encoder(
             }),
         video_encoder: crate::record::pick_video_encoder(&ffmpeg),
     };
+    log::info!(
+        "start_encoder: ffmpeg={} video {}x{}@{}, audio={}, mic={}",
+        ffmpeg.display(),
+        encoder_config.width,
+        encoder_config.height,
+        encoder_config.fps,
+        encoder_config.audio.is_some(),
+        encoder_config.mic.is_some(),
+    );
     crate::record::SegmentEncoder::start(&encoder_config, out_path, &ffmpeg, video_rx, audio_rx, mic_rx)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn begin_recording(app: AppHandle) -> Result<(), String> {
+    log::info!("begin_recording: called");
     if let Some(window) = app.get_webview_window("countdown") {
         let _ = window.close();
     }
@@ -910,9 +1054,23 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
         configuration
     };
 
-    create_control_panel(&app)?;
+    create_control_panel(&app, &configuration)?;
     if configuration.options.highlights_clicks {
         create_ripple_window(&app, &configuration)?;
+        // The click monitor needs the Input Monitoring permission; install
+        // it only while highlighting clicks (avoids a permission prompt at
+        // every launch).
+        let _ = crate::ensure_click_monitor(&app);
+    }
+
+    // Mark the session as starting so the control panel shows a spinner
+    // while the recorder/encoder come up (SCK content resolution and stream
+    // start take a moment).
+    {
+        let state = app.state::<AppState>();
+        let mut recording = state.recording.lock().unwrap();
+        recording.is_starting = true;
+        emit_recording_state(&app, &recording);
     }
 
     let out_path = std::env::temp_dir().join(format!(
@@ -934,8 +1092,22 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
         .map(|(tx, rx)| (Some(tx), Some(rx)))
         .unwrap_or((None, None));
 
-    let recorder = start_recorder(&app, &configuration, video_tx, audio_tx, mic_tx)?;
-    let encoder = start_encoder(&app, &configuration, out_path, video_rx, audio_rx, mic_rx)?;
+    let recorder = match start_recorder(&app, &configuration, video_tx, audio_tx, mic_tx) {
+        Ok(recorder) => recorder,
+        Err(error) => {
+            log::error!("recording: start_recorder failed: {error}");
+            emit_error(&app, "Could not start screen recording.".into(), None);
+            return Err(error);
+        }
+    };
+    let encoder = match start_encoder(&app, &configuration, out_path, video_rx, audio_rx, mic_rx) {
+        Ok(encoder) => encoder,
+        Err(error) => {
+            log::error!("recording: start_encoder failed: {error}");
+            emit_error(&app, "Could not start the video encoder.".into(), None);
+            return Err(error);
+        }
+    };
 
     {
         let state = app.state::<AppState>();
@@ -951,12 +1123,39 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
         emit_recording_state(&app, &recording);
     }
 
+    // Focus stays on the control panel while recording so the hotkeys work
+    // (Space = pause/resume, Esc = stop); stop_recording hands focus back to
+    // the original application afterwards.
+
+    // Spec (app-orchestration §2.6 / recording §7): a 250ms recording clock
+    // refreshes the elapsed time in the control panel while recording.
+    {
+        let handle = app.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            let should_continue = {
+                let state = handle.state::<AppState>();
+                let recording = state.recording.lock().unwrap();
+                if recording.is_recording && !recording.is_paused {
+                    emit_recording_state(&handle, &recording);
+                    true
+                } else {
+                    false
+                }
+            };
+            if !should_continue {
+                break;
+            }
+        });
+    }
+
     emit_notice(&app, "Recording Started".into(), "record.circle.fill".into());
     Ok(())
 }
 
 #[tauri::command]
 pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
+    log::info!("pause_recording: called");
     let mut active = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
@@ -1008,6 +1207,7 @@ pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn resume_recording(app: AppHandle) -> Result<(), String> {
+    log::info!("resume_recording: called");
     let configuration = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
@@ -1041,8 +1241,22 @@ pub fn resume_recording(app: AppHandle) -> Result<(), String> {
         .map(|(tx, rx)| (Some(tx), Some(rx)))
         .unwrap_or((None, None));
 
-    let recorder = start_recorder(&app, &configuration, video_tx, audio_tx, mic_tx)?;
-    let encoder = start_encoder(&app, &configuration, out_path, video_rx, audio_rx, mic_rx)?;
+    let recorder = match start_recorder(&app, &configuration, video_tx, audio_tx, mic_tx) {
+        Ok(recorder) => recorder,
+        Err(error) => {
+            log::error!("recording: start_recorder failed: {error}");
+            emit_error(&app, "Could not start screen recording.".into(), None);
+            return Err(error);
+        }
+    };
+    let encoder = match start_encoder(&app, &configuration, out_path, video_rx, audio_rx, mic_rx) {
+        Ok(encoder) => encoder,
+        Err(error) => {
+            log::error!("recording: start_encoder failed: {error}");
+            emit_error(&app, "Could not start the video encoder.".into(), None);
+            return Err(error);
+        }
+    };
 
     {
         let state = app.state::<AppState>();
@@ -1057,13 +1271,26 @@ pub fn resume_recording(app: AppHandle) -> Result<(), String> {
         });
         emit_recording_state(&app, &recording);
     }
+    if let Some(window) = app.get_webview_window("control-panel") {
+        let _ = window.set_focus();
+    }
     emit_notice(&app, "Recording Resumed".into(), "play.circle.fill".into());
     Ok(())
 }
 
 #[tauri::command]
 pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
-    let (segments, active) = {
+    log::info!("stop_recording: called");
+    // Stop the click monitor if it was installed (recording ended).
+    {
+        let state = app.state::<AppState>();
+        let monitor = state.click_monitor.lock().unwrap().take();
+        drop(state);
+        if let Some(monitor) = monitor {
+            monitor.stop();
+        }
+    }
+    let (segments, active, return_pid, was_kiri_frontmost) = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
         if !(recording.is_recording || recording.is_paused) || recording.is_transitioning {
@@ -1074,29 +1301,13 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         recording.is_finalizing = true;
         recording.started_at = None;
         emit_recording_state(&app, &recording);
-        (recording.segments.clone(), recording.active.take())
+        (
+            recording.segments.clone(),
+            recording.active.take(),
+            recording.return_pid,
+            recording.was_kiri_frontmost,
+        )
     };
-
-    let mut final_segments = segments;
-    if let Some(mut active) = active {
-        let mut failure = None;
-        if let Some(mut recorder) = active.recorder.take() {
-            if let Err(error) = recorder.stop() {
-                failure = Some(error.to_string());
-            }
-        }
-        if failure.is_none() {
-            if let Some(encoder) = active.encoder.take() {
-                match encoder.finish() {
-                    Ok(path) => final_segments.push(path),
-                    Err(error) => failure = Some(error.to_string()),
-                }
-            }
-        }
-        if let Some(error) = failure {
-            emit_error(&app, error, None);
-        }
-    }
 
     if let Some(window) = app.get_webview_window("control-panel") {
         let _ = window.close();
@@ -1105,24 +1316,43 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         let _ = window.close();
     }
 
-    // Capture focus-restore info before the recording state is reset.
-    let (return_pid, was_kiri_frontmost) = {
-        let state = app.state::<AppState>();
-        let recording = state.recording.lock().unwrap();
-        (recording.return_pid, recording.was_kiri_frontmost)
-    };
+    // Entire stop + finalize runs on a background thread: recorder.stop()
+    // and encoder.finish() can block on SCK/ffmpeg callbacks, and merging
+    // + probing takes time. The UI already shows the finalizing spinner, so
+    // the async command returns immediately and the panel stays responsive.
     let handle = app.clone();
     std::thread::spawn(move || {
-        let result = finalize_recording(&handle, final_segments);
-        {
-            let state = handle.state::<AppState>();
-            let mut recording = state.recording.lock().unwrap();
-            *recording = RecordingFlow::default();
-            emit_recording_state(&handle, &recording);
+        let mut failure = None;
+        let mut final_segments = segments;
+        if let Some(mut active) = active {
+            if let Some(mut recorder) = active.recorder.take() {
+                if let Err(error) = recorder.stop() {
+                    failure = Some(error.to_string());
+                }
+            }
+            if failure.is_none() {
+                if let Some(encoder) = active.encoder.take() {
+                    match encoder.finish() {
+                        Ok(path) => final_segments.push(path),
+                        Err(error) => failure = Some(error.to_string()),
+                    }
+                }
+            }
         }
-        match result {
-            Ok(()) => emit_notice(&handle, "Recording Saved".into(), "video.fill".into()),
-            Err(error) => emit_error(&handle, error, None),
+        if let Some(error) = failure {
+            emit_error(&handle, error, None);
+        } else {
+            let result = finalize_recording(&handle, final_segments);
+            {
+                let state = handle.state::<AppState>();
+                let mut recording = state.recording.lock().unwrap();
+                *recording = RecordingFlow::default();
+                emit_recording_state(&handle, &recording);
+            }
+            match result {
+                Ok(()) => emit_notice(&handle, "Recording Saved".into(), "video.fill".into()),
+                Err(error) => emit_error(&handle, error, None),
+            }
         }
         if !was_kiri_frontmost {
             if let Some(pid) = return_pid {
@@ -1172,6 +1402,11 @@ fn finalize_recording(app: &AppHandle, segments: Vec<PathBuf>) -> Result<(), Str
 // ---------------------------------------------------------------------------
 // Settings / locale / shortcuts
 // ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn frontend_log(message: String) {
+    log::info!("[ui] {message}");
+}
 
 #[tauri::command]
 pub fn log_frontend_error(message: String) {
@@ -1238,6 +1473,25 @@ pub fn open_settings(action: String) -> Result<(), String> {
 #[tauri::command]
 pub fn quit_app(app: AppHandle) -> Result<(), String> {
     app.exit(0);
+    Ok(())
+}
+
+/// Toggles the web inspector on the frontmost Kiri window (⌘⌥I). Works in
+/// release builds thanks to the "devtools" cargo feature.
+#[tauri::command]
+pub fn open_devtools(app: AppHandle) -> Result<(), String> {
+    use tauri::Manager;
+    for label in ["library", "overlay", "editor"] {
+        if let Some(window) = app.get_webview_window(label) {
+            if window.is_focused().unwrap_or(false) {
+                window.open_devtools();
+                return Ok(());
+            }
+        }
+    }
+    if let Some(window) = app.get_webview_window("library") {
+        window.open_devtools();
+    }
     Ok(())
 }
 

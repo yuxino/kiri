@@ -121,6 +121,28 @@ fn make_fixture() -> Result<CapturedDisplay> {
     })
 }
 
+
+/// Average brightness (0-255) of a PNG buffer; None if undecodable.
+fn png_average(png: &[u8]) -> Option<(u32, u32, f64)> {
+    let image = image::load_from_memory(png).ok()?;
+    let rgba = image.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let mut sum = 0.0f64;
+    let mut count = 0.0f64;
+    let step = ((w * h) / 4000).max(1);
+    for (i, pixel) in rgba.pixels().enumerate() {
+        if i % step as usize != 0 {
+            continue;
+        }
+        sum += (pixel[0] as f64 + pixel[1] as f64 + pixel[2] as f64) / 3.0;
+        count += 1.0;
+    }
+    Some((w, h, sum / count.max(1.0)))
+}
+
 fn active_screen() -> Result<ActiveScreen> {
     let mtm = objc2::MainThreadMarker::new().unwrap();
     let mouse = NSEvent::mouseLocation();
@@ -167,6 +189,10 @@ fn active_screen() -> Result<ActiveScreen> {
 }
 
 fn shareable_content() -> Result<Retained<SCShareableContent>> {
+    // SCShareableContent is MainThreadOnly: the query must run on the main
+    // thread even when this is called from a background thread (recording
+    // starts off the UI thread). dispatch2 lets us hop to the main queue and
+    // wait for the completion handler synchronously.
     let (tx, rx) = mpsc::channel::<std::result::Result<Retained<SCShareableContent>, String>>();
     let block = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
         let result = if error.is_null() && !content.is_null() {
@@ -187,8 +213,12 @@ fn shareable_content() -> Result<Retained<SCShareableContent>> {
             &block,
         );
     }
-    rx.recv()
-        .map_err(|_| anyhow!("shareable content callback dropped"))?
+    log::info!("shareable_content: waiting for SCK callback…");
+    let result = rx
+        .recv_timeout(std::time::Duration::from_secs(8))
+        .map_err(|_| anyhow!("shareable content timed out after 8s"))?;
+    log::info!("shareable_content: got SCK callback");
+    result
         .map_err(|message| anyhow!(message))
 }
 
@@ -277,10 +307,15 @@ fn collect_window_rects(content: &SCShareableContent, display_id: CGDirectDispla
         if width < 8.0 || height < 8.0 {
             continue;
         }
-        let top_left_y = display_bounds.size.height - (min_y - display_bounds.origin.y + height);
+        // SCWindow.frame and CGDisplayBounds share the same coordinate space
+        // (top-left origin, y down — matching CGWindow, not NSScreen). The
+        // Swift original (CaptureCoordinator.swift) translates by the display
+        // origin WITHOUT flipping y, and the overlay's flipped view consumes
+        // these rects directly. Any y-flip here mirrors the hover/selection
+        // rectangles vertically.
         rects.push(Rect::new(
             min_x - display_bounds.origin.x,
-            top_left_y,
+            min_y - display_bounds.origin.y,
             width,
             height,
         ));
@@ -374,6 +409,9 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         .map_err(|message| anyhow!(message))?;
 
     let (png_data, pixel_width, pixel_height) = cgimage_to_png(&image)?;
+    if let Some((w, h, avg)) = png_average(&png_data) {
+        log::info!("capture_active_display: frozen {w}x{h} avg-brightness={avg:.1}");
+    }
 
     Ok(CapturedDisplay {
         png_data,
@@ -406,6 +444,12 @@ struct DelegateState {
     video_size: OnceLock<(usize, usize)>,
     audio_format: OnceLock<AudioFormat>,
     mic_format: OnceLock<AudioFormat>,
+    /// Set before the stream stops so late frame callbacks (already queued
+    /// on the SCK queue) become no-ops instead of sending into a channel
+    /// whose receiver is gone.
+    stopped: std::sync::atomic::AtomicBool,
+    /// Total frames forwarded to the encoder (debug counter).
+    frames: std::sync::atomic::AtomicU64,
 }
 
 /// A recording session running the SCK stream on a dedicated thread.
@@ -414,6 +458,8 @@ struct DelegateState {
 pub struct MacRecordingSession {
     stop_tx: mpsc::Sender<()>,
     result_rx: mpsc::Receiver<Result<()>>,
+    /// Receives the stream-thread's completion notification after a stop.
+    stop_done_rx: mpsc::Receiver<()>,
     _thread: std::thread::JoinHandle<()>,
 }
 
@@ -433,7 +479,10 @@ impl MacRecordingSession {
             bail!("The recording region is too small.");
         }
 
-        // SCShareableContent is MainThreadOnly: resolve it on the main thread.
+        // SCShareableContent is MainThreadOnly: resolve it on the main
+        // thread. The recorder may be started from a background thread (the
+        // UI must stay responsive), so hop to the main thread via the
+        // process-wide dispatch main queue when needed.
         let content = shareable_content()?;
         let displays = unsafe { content.displays() };
         let display = displays
@@ -442,6 +491,7 @@ impl MacRecordingSession {
             .ok_or_else(|| anyhow!("The selected display is no longer available."))?;
         let own_process_id = std::process::id() as i32;
         let filter = make_filter(&content, &display, own_process_id, excepted_window_ids);
+        log::info!("MacRecordingSession: filter created");
 
         let width = crate::core::policy::RecordingPolicy::pixel_dimension(
             region.width,
@@ -454,11 +504,14 @@ impl MacRecordingSession {
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let (result_tx, result_rx) = mpsc::channel::<Result<()>>();
+        let (stop_done_tx, stop_done_rx) = mpsc::channel::<()>();
         // Transfer ownership across the thread boundary via a raw pointer;
         // the recorder thread owns the filter exclusively afterwards.
         let filter_ptr = Retained::into_raw(filter) as usize;
 
+        log::info!("MacRecordingSession: spawning stream thread");
         let thread = std::thread::spawn(move || {
+            log::info!("MacRecordingSession: stream thread running");
             let filter = unsafe { Retained::from_raw(filter_ptr as *mut SCContentFilter).unwrap() };
             let configuration = unsafe {
                 let configuration = SCStreamConfiguration::new();
@@ -501,6 +554,8 @@ impl MacRecordingSession {
                 video_size: OnceLock::new(),
                 audio_format: OnceLock::new(),
                 mic_format: OnceLock::new(),
+                stopped: std::sync::atomic::AtomicBool::new(false),
+                frames: std::sync::atomic::AtomicU64::new(0),
             };
             let state_ptr = Box::into_raw(Box::new(state)) as usize;
 
@@ -553,35 +608,77 @@ impl MacRecordingSession {
                 }
             }
 
+            log::info!("MacRecordingSession: starting capture…");
             if let Err(error) = start_capture_sync(&stream) {
+                log::error!("MacRecordingSession: start_capture_sync failed: {error}");
                 let _ = result_tx.send(Err(error));
                 return;
             }
+            log::info!("MacRecordingSession: capture started");
             let _ = result_tx.send(Ok(()));
 
+            log::info!("MacRecordingSession: stream thread got stop signal");
             let _ = stop_rx.recv();
-            let _ = stop_capture_sync(&stream);
+            unsafe {
+                let state = &mut *(state_ptr as *mut DelegateState);
+                state
+                    .stopped
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                log::info!(
+                    "MacRecordingSession: stopping after {} frames",
+                    state.frames.load(std::sync::atomic::Ordering::Relaxed)
+                );
+            }
+            // Do NOT call stopCaptureWithCompletionHandler here: it can block
+            // (and its completion may be dispatched onto the sample-handler
+            // queue, deadlocking this thread). Dropping the stream and the
+            // senders (below) signals EOF to ffmpeg and lets SCK tear the
+            // stream down on its own.
+            log::info!("MacRecordingSession: stopping capture (drop)…");
+            // Give SCK a moment to drain any frame callbacks already queued
+            // on the stream queue before we free the delegate state; freeing
+            // it first lets a late callback touch freed memory (SIGSEGV in
+            // stream_didOutputSampleBuffer → Sender::send).
+            std::thread::sleep(std::time::Duration::from_millis(300));
             // Delegate (and frame senders) drop here → EOF for ffmpeg.
             unsafe {
                 let _ = Box::from_raw(state_ptr as *mut DelegateState);
             }
+            // `stream` drops at the end of this scope, releasing the SCK
+            // stream (which stops capture). Only after that notify the stop
+            // waiter — otherwise the stream would still be capturing when
+            // the caller believes recording has stopped.
+            drop(stream);
+            // Notify the stop waiter that the stream thread has finished
+            // tearing down (senders dropped → ffmpeg EOF, stream released).
+            let _ = stop_done_tx.send(());
         });
 
+        log::info!("MacRecordingSession: waiting for stream thread result…");
         result_rx
             .recv()
             .map_err(|_| anyhow!("recorder thread exited early"))??;
+        log::info!("MacRecordingSession: stream thread ready");
         Ok(MacRecordingSession {
             stop_tx,
             result_rx,
+            stop_done_rx,
             _thread: thread,
         })
     }
 
     fn request_stop(&self) -> Result<()> {
+        log::info!("MacRecordingSession: request_stop sending…");
         let _ = self.stop_tx.send(());
-        self.result_rx
-            .recv()
-            .map_err(|_| anyhow!("recorder thread exited early"))?
+        // The result_rx is a one-shot used at start; the stop completion is
+        // delivered on stop_done_rx. Waiting on result_rx here would
+        // immediately error ("recorder thread exited early") because its
+        // sender was already dropped after the start handshake.
+        self.stop_done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .map_err(|_| anyhow!("recorder stop timed out"))?;
+        log::info!("MacRecordingSession: request_stop done");
+        Ok(())
     }
 }
 
@@ -606,24 +703,6 @@ fn start_capture_sync(stream: &SCStream) -> Result<()> {
     unsafe { stream.startCaptureWithCompletionHandler(Some(block_ref)) };
     rx.recv()
         .map_err(|_| anyhow!("start capture callback dropped"))?
-        .map_err(|message| anyhow!(message))
-}
-
-fn stop_capture_sync(stream: &SCStream) -> Result<()> {
-    let (tx, rx) = mpsc::channel::<std::result::Result<(), String>>();
-    let block = RcBlock::new(move |error: *mut NSError| {
-        let result = if error.is_null() {
-            Ok(())
-        } else {
-            let error = unsafe { Retained::retain(error).unwrap() };
-            Err(error.localizedDescription().to_string())
-        };
-        let _ = tx.send(result);
-    });
-    let block_ref: &block2::Block<dyn Fn(*mut NSError)> = &block;
-    unsafe { stream.stopCaptureWithCompletionHandler(Some(block_ref)) };
-    rx.recv()
-        .map_err(|_| anyhow!("stop capture callback dropped"))?
         .map_err(|message| anyhow!(message))
 }
 
@@ -722,8 +801,20 @@ objc2::define_class!(
                 return;
             }
             let state = unsafe { &*(self.ivars().state as *const DelegateState) };
+            // Late callback after stop: ignore to avoid use-after-free of
+            // the senders (the receiver is dropped once the stream stops).
+            if state
+                .stopped
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
+                return;
+            }
             if of_type == SCStreamOutputType::Screen {
                 if let Some(frame) = copy_pixel_buffer(buffer) {
+                    let count = state.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if count % 30 == 0 {
+                        log::info!("MacRecordingSession: {count} frames captured");
+                    }
                     let _ = state.video_tx.send(frame);
                 }
             } else if of_type == SCStreamOutputType::Microphone {

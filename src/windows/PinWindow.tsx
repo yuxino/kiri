@@ -1,9 +1,11 @@
 // PinWindow — a floating pinned image (PinnedImageController.swift):
 // floating panel, always on top, drag to move, no opacity control.
-
+// Visual details per app-orchestration.md §5.3.
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { pinImageUrl } from "../lib/ipc";
+import { t } from "../i18n";
+import { KiriIcon } from "../components/KiriIcons";
 
 export function PinWindow(props: { id: string }) {
   const close = () => {
@@ -17,7 +19,13 @@ export function PinWindow(props: { id: string }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "rgba(255,255,255,0.98)",
+        // Spec: content container bg rgb(0.06,0.055,0.09) α0.98, radius 16,
+        // white α0.16 border. The window itself is transparent.
+        background: "rgba(15, 14, 23, 0.98)",
+        borderRadius: 16,
+        border: "1px solid rgba(255,255,255,0.16)",
+        boxSizing: "border-box",
+        overflow: "hidden",
       }}
       data-tauri-drag-region
     >
@@ -29,22 +37,25 @@ export function PinWindow(props: { id: string }) {
       />
       <button
         onClick={close}
-        title="Close"
+        title={t("Close")}
         style={{
           position: "absolute",
-          top: 6,
-          right: 6,
-          width: 22,
-          height: 22,
-          borderRadius: 7,
+          top: 10,
+          right: -10,
+          width: 24,
+          height: 24,
+          borderRadius: 10,
           border: "none",
-          background: "rgba(0,0,0,0.08)",
-          color: "#333",
-          fontSize: 11,
+          background: "rgba(0,0,0,0.58)",
+          color: "#fff",
+          fontSize: 12,
           cursor: "default",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
         }}
       >
-        ✕
+        <KiriIcon name="xmark" size={12} />
       </button>
     </div>
   );

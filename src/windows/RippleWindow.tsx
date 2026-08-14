@@ -1,6 +1,7 @@
 // RippleWindow — the violet click ripple drawn over the recording region
 // (RecordingClickHighlighterController.swift). This window is NOT excluded
-// from capture, so ripples appear in the exported video.
+// from capture, so ripples appear in the exported video. Three-layer visual
+// per recording.md §6.3.
 
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
@@ -17,7 +18,7 @@ interface Ripple {
   startedAt: number;
 }
 
-const VIOLET = "rgba(125, 105, 245, 1)"; // accent (0.49, 0.41, 0.96)
+const ACCENT = "rgba(125, 105, 245, 1)"; // accent (0.49, 0.41, 0.96)
 
 let nextId = 1;
 
@@ -40,43 +41,57 @@ export function RippleWindow() {
     };
   }, []);
 
-
   const visible = ripples.filter((ripple) => now - ripple.startedAt < 460);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "transparent", overflow: "hidden" }}>
       {visible.map((ripple) => {
         const t = now - ripple.startedAt;
-        const halo = Math.min(t / 460, 1); // 42px halo, 0.46s
-        const ring = Math.min(t / 340, 1); // 30px ring, 0.34s
-        const center = Math.min(t / 240, 1); // 7px center, 0.24s
-        const easeOut = (v: number) => 1 - Math.pow(1 - v, 3);
-        // Scale keyTimes [0, 0.68, 1]; opacity plateau 1 until 0.68, then fade.
-        const scale = (v: number) => easeOut(Math.min(v / 0.68, 1));
-        const alpha = (v: number) =>
-          v < 0.12 ? v / 0.12 : v < 0.68 ? 1 : (1 - (v - 0.68) / 0.32) * 0.9;
+        // Spec §6.3 keyframes: scale keyTimes [0, 0.68, 1]; opacity
+        // keyTimes [0, 0.12, 0.68, 1] with values [0, peak, peak*0.82, 0].
+        const scaleAt = (from: number, to: number, time: number) => {
+          const v = Math.min(time / 0.68, 1);
+          return from + (to - from) * (1 - Math.pow(1 - v, 3));
+        };
+        const opacityAt = (peak: number, time: number) => {
+          if (time < 0.12) return peak * (time / 0.12);
+          if (time < 0.68) return peak;
+          return peak * 0.82 * (1 - (time - 0.68) / 0.32);
+        };
         return (
           <div key={ripple.id} style={{ position: "absolute", left: 0, top: 0 }}>
+            {/* Halo: 42pt stroke, accent α0.30, width 6; 0.45→1.12, peak α0.72, 0.46s */}
             <Ellipse
               x={ripple.x}
               y={ripple.y}
               width={42}
-              scale={scale(halo)}
-              opacity={alpha(halo)}
+              scale={scaleAt(0.45, 1.12, t / 460)}
+              opacity={opacityAt(0.72, t / 460)}
+              fill="none"
+              stroke={ACCENT.replace("1)", "0.30)")}
+              strokeWidth={6}
             />
+            {/* Ring: 30pt fill accent α0.12 + stroke α0.95 w2.5; 0.58→1.0, 0.34s */}
             <Ellipse
               x={ripple.x}
               y={ripple.y}
               width={30}
-              scale={scale(ring)}
-              opacity={alpha(ring)}
+              scale={scaleAt(0.58, 1.0, t / 340)}
+              opacity={opacityAt(1, t / 340)}
+              fill={ACCENT.replace("1)", "0.12)")}
+              stroke={ACCENT.replace("1)", "0.95)")}
+              strokeWidth={2.5}
             />
+            {/* Center: 7pt fill white α0.95 + accent stroke w1.5; 0.72→1.0, 0.24s */}
             <Ellipse
               x={ripple.x}
               y={ripple.y}
               width={7}
-              scale={scale(center)}
-              opacity={alpha(center)}
+              scale={scaleAt(0.72, 1.0, t / 240)}
+              opacity={opacityAt(1, t / 240)}
+              fill="rgba(255,255,255,0.95)"
+              stroke={ACCENT}
+              strokeWidth={1.5}
             />
           </div>
         );
@@ -91,8 +106,11 @@ function Ellipse(props: {
   width: number;
   scale: number;
   opacity: number;
+  fill?: string;
+  stroke?: string;
+  strokeWidth?: number;
 }) {
-  const { x, y, width, scale, opacity } = props;
+  const { x, y, width, scale, opacity, fill, stroke, strokeWidth } = props;
   return (
     <div
       style={{
@@ -102,7 +120,9 @@ function Ellipse(props: {
         width: width * scale,
         height: width * scale,
         borderRadius: "50%",
-        border: `2px solid ${VIOLET}`,
+        background: fill ?? "transparent",
+        border: stroke ? `${strokeWidth ?? 1}px solid ${stroke}` : "none",
+        boxSizing: "border-box",
         opacity,
         transform: "translateZ(0)",
       }}

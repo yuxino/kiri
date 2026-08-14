@@ -30,11 +30,35 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, shortcut, event| {
+                    use tauri_plugin_global_shortcut::ShortcutState;
+                    if event.state() == ShortcutState::Pressed {
+                        log::info!("[shortcut] pressed: {:?}", shortcut);
+                        let handle = app.clone();
+                        let trigger = handle.clone();
+                        let _ = trigger.run_on_main_thread(move || {
+                            let _ = commands::start_capture(handle);
+                        });
+                    }
+                })
+                .build(),
+        )
         .manage(protocol::ProtocolStore::new())
         .register_uri_scheme_protocol("kiri", |ctx, request| {
             protocol::handle(ctx.app_handle(), &request)
         })
         .setup(|app| {
+            // Force a regular activation policy (macOS Dock icon). A bare
+            // binary launched from a terminal may otherwise drop out of the
+            // Dock once every window is hidden; the library window handles
+            // the Dock-click reopen.
+            #[cfg(target_os = "macos")]
+            {
+                app.set_activation_policy(tauri::ActivationPolicy::Regular);
+                log::info!("[app] activation policy = Regular (Dock icon enabled)");
+            }
             let state = AppState::new(app.handle())?;
             let options = state::load_recording_options(app.handle());
             *state.saved_recording_options.lock().unwrap() = options;
@@ -46,7 +70,7 @@ pub fn run() {
                 });
 
             register_shortcut(app.handle())?;
-            install_click_monitor(app.handle())?;
+            install_tray(app.handle())?;
             Ok(())
         })
 .on_window_event(|window, event| {
@@ -82,6 +106,8 @@ pub fn run() {
             commands::confirm_capture,
             commands::save_file_dialog,
             commands::update_asset,
+            commands::rename_asset,
+            commands::set_tags,
             commands::recognize_text,
             commands::copy_text,
             commands::start_recording_flow,
@@ -92,10 +118,12 @@ pub fn run() {
             commands::stop_recording,
             commands::mic_supported,
             commands::log_frontend_error,
+            commands::frontend_log,
             commands::get_locale,
             commands::get_shortcut_label,
             commands::open_settings,
             commands::quit_app,
+            commands::open_devtools,
             commands::get_recording_options,
             commands::set_recording_options,
         ])
@@ -112,63 +140,33 @@ pub fn run() {
         });
 }
 
-#[cfg(target_os = "macos")]
 fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
-    use crate::platform::macos;
-    let handle = app.clone();
-    let shortcut = macos::start_shortcut(Box::new(move || {
-        // Runs on the CGEventTap callback thread; dispatch to the main thread
-        // so AppKit/SCK calls stay on the main thread.
-        let handle = handle.clone();
-        let trigger = handle.clone();
-        let _ = trigger.run_on_main_thread(move || {
-            let _ = commands::start_capture(handle);
-        });
-    }));
-    match shortcut {
-        Ok(_) => Ok(()),
-        Err(error) => {
-            log::warn!("shortcut registration failed: {error}");
-            // Surface the failure: show the library window and an error
-            // banner with a recovery action so the user knows why the
-            // shortcut is dead (mirrors the Swift app's menu-bar error).
-            if let Some(window) = app.get_webview_window("library") {
-                let _ = window.show();
-            }
-            crate::state::emit_error(
-                app,
-                error.to_string(),
-                Some(crate::state::RecoveryAction::OpenInputMonitoringSettings),
-            );
-            Ok(())
-        }
-    }
+    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+    // macOS: Command+Shift+A; Windows: Control+Shift+A.
+    #[cfg(target_os = "macos")]
+    let modifiers = Modifiers::SUPER | Modifiers::SHIFT;
+    #[cfg(not(target_os = "macos"))]
+    let modifiers = Modifiers::CONTROL | Modifiers::SHIFT;
+    let shortcut = Shortcut::new(Some(modifiers), Code::KeyA);
+    app.global_shortcut()
+        .register(shortcut)
+        .map_err(|e| tauri::Error::Anyhow(e.into()))?;
+    log::info!("[shortcut] registered {modifiers:?} + A");
+    Ok(())
 }
 
-#[cfg(windows)]
-fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
-    use crate::platform::windows;
-    let handle = app.clone();
-    let shortcut = windows::start_shortcut(Box::new(move || {
-        let handle = handle.clone();
-        let _ = std::thread::spawn(move || {
-            let _ = commands::start_capture(handle);
-        });
-    }));
-    match shortcut {
-        Ok(_) => Ok(()),
-        Err(error) => {
-            log::warn!("shortcut registration failed: {error}");
-            Ok(())
+/// Installs the global click monitor for the click ripple. The monitor uses
+/// NSEvent.addGlobalMonitorForEventsMatchingMask, which requires the Input
+/// Monitoring permission — so it is installed ON DEMAND (only while
+/// recording with "highlight clicks" enabled) instead of at every launch,
+/// which would make macOS prompt for the permission on each start.
+pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
+    {
+        let state = app.state::<AppState>();
+        if state.click_monitor.lock().unwrap().is_some() {
+            return Ok(());
         }
     }
-}
-
-/// Installs the app-lifetime global click monitor once. The callback reads the
-/// current recording region from state and forwards normalized, region-local
-/// click positions to the ripple window (mirrors the Swift original's single
-/// global monitor).
-fn install_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     let main_height = {
         use objc2_app_kit::NSScreen;
@@ -204,7 +202,7 @@ fn install_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
             if !active {
                 return;
             }
-            let (region, frame, scale) = match (region, frame, scale) {
+            let (region, frame, _scale) = match (region, frame, scale) {
                 (Some(r), Some(f), Some(s)) => (r, f, s),
                 _ => return,
             };
@@ -223,5 +221,65 @@ fn install_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
     let monitor = platform::start_click_monitor(callback).map_err(|e| tauri::Error::Anyhow(e.into()))?;
     let state = app.state::<AppState>();
     *state.click_monitor.lock().unwrap() = Some(monitor);
+    Ok(())
+}
+
+/// Menu-bar (macOS) / tray (Windows) icon with Capture, Open Library, and
+/// Quit — mirrors the Swift original's MenuBarExtra (app-orchestration.md
+/// §1). The tray icon is optional sugar; the library window and the global
+/// shortcut remain the primary entry points.
+fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::TrayIconBuilder;
+
+    // Simple OS-language lookup for the tray menu (the frontend i18n dict is
+    // the source of truth for the UI; the tray mirrors its strings).
+    let zh = std::env::var("LANG")
+        .or_else(|_| std::env::var("LC_ALL"))
+        .map(|lang| lang.to_lowercase().starts_with("zh"))
+        .unwrap_or(false);
+    let (open_label, capture_label, quit_label) = if zh {
+        ("打开素材库", "截屏", "退出 Kiri")
+    } else {
+        ("Open Library", "Capture", "Quit Kiri")
+    };
+
+    let open_library = MenuItem::with_id(app, "open-library", open_label, true, None::<&str>)?;
+    let capture = MenuItem::with_id(app, "capture", capture_label, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open_library, &capture, &quit])?;
+
+    // Menu-bar icon mirrors the Swift original's MenuBarExtra viewfinder
+    // symbol (a capture-frame glyph), not the chibi app icon.
+    let icon = {
+        let bytes = include_bytes!("../icons/tray-viewfinder.png");
+        tauri::image::Image::from_bytes(bytes).ok()
+    };
+    let mut builder = TrayIconBuilder::new()
+        .menu(&menu)
+        .tooltip("Kiri")
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open-library" => {
+                if let Some(window) = app.get_webview_window("library") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "capture" => {
+                let handle = app.clone();
+                let trigger = handle.clone();
+                let _ = trigger.run_on_main_thread(move || {
+                    let _ = commands::start_capture(handle);
+                });
+            }
+            "quit" => {
+                app.exit(0);
+            }
+            _ => {}
+        });
+    if let Some(icon) = icon {
+        builder = builder.icon(icon);
+    }
+    builder.build(app)?;
     Ok(())
 }

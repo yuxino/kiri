@@ -45,9 +45,14 @@ export interface RenderContext {
 
 function exportPoint(p: Point, r: RenderContext): Point {
   if (!r.exporting) return p;
+  // Canvas 2D is y-down, same as the view space, so no vertical flip is
+  // needed. The Swift spec's `outputSize.height - (regionSize.height - p.y)
+  // * scaleY` algebraically equals `p.y * scaleY` (outputSize.height ==
+  // regionSize.height * scaleY), which for sub-region captures is exactly
+  // what keeps annotations aligned with the unflipped background image.
   return {
     x: p.x * r.scaleX,
-    y: r.sourceImage.height - (r.regionSize.height - p.y) * r.scaleY,
+    y: p.y * r.scaleY,
   };
 }
 
@@ -85,6 +90,17 @@ export function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRend
       const radius = r.exporting ? 3 : 2;
       ctx.strokeStyle = colorValue(mark.color);
       ctx.lineWidth = exportSize(mark.width, r);
+      if (w < 1 && h < 1) {
+        // Zero-size rectangle from a click: Swift draws a small rounded
+        // stroke dot (the rect corner radius keeps it visible). Mirror that
+        // with a filled dot of the stroke width.
+        const dot = Math.max(exportSize(mark.width, r) * 0.7, 2);
+        ctx.fillStyle = colorValue(mark.color);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, dot / 2, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
       roundRectPath(ctx, p.x, p.y, w, h, radius);
       ctx.stroke();
       break;
@@ -175,21 +191,46 @@ function wrapText(
   maxWidth: number,
   fontSize: number,
 ) {
-  const words = text.split(/\s+/);
+  // Spec §5.5: wrap within the rect width. CJK text has no spaces, so
+  // break per character for CJK runs while keeping Latin word wrapping.
+  const lineHeight = fontSize * 1.25;
   let line = "";
   let lineY = y;
-  const lineHeight = fontSize * 1.25;
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > Math.max(1, maxWidth) && line) {
-      ctx.fillText(line, x, lineY);
-      line = word;
+  const flush = () => {
+    if (line) ctx.fillText(line, x, lineY);
+  };
+  let index = 0;
+  while (index < text.length) {
+    const ch = text[index];
+    const isCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(ch);
+    const candidate = line ? `${line}${ch}` : ch;
+    const tooWide = ctx.measureText(candidate).width > Math.max(1, maxWidth) && line !== "";
+    if (tooWide) {
+      flush();
+      line = "";
       lineY += lineHeight;
-    } else {
-      line = test;
+      continue;
     }
+    if (isCjk) {
+      line += ch;
+    } else {
+      // Latin: accumulate whole words.
+      const rest = text.slice(index);
+      const wordMatch = rest.match(/^\s*\S+/);
+      const word = wordMatch ? wordMatch[0] : ch;
+      const test = line ? `${line}${word}` : word.trim();
+      if (ctx.measureText(test).width > Math.max(1, maxWidth) && line) {
+        flush();
+        line = "";
+        lineY += lineHeight;
+        continue;
+      }
+      line = test;
+      index += word.length - 1;
+    }
+    index += 1;
   }
-  if (line) ctx.fillText(line, x, lineY);
+  flush();
 }
 
 // ---------------------------------------------------------------------------
@@ -213,14 +254,19 @@ function mosaicStrokeBounds(points: Point[], diameter: number, region: Rect): Re
 function clipToMosaicStroke(ctx: CanvasRenderingContext2D, points: Point[], diameter: number) {
   ctx.save();
   ctx.beginPath();
+  // Canvas 2D clip() uses the path's *fill* region, so an open polyline
+  // would clip to ~nothing. Build the stroke band as the union of one disk
+  // per sample point: sampling distance (≥0.5pt) is far smaller than the
+  // brush diameter (≥12pt), so the disks overlap into a continuous band,
+  // equivalent to the Swift `replacePathWithStrokedPath()` approach.
+  const radius = diameter / 2;
   if (points.length === 1) {
-    ctx.arc(points[0].x, points[0].y, diameter / 2, 0, Math.PI * 2);
+    ctx.arc(points[0].x, points[0].y, radius, 0, Math.PI * 2);
   } else {
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
-    ctx.lineWidth = diameter;
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
+    for (const p of points) {
+      ctx.moveTo(p.x + radius, p.y);
+      ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+    }
   }
   ctx.clip();
 }
@@ -260,19 +306,38 @@ export function drawMosaicMark(
   smallCtx.imageSmoothingEnabled = false;
   smallCtx.drawImage(r.sourceImage, cx, cy, cw, ch, 0, 0, smallW, smallH);
 
-  clipToMosaicStroke(ctx, mark.points, mark.brushDiameter);
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(
-    small,
-    0,
-    0,
-    smallW,
-    smallH,
-    minX(viewRect),
-    minY(viewRect),
-    viewRect.width,
-    viewRect.height,
+  clipToMosaicStroke(
+    ctx,
+    r.exporting ? mark.points.map((p) => exportPoint(p, r)) : mark.points,
+    // Spec §9: export clip diameter is brushDiameter * min(scaleX, scaleY).
+    r.exporting ? mark.brushDiameter * Math.min(r.scaleX, r.scaleY) : mark.brushDiameter,
   );
+  ctx.imageSmoothingEnabled = false;
+  if (r.exporting) {
+    ctx.drawImage(
+      small,
+      0,
+      0,
+      smallW,
+      smallH,
+      minX(viewRect) * r.scaleX,
+      minY(viewRect) * r.scaleY,
+      viewRect.width * r.scaleX,
+      viewRect.height * r.scaleY,
+    );
+  } else {
+    ctx.drawImage(
+      small,
+      0,
+      0,
+      smallW,
+      smallH,
+      minX(viewRect),
+      minY(viewRect),
+      viewRect.width,
+      viewRect.height,
+    );
+  }
   ctx.restore();
 }
 
@@ -292,7 +357,11 @@ export function renderAll(
   const region = { x: 0, y: 0, width: r.regionSize.width, height: r.regionSize.height };
 
   ctx.fillStyle = "#141414";
-  ctx.fillRect(0, 0, region.width, region.height);
+  if (r.exporting) {
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  } else {
+    ctx.fillRect(0, 0, region.width, region.height);
+  }
 
   if (r.exporting) {
     ctx.imageSmoothingEnabled = true;
@@ -305,8 +374,8 @@ export function renderAll(
       region.height * r.scaleY,
       0,
       0,
-      r.sourceImage.width,
-      r.sourceImage.height,
+      region.width * r.scaleX,
+      region.height * r.scaleY,
     );
   } else {
     ctx.imageSmoothingEnabled = true;

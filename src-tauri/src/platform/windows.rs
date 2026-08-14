@@ -133,35 +133,6 @@ pub fn set_window_capture_excluded(app: &tauri::AppHandle, label: &str, excluded
 }
 
 // ---------------------------------------------------------------------------
-// Global shortcut (Shift+Ctrl+A) — RegisterHotKey is exclusive by design.
-// ---------------------------------------------------------------------------
-
-const HOTKEY_ID: i32 = 0x4B49;
-
-pub struct ShortcutHandle {
-    _thread: thread::JoinHandle<()>,
-}
-
-pub fn start_shortcut(action: Box<dyn Fn() + Send>) -> Result<ShortcutHandle> {
-    let thread = thread::spawn(move || unsafe {
-        if RegisterHotKey(None, HOTKEY_ID, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, 'A' as u32)
-            .is_err()
-        {
-            return;
-        }
-        let mut message = MSG::default();
-        while GetMessageW(&mut message, None, 0, 0).as_bool() {
-            if message.message == WM_HOTKEY && message.wParam.0 as i32 == HOTKEY_ID {
-                action();
-            }
-            let _ = TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-    });
-    Ok(ShortcutHandle { _thread: thread })
-}
-
-// ---------------------------------------------------------------------------
 // Global click monitor (WH_MOUSE_LL)
 // ---------------------------------------------------------------------------
 

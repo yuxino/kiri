@@ -171,3 +171,106 @@ textarea {
 *:focus {
   outline: none;
 }
+
+/* ---------------------------------------------------------------------------
+ * Unified control buttons — one hover/press/disabled language everywhere.
+ * ------------------------------------------------------------------------- */
+
+.kiri-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: 600 12px var(--kiri-font-ui);
+  border-radius: var(--kiri-radius-control);
+  cursor: default;
+  transition:
+    transform var(--kiri-motion-hover) ease-out,
+    box-shadow var(--kiri-motion-hover) ease-out,
+    background var(--kiri-motion-hover) ease-out,
+    border-color var(--kiri-motion-hover) ease-out,
+    color var(--kiri-motion-hover) ease-out,
+    opacity var(--kiri-motion-hover) ease-out;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.kiri-button:active {
+  transform: scale(0.96);
+}
+
+.kiri-button:disabled {
+  filter: saturate(0.18);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* Primary (accent fill) */
+.kiri-button--primary {
+  min-height: 34px;
+  padding: 0 14px;
+  color: #fff;
+  background: var(--kiri-brand-gradient);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 3px 8px rgba(125, 105, 245, 0.24);
+}
+
+.kiri-button--primary:hover {
+  box-shadow: 0 5px 14px rgba(125, 105, 245, 0.32);
+  filter: brightness(1.06);
+}
+
+/* Secondary (outline) */
+.kiri-button--secondary {
+  min-height: 32px;
+  padding: 0 12px;
+  color: var(--kiri-label);
+  background: transparent;
+  border: 1px solid var(--kiri-surface-border);
+}
+
+.kiri-button--secondary:hover {
+  background: var(--kiri-group-fill);
+  border-color: var(--kiri-accent);
+}
+
+/* Destructive (red) */
+.kiri-button--destructive {
+  min-height: 32px;
+  padding: 0 12px;
+  color: var(--kiri-coral);
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.kiri-button--destructive:hover {
+  background: rgba(250, 71, 110, 0.10);
+  border-color: rgba(250, 71, 110, 0.35);
+}
+
+/* Icon-only (round) */
+.kiri-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--kiri-secondary-label);
+  cursor: default;
+  transition:
+    background var(--kiri-motion-hover) ease-out,
+    color var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-icon-button:hover {
+  background: var(--kiri-group-fill);
+  color: var(--kiri-label);
+}
+
+.kiri-icon-button:active {
+  transform: scale(0.92);
+}

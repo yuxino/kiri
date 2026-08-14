@@ -201,7 +201,7 @@ impl SegmentEncoder {
         ffmpeg: &Path,
         video_rx: mpsc::Receiver<Vec<u8>>,
         audio_rx: Option<mpsc::Receiver<Vec<u8>>>,
-        mic_rx: Option<mpsc::Receiver<Vec<u8>>>,
+        _mic_rx: Option<mpsc::Receiver<Vec<u8>>>,
     ) -> Result<SegmentEncoder> {
         let mut command = ffmpeg_command(ffmpeg);
 

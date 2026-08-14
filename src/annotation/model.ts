@@ -146,6 +146,16 @@ export class AnnotationHistory {
     return removed;
   }
 
+  /**
+   * Replaces the visible array without recording history — used for live
+   * previews (e.g. dragging the text-size slider). Callers must follow up
+   * with a history-recording operation (append/replace/remove) or the
+   * change is lost to undo.
+   */
+  overwrite(elements: AnnotationMark[]): void {
+    this.visible = elements.slice();
+  }
+
   undo(): AnnotationMark | null {
     const step = this.undoSteps.pop();
     if (!step) return null;

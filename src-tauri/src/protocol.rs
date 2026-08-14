@@ -118,6 +118,9 @@ fn respond(bytes: Vec<u8>, content_type: &str) -> Response<Vec<u8>> {
     Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", content_type)
+        // Required for fetch() from the tauri://localhost page to the
+        // kiri:// custom scheme (canvas-safe blob loading).
+        .header("Access-Control-Allow-Origin", "*")
         .header("Cache-Control", "no-store")
         .body(bytes)
         .unwrap()

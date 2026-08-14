@@ -191,6 +191,21 @@ impl AssetLibrary {
         self.update(id, |asset| asset.is_favorite = favorite)
     }
 
+    pub fn set_title(&mut self, title: Option<String>, id: &uuid::Uuid) -> Result<()> {
+        self.update(id, |asset| asset.title = title)
+    }
+
+    pub fn set_tags(&mut self, tags: Vec<String>, id: &uuid::Uuid) -> Result<()> {
+        let mut deduped: Vec<String> = Vec::new();
+        for tag in tags {
+            let trimmed = tag.trim().to_string();
+            if !trimmed.is_empty() && !deduped.iter().any(|t| t.eq_ignore_ascii_case(&trimmed)) {
+                deduped.push(trimmed);
+            }
+        }
+        self.update(id, |asset| asset.tags = deduped)
+    }
+
     pub fn move_to_trash(&mut self, id: &uuid::Uuid) -> Result<()> {
         self.update(id, |asset| asset.trashed_at = Some(now_ms()))
     }
@@ -301,6 +316,8 @@ impl AssetLibrary {
             kind,
             created_at,
             filename,
+            title: None,
+            tags: Vec::new(),
             pixel_width,
             pixel_height,
             duration,

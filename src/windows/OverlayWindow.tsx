@@ -5,6 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
+  dbg,
   frozenImageUrl,
   onNotice,
   type CaptureContextDto,
@@ -38,6 +39,7 @@ import {
   type Tool,
 } from "../annotation/model";
 import AnnotationCanvas, { type AnnotationCanvasHandle } from "../annotation/AnnotationCanvas";
+import { KiriIcon, type IconName } from "../components/KiriIcons";
 
 type Phase =
   | "mode-select"
@@ -112,18 +114,28 @@ export function OverlayWindow() {
 
   // Load context on mount.
   useEffect(() => {
+    dbg(`overlay mount: inner=${window.innerWidth}x${window.innerHeight} dpr=${window.devicePixelRatio}`);
     (window as unknown as { __kiriOverlay: boolean }).__kiriOverlay = true;
     let unlistenNotice: (() => void) | undefined;
     onNotice(() => {}).then((unlisten) => {
       unlistenNotice = unlisten;
     });
     api.startCapture()
-      .then((ctx) => setContext(ctx))
+      .then((ctx) => {
+        dbg(`overlay startCapture ok: display=${ctx.displayWidth}x${ctx.displayHeight} windows=${ctx.windowRects.length} scale=${ctx.scale}`);
+
+        setContext(ctx);
+      })
       .catch((error) => {
         void import("@tauri-apps/api/core").then(({ invoke }) => {
           invoke("log_frontend_error", {
             message: `overlay startCapture rejected: ${String(error)}`,
           });
+        });
+        // Permission or capture failure: close the overlay so the library
+        // window's error banner (emitted by the backend) is visible.
+        void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+          void getCurrentWindow().close();
         });
       });
     api.getRecordingOptions().then((options) => setRecordOptions(options)).catch(() => {});
@@ -132,8 +144,18 @@ export function OverlayWindow() {
     // custom-scheme image would taint the canvas and break PNG export.
     fetch(frozenImageUrl())
       .then((response) => response.blob())
-      .then((blob) => setFrozenSrc(URL.createObjectURL(blob)))
-      .catch(() => {});
+      .then((blob) => {
+        const img = new Image();
+        img.onload = () => {
+          dbg(`frozen img loaded: ${img.naturalWidth}x${img.naturalHeight}`);
+        };
+        img.onerror = () => {
+          dbg("frozen img ERROR (blob)");
+        };
+        img.src = URL.createObjectURL(blob);
+        setFrozenSrc(img.src);
+      })
+      .catch((error) => dbg(`frozen fetch failed: ${String(error)}`));
     return () => {
       unlistenNotice?.();
     };
@@ -144,6 +166,7 @@ export function OverlayWindow() {
     : { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
 
   const cancel = useCallback(() => {
+    dbg(`cancel() phase=${phaseRef.current}`);
     void api.cancelCapture().catch(() => {});
   }, []);
 
@@ -159,14 +182,58 @@ export function OverlayWindow() {
         reportFrontend(`complete(${action}): exportPng returned no data`);
         return;
       }
+      dbg(`complete(${action}) pngBytes=${png.byteLength}`);
       const bytes = Array.from(png);
       try {
         await api.confirmCapture(bytes, action);
+        dbg(`complete(${action}) confirmCapture ok`);
       } catch (error) {
         reportFrontend(`confirm_capture(${action}) rejected: ${String(error)}`);
       }
     },
     [],
+  );
+
+  const runOcr = useCallback(
+    async (sel: Rect) => {
+      setOcrBusy(true);
+      const image = imageRef.current;
+      if (!image) return;
+      const scale = image.naturalWidth / bounds.width;
+      const crop = document.createElement("canvas");
+      crop.width = Math.round(sel.width * scale);
+      crop.height = Math.round(sel.height * scale);
+      const ctx = crop.getContext("2d")!;
+      ctx.drawImage(
+        image,
+        sel.x * scale,
+        sel.y * scale,
+        sel.width * scale,
+        sel.height * scale,
+        0,
+        0,
+        crop.width,
+        crop.height,
+      );
+      const blob = await new Promise<Blob | null>((resolve) => crop.toBlob(resolve, "image/png"));
+      if (!blob) return;
+      const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+      try {
+        const text = await api.recognizeText(bytes);
+        setOcrFailed(false);
+        setOcrText(text);
+        setPhase("ocr-result");
+      } catch {
+        // The backend returns "No Text Found" for empty results and
+        // "Text Recognition Failed" for real failures.
+        setOcrFailed(true);
+        setOcrText("");
+        setPhase("ocr-result");
+      } finally {
+        setOcrBusy(false);
+      }
+    },
+    [bounds],
   );
 
   // --- keyboard ---
@@ -194,8 +261,27 @@ export function OverlayWindow() {
         return;
       }
       if (e.key === "Enter" || e.key === "Return") {
-        if (phaseRef.current === "annotating") void complete("copy");
-        return;
+        const ph = phaseRef.current;
+        if (ph === "annotating") {
+          void complete("copy");
+          return;
+        }
+        if (ph === "record-options" && selectionRef.current) {
+          // Spec (recording §2.2): Start Recording is bound to Return.
+          void api.startRecordingFlow(selectionRef.current, recordOptionsRef.current).catch(() => {});
+          return;
+        }
+        if (ph === "selecting" && selectionRef.current && isValidSelection(selectionRef.current, 3)) {
+          // Spec §5.2: Return with a valid selection confirms per mode.
+          if (modeRef.current === "screenshot") {
+            void complete("copy");
+          } else if (modeRef.current === "record") {
+            setPhase("record-options");
+          } else if (modeRef.current === "ocr") {
+            void runOcr(selectionRef.current);
+          }
+          return;
+        }
       }
       if (!mod && !e.altKey) {
         const key = e.key.toLowerCase();
@@ -210,6 +296,8 @@ export function OverlayWindow() {
         };
         if (key in map && phaseRef.current !== "mode-select") {
           const next = map[key];
+          // Spec §6.6: switching tools commits any in-flight text edit.
+          canvasRef.current?.commitTextEditing();
           if (phaseRef.current === "selecting" && selectionRef.current) {
             // Selecting a tool locks the region into annotation mode.
             setPhase("annotating");
@@ -222,12 +310,15 @@ export function OverlayWindow() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [cancel, complete]);
+  }, [cancel, complete, runOcr]);
 
   const phaseRef = useRef<Phase>("mode-select");
   phaseRef.current = phase;
   const selectionRef = useRef<Rect | null>(null);
   selectionRef.current = selection;
+  const hoverWindowRef = useRef<Rect | null>(null);
+  const recordOptionsRef = useRef<RecordingOptions>(recordOptions);
+  recordOptionsRef.current = recordOptions;
 
   // --- pointer interactions ---
   const toPoint = useCallback(
@@ -239,6 +330,7 @@ export function OverlayWindow() {
     (e: React.PointerEvent) => {
       if (phaseRef.current !== "mode-select" && phaseRef.current !== "selecting") return;
       const p = clampPoint(toPoint(e), bounds);
+      dbg(`pointerDown at ${p.x.toFixed(0)},${p.y.toFixed(0)} phase=${phaseRef.current}`);
       if (phaseRef.current === "selecting" && selectionRef.current) {
         // Handle or move the existing selection.
         const handle = hitTestHandle(p, selectionRef.current, 10);
@@ -262,9 +354,17 @@ export function OverlayWindow() {
       const p = clampPoint(toPoint(e), bounds);
       const interactive = phaseRef.current === "mode-select" || phaseRef.current === "selecting";
       if (!interactive) return;
-      // Hover outline while not dragging.
+      // Hover outline while not dragging. OCR mode never hovers windows
+      // (spec §2.1: hoveredWindowSelection is always nil for .ocr).
       if (!drag && !resizeHandle && !moveDrag) {
-        setHoverWindow(context ? windowCandidate(p, context.windowRects, bounds) : null);
+        const candidate =
+          modeRef.current !== "ocr" && context
+            ? windowCandidate(p, context.windowRects, bounds)
+            : null;
+        if (candidate !== hoverWindowRef.current) {
+          hoverWindowRef.current = candidate;
+          setHoverWindow(candidate);
+        }
         return;
       }
       setHoverWindow(null);
@@ -301,6 +401,7 @@ export function OverlayWindow() {
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
       const p = clampPoint(toPoint(e), bounds);
+      dbg(`pointerUp at ${p.x.toFixed(0)},${p.y.toFixed(0)} phase=${phaseRef.current} drag=${!!drag}`);
       if (resizeHandle || moveDrag) {
         setResizeHandle(null);
         setMoveDrag(null);
@@ -309,7 +410,7 @@ export function OverlayWindow() {
       }
       if (drag) {
         const moved = Math.hypot(p.x - drag.start.x, p.y - drag.start.y) >= 3;
-        if (!moved && context) {
+        if (!moved && context && modeRef.current !== "ocr") {
           const candidate = windowCandidate(p, context.windowRects, bounds);
           if (candidate) {
             setSelection(candidate);
@@ -326,7 +427,11 @@ export function OverlayWindow() {
 
   function afterSelection(sel: Rect) {
     if (modeRef.current === "screenshot") {
-      setPhase("annotating");
+      // Spec §7.1: once a region is chosen, the toolbar appears immediately
+      // but the region stays adjustable (phase stays .selecting, the
+      // annotation canvas stays hidden). Picking a tool (or its shortcut)
+      // is what locks the region into .annotating.
+      setPhase("selecting");
       setTool("select");
     } else if (modeRef.current === "ocr") {
       setPhase("ocr-drag");
@@ -336,54 +441,57 @@ export function OverlayWindow() {
     }
   }
 
-  async function runOcr(sel: Rect) {
-    setOcrBusy(true);
-    const image = imageRef.current;
-    if (!image) return;
-    const scale = image.naturalWidth / bounds.width;
-    const crop = document.createElement("canvas");
-    crop.width = Math.round(sel.width * scale);
-    crop.height = Math.round(sel.height * scale);
-    const ctx = crop.getContext("2d")!;
-    ctx.drawImage(
-      image,
-      sel.x * scale,
-      sel.y * scale,
-      sel.width * scale,
-      sel.height * scale,
-      0,
-      0,
-      crop.width,
-      crop.height,
-    );
-    const blob = await new Promise<Blob | null>((resolve) => crop.toBlob(resolve, "image/png"));
-    if (!blob) return;
-    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-    try {
-      const text = await api.recognizeText(bytes);
-      setOcrFailed(false);
-      setOcrText(text);
-      setPhase("ocr-result");
-    } catch {
-      // The backend returns "No Text Found" for empty results and
-      // "Text Recognition Failed" for real failures.
-      setOcrFailed(true);
+  // Spec §2.4 changeCaptureMode: switching the mode resets to the selection
+  // phase, tears down the recording-options popover and the OCR panel, and
+  // keeps or clears the region per mode (OCR always clears it). The mode
+  // selector stays visible throughout (spec §1.2), so this can be invoked
+  // at any point.
+  const switchMode = useCallback(
+    (next: Mode) => {
+      if (next === modeRef.current) return;
+      modeRef.current = next;
+      setMode(next);
+      setPhase("selecting");
+      setDrag(null);
+      setResizeHandle(null);
+      setMoveDrag(null);
+      setHoverWindow(null);
+      hoverWindowRef.current = null;
       setOcrText("");
-      setPhase("ocr-result");
-    } finally {
-      setOcrBusy(false);
-    }
-  }
+      setOcrFailed(false);
+      setTool("select");
+      if (next === "ocr") {
+        // Spec: OCR always clears the selection and re-draws a region.
+        setSelection(null);
+      } else if (next === "record" && selectionRef.current) {
+        // Existing region + record mode → show the recording options.
+        setPhase("record-options");
+      } else if (next === "screenshot" && selectionRef.current) {
+        // Existing region + screenshot → toolbar re-appears (selecting).
+        setPhase("selecting");
+      } else {
+        setSelection(null);
+      }
+      // With a valid region: screenshot re-shows the toolbar (selecting
+      // phase with a selection); record shows the options popover.
+    },
+    [],
+  );
 
-  // --- toolbar placement ---
+  // --- toolbar placement (spec §7.6) ---
+  // Defaults to 10pt below the selection, centered; flips above when the
+  // bottom would overflow; x/y clamped with an 8pt margin.
   const toolbarAnchor = useMemo(() => {
-    if (!selection) return { x: 0, y: 0, above: true };
+    if (!selection) return { x: 0, y: 0 };
+    const below = selection.y + selection.height + 10;
+    const above = selection.y - 10;
     return {
       x: selection.x + selection.width / 2,
-      y: selection.y,
-      above: selection.y >= 96,
+      // Spec §7.6: below the selection by default; flip above when the
+      // bottom edge would overflow (48 = toolbar height, 8 = margin).
+      y: below + 48 + 8 > bounds.height ? above : below,
     };
-  }, [selection]);
+  }, [selection, bounds]);
 
   // --- render ---
   const selectingRect = drag && drag.moved && !resizeHandle ? normalized(drag.start, drag.current) : null;
@@ -406,6 +514,19 @@ export function OverlayWindow() {
       onPointerDown={phase === "annotating" ? undefined : onPointerDown}
       onPointerMove={phase === "annotating" ? undefined : onPointerMove}
       onPointerUp={phase === "annotating" ? undefined : onPointerUp}
+      onContextMenu={(e) => {
+        // Spec §1.6: right-click returns to region selection while
+        // annotating (tearing down annotations); otherwise it cancels.
+        e.preventDefault();
+        if (phase === "annotating") {
+          setPhase("selecting");
+          setSelection(null);
+          setTool("select");
+          setAppearance(DEFAULT_APPEARANCE);
+        } else {
+          cancel();
+        }
+      }}
     >
       {context && frozenSrc && (
         <img
@@ -489,7 +610,7 @@ export function OverlayWindow() {
             }}
           />
           <SelectionHandles rect={displayRect} />
-          <SizeBadge rect={displayRect} />
+          <SizeBadge rect={displayRect} bounds={bounds} />
         </>
       )}
 
@@ -525,8 +646,10 @@ export function OverlayWindow() {
         </>
       )}
 
-      {/* Annotation canvas */}
-      {annotating && selection && (
+      {/* Annotation canvas — mounted (hidden) as soon as a region is chosen
+          (spec §7.1: the canvas exists but is hidden until a tool is picked),
+          so Done/Return export works without picking a tool. */}
+      {selection && (annotating || phase === "selecting") && (
         <div
           style={{
             position: "absolute",
@@ -534,11 +657,18 @@ export function OverlayWindow() {
             top: selection.y,
             width: selection.width,
             height: selection.height,
+            visibility: annotating ? "visible" : "hidden",
+            pointerEvents: annotating ? "auto" : "none",
           }}
         >
           <AnnotationCanvas
             ref={canvasRef}
             image={imageRef.current}
+            displaySize={
+              context
+                ? { width: context.displayWidth, height: context.displayHeight }
+                : undefined
+            }
             region={{ x: selection.x, y: selection.y, width: selection.width, height: selection.height }}
             tool={tool}
             appearance={appearance}
@@ -548,15 +678,19 @@ export function OverlayWindow() {
             }}
             onCancel={cancel}
             onToolChange={setTool}
+            onFinishAfterTextCommit={() => void complete("copy")}
           />
         </div>
       )}
 
-      {/* Mode selector */}
-      {phase === "mode-select" && (
+      {/* Mode selector — ALWAYS visible (spec §1.2: never hidden), so the
+          mode can be switched at any point: before/during selection and
+          after a region is chosen (spec §2.4 changeCaptureMode). */}
+      {phase !== "ocr-result" && (
         <>
           <div
             className="kiri-hud"
+            onPointerDown={(e) => e.stopPropagation()}
             style={{
               position: "absolute",
               left: "50%",
@@ -570,38 +704,67 @@ export function OverlayWindow() {
           >
             <ModeButton
               active={mode === "screenshot"}
-              glyph={<Glyph name="camera" />}
+              icon="camera.viewfinder"
               label={t("Screenshot")}
-              onClick={() => setMode("screenshot")}
+              onClick={() => switchMode("screenshot")}
             />
             <ModeButton
               active={mode === "record"}
-              glyph={<Glyph name="record" />}
+              icon="record.circle"
               label={t("Record")}
-              onClick={() => setMode("record")}
+              onClick={() => switchMode("record")}
             />
             <ModeButton
               active={mode === "ocr"}
-              glyph={<Glyph name="text" />}
+              icon="text.viewfinder"
               label={t("OCR")}
-              onClick={() => setMode("ocr")}
+              onClick={() => switchMode("ocr")}
             />
           </div>
-          <HintLabel
-            text={
-              mode === "screenshot"
-                ? t("Drag to choose a capture area   ·   Click a window   ·   Esc to cancel")
-                : mode === "record"
-                  ? t("Drag to choose a recording area   ·   Click a window   ·   Esc to cancel")
-                  : t("Drag to choose text to recognize   ·   Esc to cancel")
-            }
-            y={128}
-          />
+          {!selection && (
+            <HintLabel
+              text={
+                mode === "screenshot"
+                  ? t("Drag to choose a capture area   ·   Click a window   ·   Esc to cancel")
+                  : mode === "record"
+                    ? t("Drag to choose a recording area   ·   Click a window   ·   Esc to cancel")
+                    : t("Drag to choose text to recognize   ·   Esc to cancel")
+              }
+              bottom={88 + 44 + 10}
+            />
+          )}
         </>
       )}
 
       {/* OCR states */}
-      {phase === "ocr-drag" && <HintLabel text={t("Recognizing Text…")} y={128} />}
+      {phase === "ocr-drag" && <HintLabel text={t("Recognizing Text…")} bottom={88 + 44 + 10} />}
+
+      {/* Drag hint while creating a region (spec §3.2.5: shown when no
+          toolbar exists yet and the user is dragging). */}
+      {phase === "selecting" && drag && drag.moved && !selection && (
+        <HintLabel
+          text={
+            mode === "screenshot"
+              ? t("Release to show tools")
+              : mode === "record"
+                ? t("Release for recording settings")
+                : t("Release to recognize text")
+          }
+          bottom={88 + 44 + 10}
+        />
+      )}
+      {phase === "selecting" && selection && !drag && (
+        <HintLabel
+          text={
+            mode === "screenshot"
+              ? t("Drag handles to resize · Drag inside to move")
+              : mode === "record"
+                ? t("Adjust the region · Recording settings below")
+                : t("Release to recognize text")
+          }
+          bottom={88 + 44 + 10}
+        />
+      )}
       {phase === "ocr-result" && (
         <OcrPanel
           text={ocrText}
@@ -617,9 +780,14 @@ export function OverlayWindow() {
       {phase === "record-options" && selection && (
         <RecordOptionsPanel
           anchor={selection}
+          bounds={bounds}
           options={recordOptions}
           micSupported={micSupported}
-          onChange={setRecordOptions}
+          onChange={(next) => {
+            // Spec (recording §3): persist each toggle change immediately.
+            setRecordOptions(next);
+            void api.setRecordingOptions(next).catch(() => {});
+          }}
           onStart={() => {
             void api.startRecordingFlow(selection, recordOptions).catch(() => {});
           }}
@@ -627,15 +795,21 @@ export function OverlayWindow() {
         />
       )}
 
-      {/* Toolbar */}
-      {annotating && (
+      {/* Toolbar — appears as soon as a region is chosen (spec §7.1); the
+          region stays adjustable until a tool is picked, which locks it. */}
+      {(annotating || (phase === "selecting" && selection)) && (
         <Toolbar
           anchor={toolbarAnchor}
+          bounds={bounds}
           selection={selection!}
           tool={tool}
           setTool={(next) => {
-            if (next === "text" || next === "select") {
-              canvasRef.current?.commitTextEditing();
+            // Spec §6.6: switching tools commits any in-flight text edit
+            // (commitTextEditing is a no-op when nothing is being edited).
+            canvasRef.current?.commitTextEditing();
+            if (phase === "selecting") {
+              // Picking a tool locks the region into annotation mode.
+              setPhase("annotating");
             }
             setTool(next);
           }}
@@ -650,13 +824,20 @@ export function OverlayWindow() {
           moreMenuOpen={moreMenuOpen}
           setMoreMenuOpen={setMoreMenuOpen}
           onReselect={() => {
+            // Spec §10.2: reselecting tears down the annotation UI and
+            // resets tool/appearance to defaults.
             setPhase("selecting");
             setSelection(null);
+            setTool("select");
+            setAppearance(DEFAULT_APPEARANCE);
           }}
           onSaveAs={() => void complete("save")}
           onPin={() => void complete("pin")}
           onOpenEditor={() => void complete("edit")}
           onClear={() => canvasRef.current?.clearAnnotations()}
+          onTextFontBegin={() => canvasRef.current?.beginTextFontSizeAdjustment()}
+          onTextFontLive={(value) => canvasRef.current?.setTextFontSizeLive(value)}
+          onTextFontEnd={() => canvasRef.current?.endTextFontSizeAdjustment()}
         />
       )}
 
@@ -668,29 +849,9 @@ export function OverlayWindow() {
 
 // ---------------------------------------------------------------------------
 
-function Glyph(props: { name: string }) {
-  return (
-    <svg width="13" height="13" viewBox="0 0 16 16" style={{ display: "block" }}>
-      {props.name === "camera" && (
-        <rect x="1.5" y="4" width="13" height="9.5" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      )}
-      {props.name === "record" && (
-        <circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      )}
-      {props.name === "text" && (
-        <>
-          <rect x="1.5" y="3" width="13" height="10" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-          <line x1="5" y1="6.5" x2="11" y2="6.5" stroke="currentColor" strokeWidth="1.4" />
-          <line x1="5" y1="9.5" x2="9.5" y2="9.5" stroke="currentColor" strokeWidth="1.4" />
-        </>
-      )}
-    </svg>
-  );
-}
-
 function ModeButton(props: {
   active: boolean;
-  glyph: React.ReactNode;
+  icon: IconName;
   label: string;
   onClick(): void;
 }) {
@@ -705,32 +866,39 @@ function ModeButton(props: {
         minWidth: 92,
         padding: "0 14px",
         borderRadius: 10,
-        border: "none",
+        border: props.active ? "1px solid rgba(255,255,255,0.22)" : "1px solid transparent",
         background: props.active ? "#634FDB" : "transparent",
-        color: "#fff",
+        color: props.active ? "#fff" : "rgba(255,255,255,0.72)",
         font: "600 12px " + "var(--kiri-font-ui)",
         cursor: "default",
+        boxShadow: props.active ? "0 3px 7px rgba(99, 79, 219, 0.24)" : "none",
+      }}
+      onMouseEnter={(e) => {
+        if (!props.active) e.currentTarget.style.background = "rgba(125,105,245,0.10)";
+      }}
+      onMouseLeave={(e) => {
+        if (!props.active) e.currentTarget.style.background = "transparent";
       }}
     >
-      {props.glyph}
+      <KiriIcon name={props.icon} size={13} />
       {props.label}
     </button>
   );
 }
 
-function HintLabel(props: { text: string; y: number }) {
+function HintLabel(props: { text: string; bottom: number }) {
   return (
     <div
       style={{
         position: "absolute",
         left: "50%",
-        top: props.y,
+        bottom: props.bottom,
         transform: "translateX(-50%)",
-        background: "rgba(0,0,0,0.76)",
+        background: "rgba(0,0,0,0.72)",
         border: "1px solid rgba(255,255,255,0.16)",
-        borderRadius: 9,
+        borderRadius: "999px",
         color: "#fff",
-        padding: "5px 10px",
+        padding: "9px 15px",
         font: "500 12px var(--kiri-font-ui)",
         whiteSpace: "pre",
         pointerEvents: "none",
@@ -748,6 +916,8 @@ function SelectionHandles(props: { rect: Rect }) {
       {ALL_HANDLES.map((handle) => {
         const p = handlePoint(handle, rect);
         return (
+          // Spec §3.2.4: white outer circle (10pt) with an accent inner
+          // circle (6pt) — a white-dot-with-violet-core handle.
           <div
             key={handle}
             style={{
@@ -758,34 +928,58 @@ function SelectionHandles(props: { rect: Rect }) {
               height: 10,
               borderRadius: "50%",
               background: "#fff",
-              boxShadow: `0 0 0 2px #fff inset, 0 0 0 5px ${ACCENT} inset`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: "0 0 2px rgba(0,0,0,0.3)",
               pointerEvents: "none",
             }}
-          />
+          >
+            <div
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                background: ACCENT,
+              }}
+            />
+          </div>
         );
       })}
     </>
   );
 }
 
-function SizeBadge(props: { rect: Rect }) {
-  const { rect } = props;
+function SizeBadge(props: { rect: Rect; bounds: Rect }) {
+  const { rect, bounds } = props;
   const label = `${Math.round(rect.width)} × ${Math.round(rect.height)}`;
-  const top = Math.max(0, rect.y - 24);
-  const left = Math.min(Math.max(0, rect.x), 6);
+  // Spec §3.2.3: badge sits 6pt above the selection, x clamped to
+  // [6, bounds.maxX - badgeWidth - 6]; if it would clip the top edge,
+  // it moves inside the selection's top instead.
+  const width = Math.max(48, label.length * 7 + 16);
+  const height = 22;
+  const rawX = rect.x;
+  const left = Math.min(Math.max(6, rawX), Math.max(6, bounds.width - width - 6));
+  const outside = rect.y - height - 6;
+  const top = outside >= 6 ? outside : rect.y + 6;
   return (
     <div
       style={{
         position: "absolute",
         left,
         top,
+        width,
+        height,
         background: "rgba(0,0,0,0.76)",
         border: "1px solid rgba(255,255,255,0.16)",
-        borderRadius: 9,
+        borderRadius: height / 2,
         color: "#fff",
-        padding: "3px 8px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         font: "500 11px ui-monospace, SFMono-Regular, Menlo, monospace",
         pointerEvents: "none",
+        boxSizing: "border-box",
       }}
     >
       {label}
@@ -798,6 +992,7 @@ function OcrPanel(props: { text: string; failed: boolean; onCopy(): void; onClos
   return (
     <div
       className="kiri-hud"
+      onPointerDown={(e) => e.stopPropagation()}
       style={{
         position: "absolute",
         left: "50%",
@@ -814,8 +1009,11 @@ function OcrPanel(props: { text: string; failed: boolean; onCopy(): void; onClos
         <span style={{ font: "600 12.5px var(--kiri-font-ui)" }}>
           {failed ? t("Text Recognition Failed") : t("Recognized Text")}
         </span>
-        <button onClick={onClose} style={iconButtonStyle}>
-          ✕
+        <button
+          onClick={onClose}
+          style={{ ...iconButtonStyle, display: "flex", alignItems: "center", justifyContent: "center" }}
+        >
+          <KiriIcon name="xmark" size={11} />
         </button>
       </div>
       <div
@@ -853,27 +1051,62 @@ const iconButtonStyle: React.CSSProperties = {
 
 function RecordOptionsPanel(props: {
   anchor: Rect;
+  bounds: Rect;
   options: RecordingOptions;
   micSupported: boolean;
   onChange(options: RecordingOptions): void;
   onStart(): void;
   onCancel(): void;
 }) {
-  const { anchor, options, micSupported, onChange, onStart, onCancel } = props;
+  const { anchor, bounds, options, micSupported, onChange, onStart, onCancel } = props;
   const toggle = (key: keyof RecordingOptions) => {
     const next = { ...options, [key]: !options[key] };
     if (key === "showsCursor" && !next.showsCursor) next.highlightsClicks = false;
     onChange(next);
   };
+  // Panel geometry: 336 wide; prefer below the selection, flip above when
+  // the bottom would overflow, and as a last resort pin inside the screen so
+  // a huge selection can never push the panel off-screen (spec: the popover
+  // must stay reachable). x centered on the selection, clamped with an 8pt
+  // margin.
+  // Panel geometry (336 wide): the Swift popover anchors to the bottom
+  // mode selector (centered, 88pt from the bottom) and flips upward, so the
+  // panel lands in the lower-middle of the screen. We mirror that: center
+  // horizontally, pin vertically to the lower third (clear of the mode
+  // selector at bottom:88), and always stay fully on screen — a huge
+  // selection can never push it off-screen.
+  const PANEL_W = 336;
+  const PANEL_H = 400;
+  const margin = 8;
+  const maxTop = Math.max(margin, bounds.height - PANEL_H - margin);
+  const centeredTop = Math.max(margin, Math.min(maxTop, bounds.height / 2 - PANEL_H / 2 + 30));
+  // Keep a small preference for hugging the selection when it's small, so
+  // the panel feels attached; fall back to the centered position for big
+  // selections.
+  const below = anchor.y + anchor.height + 10;
+  const above = anchor.y - PANEL_H - 10;
+  let top: number;
+  if (anchor.height > bounds.height - 240 || anchor.width > bounds.width - 240) {
+    top = centeredTop;
+  } else {
+    const preferred = below + PANEL_H + margin > bounds.height ? above : below;
+    top = Math.min(Math.max(margin, preferred), maxTop);
+  }
+  const centerX = anchor.x + anchor.width / 2 - PANEL_W / 2;
+  const left = Math.min(
+    Math.max(margin, centerX),
+    Math.max(margin, bounds.width - PANEL_W - margin),
+  );
   return (
     <div
       className="kiri-hud"
+      onPointerDown={(e) => e.stopPropagation()}
       style={{
         position: "absolute",
-        left: Math.max(8, anchor.x),
-        top: Math.max(8, anchor.y + anchor.height + 10),
+        left,
+        top,
         padding: 12,
-        width: 336,
+        width: PANEL_W,
         display: "flex",
         flexDirection: "column",
         gap: 4,
@@ -881,7 +1114,7 @@ function RecordOptionsPanel(props: {
     >
       <div style={{ font: "600 12.5px var(--kiri-font-ui)", marginBottom: 6 }}>{t("Record Region")}</div>
       <div style={{ color: "rgba(255,255,255,0.7)", font: "400 11px var(--kiri-font-ui)", marginBottom: 6 }}>
-        {t("MP4 · 30 fps · Saved locally")}
+        {t("MP4 · 30 fps · Saved locally · Never uploaded")}
       </div>
       <ToggleRow
         label={t("3-second countdown")}
@@ -915,8 +1148,11 @@ function RecordOptionsPanel(props: {
         <button className="kiri-primary-button" style={{ flex: 1 }} onClick={onStart}>
           {t("Start Recording")}
         </button>
-        <button style={{ ...iconButtonStyle, height: 36 }} onClick={onCancel}>
-          ✕
+        <button
+          style={{ ...iconButtonStyle, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={onCancel}
+        >
+          <KiriIcon name="xmark" size={11} />
         </button>
       </div>
     </div>
@@ -978,7 +1214,8 @@ function ToggleRow(props: {
 }
 
 interface ToolbarProps {
-  anchor: { x: number; y: number; above: boolean };
+  anchor: { x: number; y: number };
+  bounds: Rect;
   selection: Rect;
   tool: Tool;
   setTool(tool: Tool): void;
@@ -997,21 +1234,25 @@ interface ToolbarProps {
   onPin(): void;
   onOpenEditor(): void;
   onClear(): void;
+  onTextFontBegin?(): void;
+  onTextFontLive?(value: number): void;
+  onTextFontEnd?(): void;
 }
 
-const TOOLS: { tool: Tool; label: string }[] = [
-  { tool: "select", label: "V" },
-  { tool: "pen", label: "P" },
-  { tool: "rectangle", label: "R" },
-  { tool: "line", label: "L" },
-  { tool: "arrow", label: "A" },
-  { tool: "text", label: "T" },
-  { tool: "mosaic", label: "M" },
+const TOOLS: { tool: Tool; icon: IconName; title: string }[] = [
+  { tool: "select", icon: "cursorarrow", title: "Select (V)" },
+  { tool: "pen", icon: "pencil.tip", title: "Pen (P)" },
+  { tool: "rectangle", icon: "rectangle.dashed", title: "Rectangle (R)" },
+  { tool: "line", icon: "line.diagonal", title: "Line (L)" },
+  { tool: "arrow", icon: "arrow.up.right", title: "Arrow (A)" },
+  { tool: "text", icon: "textformat", title: "Text (T)" },
+  { tool: "mosaic", icon: "square.grid.3x3.fill", title: "Mosaic (M)" },
 ];
 
 function Toolbar(props: ToolbarProps) {
   const {
     anchor,
+    bounds,
     tool,
     setTool,
     appearance,
@@ -1029,6 +1270,9 @@ function Toolbar(props: ToolbarProps) {
     onPin,
     onOpenEditor,
     onClear,
+    onTextFontBegin,
+    onTextFontLive,
+    onTextFontEnd,
   } = props;
 
   const slider =
@@ -1043,18 +1287,37 @@ function Toolbar(props: ToolbarProps) {
             : null;
 
   const toolbarHeight = 48;
-  const left = Math.max(8, anchor.x);
-  const top = anchor.above ? Math.max(8, anchor.y - toolbarHeight - 10) : Math.max(8, anchor.y + props.selection.height + 10);
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barWidth, setBarWidth] = useState(420);
+  // Measure the real toolbar width so the centering clamp keeps the whole
+  // bar on screen (spec §7.6: translate, never shrink or wrap).
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const measure = () => setBarWidth(el.offsetWidth || 420);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [tool, moreMenuOpen, appearance]);
+  // Spec §7.6: centered on the selection's midX; clamp so the bar's left
+  // and right edges stay ≥8pt inside the screen. y is already resolved.
+  const left = Math.min(
+    Math.max(8, anchor.x - barWidth / 2),
+    Math.max(8, bounds.x + bounds.width - barWidth - 8),
+  );
+  const top = Math.min(Math.max(8, anchor.y), Math.max(8, bounds.y + bounds.height - toolbarHeight - 8));
 
   return (
     <>
       <div
+        ref={barRef}
         className="kiri-hud"
+        onPointerDown={(e) => e.stopPropagation()}
         style={{
           position: "absolute",
           left,
           top,
-          transform: "translateX(-50%)",
           display: "flex",
           alignItems: "center",
           gap: 4,
@@ -1062,13 +1325,13 @@ function Toolbar(props: ToolbarProps) {
           boxShadow: "0 5px 12px rgba(0,0,0,0.24)",
         }}
       >
-        <ToolButton label="✕" title={t("Cancel capture · Esc")} onClick={onCancel} />
+        <ToolButton icon="xmark" title={t("Cancel capture · Esc")} onClick={onCancel} />
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.16)" }} />
-        {TOOLS.map(({ tool: t2, label }) => (
+        {TOOLS.map(({ tool: t2, icon, title }) => (
           <ToolButton
             key={t2}
-            label={label}
-            title={t("Select (V)")}
+            icon={icon}
+            title={t(title)}
             active={tool === t2}
             onClick={() => setTool(t2)}
           />
@@ -1079,9 +1342,9 @@ function Toolbar(props: ToolbarProps) {
           <SegmentedControl
             width={26}
             segments={[
-              { label: "", glyph: "none", title: t("Transparent background") },
-              { label: "", glyph: "dark", title: t("Dark background") },
-              { label: "", glyph: "light", title: t("Light background") },
+              { icon: "square.dashed", title: t("Transparent background") },
+              { icon: "moon.fill", title: t("Dark background") },
+              { icon: "sun.max.fill", title: t("Light background") },
             ]}
             value={appearance.textBackgroundStyle === "transparent" ? 0 : appearance.textBackgroundStyle === "dark" ? 1 : 2}
             onChange={(index) =>
@@ -1115,7 +1378,21 @@ function Toolbar(props: ToolbarProps) {
               min={slider.min}
               max={slider.max}
               value={slider.value}
-              onChange={(e) => slider.onChange(Math.round(Number(e.target.value)))}
+              onChange={(e) => {
+                const value = Math.round(Number(e.target.value));
+                slider.onChange(value);
+                // Live preview for the selected text mark (spec §6.6).
+                if (tool === "text") onTextFontLive?.(value);
+              }}
+              onPointerDown={() => {
+                if (tool === "text") onTextFontBegin?.();
+              }}
+              onPointerUp={() => {
+                if (tool === "text") onTextFontEnd?.();
+              }}
+              onPointerLeave={() => {
+                if (tool === "text") onTextFontEnd?.();
+              }}
               style={{ width: 76, accentColor: ACCENT }}
             />
             <span
@@ -1139,11 +1416,11 @@ function Toolbar(props: ToolbarProps) {
           />
         ))}
         <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.16)" }} />
-        <ToolButton label="↶" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={onUndo} />
-        <ToolButton label="↷" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={onRedo} />
-        <ToolButton label="✓" title={t("Done — Copy to clipboard · Return")} primary onClick={onDone} />
+        <ToolButton icon="arrow.uturn.backward" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={onUndo} />
+        <ToolButton icon="arrow.uturn.forward" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={onRedo} />
+        <ToolButton icon="checkmark" title={t("Done — Copy to clipboard · Return")} primary onClick={onDone} />
         <div style={{ position: "relative" }}>
-          <ToolButton label="⋯" title={t("More — Save, pin, edit, or clear")} onClick={() => setMoreMenuOpen(!moreMenuOpen)} />
+          <ToolButton icon="ellipsis.circle" title={t("More — Save, pin, edit, or clear")} onClick={() => setMoreMenuOpen(!moreMenuOpen)} />
           {moreMenuOpen && (
             <div
               className="kiri-hud"
@@ -1158,11 +1435,13 @@ function Toolbar(props: ToolbarProps) {
                 zIndex: 10,
               }}
             >
-              <MenuItem label={t("Reselect Region")} onClick={onReselect} />
-              <MenuItem label={t("Save As…")} onClick={onSaveAs} />
-              <MenuItem label={t("Pin on Screen")} onClick={onPin} />
-              <MenuItem label={t("Open in Editor")} onClick={onOpenEditor} />
-              <MenuItem label={t("Clear Annotations")} onClick={onClear} />
+              <MenuItem icon="crop" label={t("Reselect Region")} onClick={onReselect} />
+              <div style={{ height: 1, background: "rgba(255,255,255,0.14)", margin: "4px 0" }} />
+              <MenuItem icon="square.and.arrow.down" label={t("Save As…")} onClick={onSaveAs} />
+              <MenuItem icon="pin" label={t("Pin on Screen")} onClick={onPin} />
+              <MenuItem icon="slider.horizontal.3" label={t("Open in Editor")} onClick={onOpenEditor} />
+              <div style={{ height: 1, background: "rgba(255,255,255,0.14)", margin: "4px 0" }} />
+              <MenuItem icon="trash" label={t("Clear Annotations")} onClick={onClear} />
             </div>
           )}
         </div>
@@ -1172,7 +1451,8 @@ function Toolbar(props: ToolbarProps) {
 }
 
 function ToolButton(props: {
-  label: string;
+  icon?: IconName;
+  label?: string;
   title?: string;
   active?: boolean;
   primary?: boolean;
@@ -1188,13 +1468,19 @@ function ToolButton(props: {
         width: 32,
         height: 32,
         borderRadius: 10,
-        border: props.primary ? "1px solid rgba(255,255,255,0.22)" : "1px solid transparent",
-        background: props.primary
-          ? "linear-gradient(135deg, #634FDB, #7D69F5)"
+        // Spec §7.3: .tool selected = accent 0.18 fill + accent 0.32 border;
+        // .primary = accentStrong fill + white 0.22 border + accent shadow.
+        border: props.primary
+          ? "1px solid rgba(255,255,255,0.22)"
           : props.active
-            ? "rgba(125,105,245,0.32)"
+            ? "1px solid rgba(125,105,245,0.32)"
+            : "1px solid transparent",
+        background: props.primary
+          ? "#634FDB"
+          : props.active
+            ? "rgba(125,105,245,0.18)"
             : "transparent",
-        color: "#fff",
+        color: props.active ? "#AB94FF" : "#fff",
         fontSize: 12,
         fontWeight: 600,
         cursor: "default",
@@ -1202,9 +1488,34 @@ function ToolButton(props: {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        boxShadow: props.primary ? "0 3px 7px rgba(99, 79, 219, 0.25)" : "none",
+        transition: "transform 0.14s ease-out, background 0.14s ease-out",
+      }}
+      onMouseEnter={(e) => {
+        if (!props.primary && !props.active && !props.disabled) {
+          e.currentTarget.style.background = "rgba(125,105,245,0.10)";
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!props.primary && !props.active) {
+          e.currentTarget.style.background = "transparent";
+        }
+      }}
+      onMouseDown={(e) => {
+        e.currentTarget.style.transform = "scale(0.94)";
+      }}
+      onMouseUp={(e) => {
+        e.currentTarget.style.transform = "scale(1)";
+      }}
+      onPointerLeave={(e) => {
+        e.currentTarget.style.transform = "scale(1)";
       }}
     >
-      {props.label}
+      {props.icon ? (
+        <KiriIcon name={props.icon} size={15} />
+      ) : (
+        props.label
+      )}
     </button>
   );
 }
@@ -1252,7 +1563,7 @@ function ColorSwatch(props: { color: string; selected: boolean; onClick(): void 
 
 function SegmentedControl(props: {
   width: number;
-  segments: { label: string; glyph?: string; title?: string }[];
+  segments: { label?: string; icon?: IconName; title?: string }[];
   value: number;
   onChange(index: number): void;
 }) {
@@ -1281,14 +1592,13 @@ function SegmentedControl(props: {
             fontSize: 9,
             fontWeight: 500,
             cursor: "default",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
-          {segment.glyph === "none" ? (
-            <span style={{ opacity: 0.7 }}>∅</span>
-          ) : segment.glyph === "dark" ? (
-            <span style={{ opacity: 0.7 }}>◼</span>
-          ) : segment.glyph === "light" ? (
-            <span style={{ opacity: 0.7 }}>◻</span>
+          {segment.icon ? (
+            <KiriIcon name={segment.icon} size={12} style={{ opacity: 0.75 }} />
           ) : (
             segment.label
           )}
@@ -1298,7 +1608,7 @@ function SegmentedControl(props: {
   );
 }
 
-function MenuItem(props: { label: string; onClick(): void }) {
+function MenuItem(props: { label: string; icon?: IconName; onClick(): void }) {
   return (
     <button
       onClick={props.onClick}
@@ -1311,8 +1621,16 @@ function MenuItem(props: { label: string; onClick(): void }) {
         borderRadius: 8,
         font: "400 12.5px var(--kiri-font-ui)",
         cursor: "default",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
       }}
     >
+      {props.icon && (
+        <span style={{ width: 14, display: "flex", justifyContent: "center", opacity: 0.75 }}>
+          <KiriIcon name={props.icon} size={13} />
+        </span>
+      )}
       {props.label}
     </button>
   );

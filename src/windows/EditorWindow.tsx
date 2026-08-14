@@ -15,15 +15,16 @@ import {
   type Tool,
 } from "../annotation/model";
 import AnnotationCanvas, { type AnnotationCanvasHandle } from "../annotation/AnnotationCanvas";
+import { KiriIcon, type IconName } from "../components/KiriIcons";
 
-const TOOLS: { tool: Tool; label: string; title: string }[] = [
-  { tool: "select", label: "V", title: "Select (V)" },
-  { tool: "pen", label: "P", title: "Pen (P)" },
-  { tool: "rectangle", label: "R", title: "Rectangle (R)" },
-  { tool: "line", label: "L", title: "Line (L)" },
-  { tool: "arrow", label: "A", title: "Arrow (A)" },
-  { tool: "text", label: "T", title: "Text (T)" },
-  { tool: "mosaic", label: "M", title: "Mosaic (M)" },
+const TOOLS: { tool: Tool; icon: IconName; title: string }[] = [
+  { tool: "select", icon: "cursorarrow", title: "Select (V)" },
+  { tool: "pen", icon: "pencil.tip", title: "Pen (P)" },
+  { tool: "rectangle", icon: "rectangle.dashed", title: "Rectangle (R)" },
+  { tool: "line", icon: "line.diagonal", title: "Line (L)" },
+  { tool: "arrow", icon: "arrow.up.right", title: "Arrow (A)" },
+  { tool: "text", icon: "textformat", title: "Text (T)" },
+  { tool: "mosaic", icon: "square.grid.3x3.fill", title: "Mosaic (M)" },
 ];
 
 export function EditorWindow(props: { id: string }) {
@@ -84,8 +85,17 @@ export function EditorWindow(props: { id: string }) {
         return;
       }
       if (!mod && !e.altKey) {
-        const found = TOOLS.find((entry) => entry.label.toLowerCase() === e.key.toLowerCase());
-        if (found) setTool(found.tool);
+        const keyMap: Record<string, Tool> = {
+          v: "select",
+          p: "pen",
+          r: "rectangle",
+          l: "line",
+          a: "arrow",
+          t: "text",
+          m: "mosaic",
+        };
+        const next = keyMap[e.key.toLowerCase()];
+        if (next) setTool(next);
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -111,7 +121,9 @@ export function EditorWindow(props: { id: string }) {
     } catch {
       return;
     }
-    if (!copyToClipboard) closeWindow();
+    // Spec: copying finishes and closes the editor; saving keeps it open
+    // so the user can continue (they can close manually or hit Copy).
+    if (copyToClipboard) closeWindow();
   }
 
   const slider =
@@ -139,10 +151,10 @@ export function EditorWindow(props: { id: string }) {
           background: "#1E1B28",
         }}
       >
-        {TOOLS.map(({ tool: t2, label, title }) => (
+        {TOOLS.map(({ tool: t2, icon, title }) => (
           <EditorToolButton
             key={t2}
-            label={label}
+            icon={icon}
             title={t(title)}
             active={tool === t2}
             onClick={() => setTool(t2)}
@@ -151,7 +163,11 @@ export function EditorWindow(props: { id: string }) {
         <div style={{ width: 1, height: 26, background: "#40394E", margin: "0 4px" }} />
         {tool === "text" ? (
           <EditorSegments
-            segments={["∅", "◼", "◻"]}
+            segments={[
+              { icon: "square.dashed" },
+              { icon: "moon.fill" },
+              { icon: "sun.max.fill" },
+            ]}
             value={appearance.textBackgroundStyle === "transparent" ? 0 : appearance.textBackgroundStyle === "dark" ? 1 : 2}
             onChange={(i) =>
               setAppearance({ ...appearance, textBackgroundStyle: (["transparent", "dark", "light"] as TextBackgroundStyle[])[i] })
@@ -159,7 +175,7 @@ export function EditorWindow(props: { id: string }) {
           />
         ) : tool === "mosaic" ? (
           <EditorSegments
-            segments={["1", "2", "3"]}
+            segments={[{ label: "1" }, { label: "2" }, { label: "3" }]}
             value={appearance.mosaicIntensity === "soft" ? 0 : appearance.mosaicIntensity === "standard" ? 1 : 2}
             onChange={(i) =>
               setAppearance({ ...appearance, mosaicIntensity: (["soft", "standard", "strong"] as MosaicIntensity[])[i] })
@@ -173,7 +189,20 @@ export function EditorWindow(props: { id: string }) {
               min={slider.min}
               max={slider.max}
               value={slider.value}
-              onChange={(e) => slider.onChange(Math.round(Number(e.target.value)))}
+              onChange={(e) => {
+                const value = Math.round(Number(e.target.value));
+                slider.onChange(value);
+                if (tool === "text") canvasRef.current?.setTextFontSizeLive(value);
+              }}
+              onPointerDown={() => {
+                if (tool === "text") canvasRef.current?.beginTextFontSizeAdjustment();
+              }}
+              onPointerUp={() => {
+                if (tool === "text") canvasRef.current?.endTextFontSizeAdjustment();
+              }}
+              onPointerLeave={() => {
+                if (tool === "text") canvasRef.current?.endTextFontSizeAdjustment();
+              }}
               style={{ width: 90, accentColor: "#7D69F5" }}
             />
             <span style={{ width: 28, textAlign: "right", fontSize: 9, fontVariantNumeric: "tabular-nums" }}>
@@ -191,10 +220,33 @@ export function EditorWindow(props: { id: string }) {
           />
         ))}
         <div style={{ width: 1, height: 26, background: "#40394E", margin: "0 4px" }} />
-        <EditorToolButton label="↶" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={() => canvasRef.current?.undo()} />
-        <EditorToolButton label="↷" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={() => canvasRef.current?.redo()} />
+        <EditorToolButton icon="arrow.uturn.backward" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={() => canvasRef.current?.undo()} />
+        <EditorToolButton icon="arrow.uturn.forward" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={() => canvasRef.current?.redo()} />
+        <EditorToolButton
+          icon="xmark"
+          title={t("Clear Annotations")}
+          disabled={!canUndo && !canRedo}
+          onClick={() => canvasRef.current?.clearAnnotations()}
+        />
         <div style={{ flex: 1 }} />
-        <EditorToolButton label="✕" title={t("Cancel (Esc)")} onClick={closeWindow} />
+        <button
+          className="editor-secondary-button"
+          style={{
+            height: 32,
+            padding: "0 12px",
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.16)",
+            background: "transparent",
+            color: "#fff",
+            fontSize: 12,
+            fontWeight: 500,
+            cursor: "default",
+          }}
+          onClick={() => void complete(false)}
+        >
+          {t("Save As…")}
+        </button>
+        <EditorToolButton icon="ellipsis.circle" title={t("Cancel (Esc)")} onClick={closeWindow} />
         <button className="kiri-primary-button" style={{ minHeight: 32 }} onClick={() => void complete(true)}>
           {t("Copy")}
         </button>
@@ -225,7 +277,8 @@ export function EditorWindow(props: { id: string }) {
 }
 
 function EditorToolButton(props: {
-  label: string;
+  icon?: IconName;
+  label?: string;
   title: string;
   active?: boolean;
   disabled?: boolean;
@@ -247,9 +300,12 @@ function EditorToolButton(props: {
         fontWeight: 600,
         cursor: "default",
         opacity: props.disabled ? 0.35 : 1,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
       }}
     >
-      {props.label}
+      {props.icon ? <KiriIcon name={props.icon} size={15} /> : props.label}
     </button>
   );
 }
@@ -287,7 +343,11 @@ function EditorSwatch(props: { color: string; selected: boolean; onClick(): void
   );
 }
 
-function EditorSegments(props: { segments: string[]; value: number; onChange(i: number): void }) {
+function EditorSegments(props: {
+  segments: { label?: string; icon?: IconName }[];
+  value: number;
+  onChange(i: number): void;
+}) {
   return (
     <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 8, padding: 2, gap: 2 }}>
       {props.segments.map((segment, index) => (
@@ -303,9 +363,12 @@ function EditorSegments(props: { segments: string[]; value: number; onChange(i: 
             color: "#fff",
             fontSize: 10,
             cursor: "default",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
           }}
         >
-          {segment}
+          {segment.icon ? <KiriIcon name={segment.icon} size={12} style={{ opacity: 0.75 }} /> : segment.label}
         </button>
       ))}
     </div>

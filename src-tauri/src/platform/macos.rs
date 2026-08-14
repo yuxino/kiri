@@ -4,17 +4,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use block2::RcBlock;
-use objc2_core_foundation::CFRetained;
-use objc2_app_kit::{NSEvent, NSEventMask, NSRunningApplication, NSWindow, NSWorkspace};
-use objc2_core_foundation::{CFMachPort, CFRunLoop, CFRunLoopSource, kCFRunLoopDefaultMode};
-use objc2_core_graphics::{
-    CGEvent, CGEventField, CGEventFlags, CGEventMask, CGEventTapLocation, CGEventTapOptions,
-    CGEventTapPlacement, CGEventTapProxy, CGEventType,
-};
-use objc2_foundation::{NSArray, NSString, NSURL};
+use objc2_core_foundation::CFRunLoop;
 use tauri::{AppHandle, Manager};
+
+use objc2_app_kit::{NSEvent, NSEventMask, NSRunningApplication, NSWindow, NSWorkspace};
+use objc2_core_foundation::kCFRunLoopDefaultMode;
+use objc2_foundation::{NSArray, NSString, NSURL};
 
 use super::ClickMonitorHandle;
 
@@ -77,121 +74,6 @@ pub fn set_window_capture_excluded(app: &AppHandle, label: &str, excluded: bool)
     // macOS exclusions happen through the SCK content filter; nothing to do
     // per-window here.
     let _ = (app, label, excluded);
-}
-
-// ---------------------------------------------------------------------------
-// Global shortcut (⇧⌘A) — CGEventTap that consumes the event, mirroring
-// GlobalShortcutMonitor in AppModel.swift.
-// ---------------------------------------------------------------------------
-
-struct ShortcutState {
-    action: Box<dyn Fn() + Send>,
-}
-
-pub struct ShortcutHandle {
-    event_tap: CFRetained<CFMachPort>,
-    _source: CFRetained<CFRunLoopSource>,
-    state_ptr: usize,
-    _thread: thread::JoinHandle<()>,
-}
-
-impl ShortcutHandle {
-    pub fn stop(self) {
-        unsafe { CGEvent::tap_enable(&self.event_tap, false) };
-        if self.state_ptr != 0 {
-            unsafe {
-                let _ = Box::from_raw(self.state_ptr as *mut ShortcutState);
-            }
-        }
-    }
-}
-
-unsafe extern "C-unwind" fn shortcut_callback(
-    _proxy: CGEventTapProxy,
-    event_type: CGEventType,
-    event: std::ptr::NonNull<CGEvent>,
-    user_info: *mut std::ffi::c_void,
-) -> *mut CGEvent {
-    // The tap callback returns the event to pass through, or null to
-    // consume it (⇧⌘A is reserved exclusively).
-    if event_type == CGEventType::TapDisabledByTimeout
-        || event_type == CGEventType::TapDisabledByUserInput
-    {
-        return event.as_ptr();
-    }
-    let state = &*(user_info as *const ShortcutState);
-    let event_ref = &*event.as_ptr();
-    if is_capture_event(event_ref) {
-        if event_type == CGEventType::KeyDown {
-            (state.action)();
-        }
-        return std::ptr::null_mut();
-    }
-    event.as_ptr()
-}
-
-fn is_capture_event(event: &CGEvent) -> bool {
-    // keycode 0 = kVK_ANSI_A
-    if CGEvent::integer_value_field(Some(event), CGEventField::KeyboardEventKeycode) != 0 {
-        return false;
-    }
-    let flags = CGEvent::flags(Some(event));
-    let modifiers = flags
-        & (CGEventFlags::MaskCommand
-            | CGEventFlags::MaskShift
-            | CGEventFlags::MaskControl
-            | CGEventFlags::MaskAlternate);
-    modifiers == (CGEventFlags::MaskCommand | CGEventFlags::MaskShift)
-}
-
-pub fn start_shortcut(action: Box<dyn Fn() + Send>) -> Result<ShortcutHandle> {
-    // Input Monitoring permission gate.
-    extern "C" {
-        fn CGPreflightListenEventAccess() -> bool;
-        fn CGRequestListenEventAccess() -> bool;
-    }
-    let permitted = unsafe { CGPreflightListenEventAccess() || CGRequestListenEventAccess() };
-    if !permitted {
-        return Err(anyhow!(
-            "Enable Kiri in Input Monitoring settings, then quit and reopen it to reserve ⇧⌘A exclusively."
-        ));
-    }
-
-    let state = ShortcutState { action };
-    let state_ptr = Box::into_raw(Box::new(state)) as *mut std::ffi::c_void;
-    let mask: CGEventMask = (1u64 << CGEventType::KeyDown.0) | (1u64 << CGEventType::KeyUp.0);
-
-    let event_tap = unsafe {
-        CGEvent::tap_create(
-            CGEventTapLocation::SessionEventTap,
-            CGEventTapPlacement::HeadInsertEventTap,
-            CGEventTapOptions::Default,
-            mask,
-            Some(shortcut_callback),
-            state_ptr,
-        )
-    }
-    .ok_or_else(|| {
-        unsafe {
-            let _ = Box::from_raw(state_ptr as *mut ShortcutState);
-        }
-        anyhow!("Kiri could not create the exclusive ⇧⌘A keyboard filter. Check Input Monitoring and Accessibility, then quit and reopen Kiri.")
-    })?;
-
-    let source = CFMachPort::new_run_loop_source(None, Some(&event_tap), 0)
-        .ok_or_else(|| anyhow!("could not create run loop source"))?;
-    let run_loop = CFRunLoop::current().ok_or_else(|| anyhow!("no run loop"))?;
-    unsafe { run_loop.add_source(Some(&source), kCFRunLoopDefaultMode) };
-    unsafe { CGEvent::tap_enable(&event_tap, true) };
-
-    let thread = thread::spawn(move || CFRunLoop::run());
-
-    Ok(ShortcutHandle {
-        event_tap,
-        _source: source,
-        state_ptr: state_ptr as usize,
-        _thread: thread,
-    })
 }
 
 // ---------------------------------------------------------------------------

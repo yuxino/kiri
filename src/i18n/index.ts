@@ -24,9 +24,18 @@ function detectLanguage(): KiriLanguage {
 }
 
 let language: KiriLanguage = detectLanguage();
+const listeners = new Set<() => void>();
 
 export function setLanguage(next: KiriLanguage) {
+  if (language === next) return;
   language = next;
+  listeners.forEach((listener) => listener());
+}
+
+/** Subscribe to language changes (returns an unsubscribe function). */
+export function onLanguageChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 export function getLanguage(): KiriLanguage {

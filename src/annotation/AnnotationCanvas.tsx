@@ -37,6 +37,14 @@ export interface AnnotationCanvasHandle {
   hasAnnotations(): boolean;
   canUndo(): boolean;
   canRedo(): boolean;
+  /**
+   * Live text font-size adjustment (spec §6.6): begin records the selected
+   * text mark, set applies a preview (no history), end commits one history
+   * entry. The slider value itself lives in the parent's AppearanceSettings.
+   */
+  beginTextFontSizeAdjustment(): void;
+  setTextFontSizeLive(value: number): void;
+  endTextFontSizeAdjustment(): void;
 }
 
 interface Props {
@@ -44,11 +52,23 @@ interface Props {
   image: HTMLImageElement | null;
   /** Region of the source in display-local points (top-left). */
   region: Rect;
+  /**
+   * Size of the coordinate space `region` lives in (the display in points).
+   * Required when `region` is a sub-rect of the image (capture overlay);
+   * omitted for the editor where region covers the whole image.
+   */
+  displaySize?: { width: number; height: number };
   tool: Tool;
   appearance: AppearanceSettings;
   onHistoryChange(canUndo: boolean, canRedo: boolean): void;
   onCancel(): void;
   onToolChange(tool: Tool): void;
+  /**
+   * Called after a text annotation is committed via Return (spec §6.6:
+   * "Return commits the text and completes the capture"). The parent
+   * overlay finishes the screenshot; the editor leaves this unset.
+   */
+  onFinishAfterTextCommit?(): void;
 }
 
 interface EditingState {
@@ -69,7 +89,16 @@ type Interaction =
 
 const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
   function AnnotationCanvas(
-    { image, region, tool, appearance, onHistoryChange, onCancel },
+    {
+      image,
+      region,
+      displaySize,
+      tool,
+      appearance,
+      onHistoryChange,
+      onCancel,
+      onFinishAfterTextCommit,
+    },
     ref,
   ) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -77,6 +106,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [draft, setDraft] = useState<AnnotationMark | null>(null);
     const [brushCursor, setBrushCursor] = useState<Point | null>(null);
+    const [selectCursor, setSelectCursor] = useState<string>("default");
     const [editing, setEditing] = useState<EditingState | null>(null);
     const historyRef = useRef(new AnnotationHistory());
     const interactionRef = useRef<Interaction>({ kind: "none" });
@@ -93,15 +123,24 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       brushCursorRef.current = brushCursor;
     }, [editing, brushCursor]);
 
-    // Convert the HTMLImageElement to a canvas for pixel access.
-    const sourceCanvas = useMemo(() => {
-      if (!image) return null;
+    // Convert the HTMLImageElement to a canvas for pixel access. Built lazily
+    // once the image is fully decoded (drawImage on a loading image yields a
+    // blank canvas that would corrupt the export).
+    const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const ensureSourceCanvas = useCallback((): HTMLCanvasElement | null => {
+      const img = imageRef.current;
+      if (!img || !img.complete || img.naturalWidth === 0) return null;
+      const cached = sourceCanvasRef.current;
+      if (cached && cached.width === img.naturalWidth && cached.height === img.naturalHeight) {
+        return cached;
+      }
       const c = document.createElement("canvas");
-      c.width = image.naturalWidth;
-      c.height = image.naturalHeight;
-      c.getContext("2d")!.drawImage(image, 0, 0);
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+      c.getContext("2d")!.drawImage(img, 0, 0);
+      sourceCanvasRef.current = c;
       return c;
-    }, [image]);
+    }, []);
 
     const view = useMemo(() => {
       return { width: region.width, height: region.height };
@@ -118,17 +157,19 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
 
     const redraw = useCallback(() => {
       const canvas = canvasRef.current;
-      if (!canvas || !sourceCanvas) return;
+      if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
+      const sourceCanvas = ensureSourceCanvas();
+      if (!sourceCanvas) return;
       ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
       const context: RenderContext = {
         ctx,
         sourceImage: sourceCanvas,
         sourceOffset: { x: region.x, y: region.y },
         regionSize: { x: 0, y: 0, width: region.width, height: region.height },
-        scaleX: sourceCanvas.width / region.width,
-        scaleY: sourceCanvas.height / region.height,
+        scaleX: sourceCanvas.width / (displaySize?.width ?? region.width),
+        scaleY: sourceCanvas.height / (displaySize?.height ?? region.height),
         exporting: false,
       };
       renderAll(context, marks, {
@@ -138,7 +179,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         selectedIndex: editing ? null : selectedIndex,
         editingIndex: editing ? editing.index : null,
       });
-    }, [marks, draft, brushCursor, selectedIndex, editing, region, sourceCanvas]);
+    }, [marks, draft, brushCursor, selectedIndex, editing, region, ensureSourceCanvas]);
 
     useEffect(() => {
       redraw();
@@ -169,9 +210,13 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           }
           return null;
         }
+        const previous =
+          current.index !== null ? historyRef.current.elements[current.index] : null;
         const newMark: AnnotationMark = {
+          // Reuse the previous id so an unchanged edit compares equal and
+          // does not create a no-op history entry (spec §6.6).
+          id: previous && previous.kind === "text" ? previous.id : Date.now() + Math.random(),
           kind: "text",
-          id: Date.now() + Math.random(),
           text,
           rect: textRect,
           color: current.color,
@@ -179,8 +224,18 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           fontSize: current.fontSize,
         };
         if (current.index !== null) {
-          const previous = historyRef.current.elements[current.index];
-          if (JSON.stringify(previous) !== JSON.stringify(newMark)) {
+          const unchanged =
+            previous && previous.kind === "text"
+              ? previous.text === newMark.text &&
+                previous.rect.x === newMark.rect.x &&
+                previous.rect.y === newMark.rect.y &&
+                previous.rect.width === newMark.rect.width &&
+                previous.rect.height === newMark.rect.height &&
+                previous.color === newMark.color &&
+                previous.background === newMark.background &&
+                previous.fontSize === newMark.fontSize
+              : false;
+          if (!unchanged) {
             historyRef.current.replace(current.index, newMark);
             syncMarks();
           }
@@ -191,6 +246,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         }
         return null;
       });
+      // Spec §6.6: commit (unchanged edits do not write history). The
+      // Return key additionally finishes the capture — handled in the
+      // TextEditor's Enter branch so other commit triggers (tool switch,
+      // undo, export) do not complete the capture.
     }, [syncMarks]);
 
     const onPointerDown = useCallback(
@@ -281,6 +340,8 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             interactionRef.current = { kind: "resize", index, original: mark, handle: handleInteraction };
           } else {
             interactionRef.current = { kind: "move", index, original: mark, start: p };
+            // Spec §6.3: closedHand while dragging.
+            setSelectCursor("grabbing");
           }
           redraw();
           return;
@@ -320,10 +381,28 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         if (interaction.kind === "none") {
           if (toolRef.current === "mosaic") setBrushCursor(p);
           else if (brushCursorRef.current) setBrushCursor(null);
+          if (toolRef.current === "select") {
+            // Spec §6.7: handle → crosshair, over a mark → open hand,
+            // otherwise arrow.
+            const current = historyRef.current.elements;
+            const selected = selectedIndexRef.current;
+            let cursor = "default";
+            if (selected !== null && current[selected]?.kind === "rectangle") {
+              if (hitTestHandle(p, (current[selected] as { rect: Rect }).rect, 9)) {
+                cursor = "crosshair";
+              }
+            }
+            if (cursor === "default" && markIndexAt(current, p) !== null) {
+              cursor = "grab";
+            }
+            setSelectCursor(cursor);
+          }
           return;
         }
         if (interaction.kind === "draw") {
           const t = interaction.tool;
+          // Spec §7.4: the brush cursor tracks the drag point while drawing.
+          if (t === "mosaic") setBrushCursor(p);
           if (t === "pen" || t === "mosaic") {
             const points = interaction.points;
             const last = points[points.length - 1];
@@ -408,6 +487,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         const p = clampPoint(toPoint(e), { x: 0, y: 0, width: region.width, height: region.height });
         const interaction = interactionRef.current;
         interactionRef.current = { kind: "none" };
+        if (interaction.kind === "move") setSelectCursor("default");
 
         if (interaction.kind === "draw") {
           const t = interaction.tool;
@@ -477,11 +557,15 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           interaction.kind === "endpoint"
         ) {
           const preview = draft;
-          const movedEnough =
+          // Spec §6.3: only commit a drag when it actually changed the
+          // mark (≥1pt of movement) — a click without movement must not
+          // write a no-op history entry.
+          const changed =
             interaction.kind === "move"
               ? Math.hypot(p.x - interaction.start.x, p.y - interaction.start.y) >= 1
-              : true;
-          if (preview && movedEnough) {
+              : preview !== null &&
+                JSON.stringify(preview) !== JSON.stringify(interaction.original);
+          if (preview && changed) {
             historyRef.current.replace(interaction.index, preview);
             syncMarks();
           }
@@ -537,6 +621,49 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       syncMarks();
     };
 
+    // Live text font-size adjustment (spec §6.6): begin records the selected
+    // text mark; set applies a preview without touching history; end commits
+    // a single replace entry if the size actually changed.
+    const fontAdjustRef = useRef<{
+      index: number;
+      original: Extract<AnnotationMark, { kind: "text" }>;
+    } | null>(null);
+    const beginFontAdjustRef = useRef<() => void>(() => {});
+    const setFontLiveRef = useRef<(value: number) => void>(() => {});
+    const endFontAdjustRef = useRef<() => void>(() => {});
+    beginFontAdjustRef.current = () => {
+      commitText();
+      const index = selectedIndexRef.current;
+      const mark = index !== null ? historyRef.current.elements[index] : undefined;
+      if (index !== null && mark && mark.kind === "text") {
+        fontAdjustRef.current = { index, original: mark };
+      } else {
+        fontAdjustRef.current = null;
+      }
+    };
+    setFontLiveRef.current = (value: number) => {
+      const adjust = fontAdjustRef.current;
+      if (!adjust) return;
+      const mark = historyRef.current.elements[adjust.index];
+      if (!mark || mark.kind !== "text") return;
+      const updated: AnnotationMark = { ...mark, fontSize: value };
+      // Preview: swap the element without recording history.
+      const before = historyRef.current.elements.slice();
+      before[adjust.index] = updated;
+      historyRef.current.overwrite(before);
+      syncMarks();
+    };
+    endFontAdjustRef.current = () => {
+      const adjust = fontAdjustRef.current;
+      fontAdjustRef.current = null;
+      if (!adjust) return;
+      const mark = historyRef.current.elements[adjust.index];
+      if (mark && mark.kind === "text" && mark.fontSize !== adjust.original.fontSize) {
+        historyRef.current.replace(adjust.index, mark);
+        syncMarks();
+      }
+    };
+
     useImperativeHandle(
       ref,
       () => ({
@@ -544,6 +671,8 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         redo: () => redoRef.current(),
         clearAnnotations: () => {
           if (!historyRef.current.canUndo && !historyRef.current.canRedo) return;
+          // Spec §10.1: clear also discards an in-flight text edit.
+          setEditing(null);
           historyRef.current.clear();
           setSelectedIndex(null);
           syncMarks();
@@ -553,16 +682,19 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         exportPng: async () => {
           commitText();
           const img = imageRef.current;
-          if (!img || !img.complete || img.naturalWidth === 0) {
-            // Wait briefly for the frozen image to decode.
-            await new Promise((resolve) => setTimeout(resolve, 300));
+          if (!img) return null;
+          if (!img.complete) {
+            try {
+              await img.decode();
+            } catch {
+              return null;
+            }
           }
-          if (!sourceCanvas || !imageRef.current || imageRef.current.naturalWidth === 0) {
-            return null;
-          }
+          const sourceCanvas = ensureSourceCanvas();
+          if (!sourceCanvas) return null;
           const out = document.createElement("canvas");
-          const scaleX = sourceCanvas.width / region.width;
-          const scaleY = sourceCanvas.height / region.height;
+          const scaleX = sourceCanvas.width / (displaySize?.width ?? region.width);
+          const scaleY = sourceCanvas.height / (displaySize?.height ?? region.height);
           out.width = Math.round(region.width * scaleX);
           out.height = Math.round(region.height * scaleY);
           const ctx = out.getContext("2d")!;
@@ -585,8 +717,11 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         hasAnnotations: () => historyRef.current.elements.length > 0,
         canUndo: () => historyRef.current.canUndo,
         canRedo: () => historyRef.current.canRedo,
+        beginTextFontSizeAdjustment: () => beginFontAdjustRef.current(),
+        setTextFontSizeLive: (value: number) => setFontLiveRef.current(value),
+        endTextFontSizeAdjustment: () => endFontAdjustRef.current(),
       }),
-      [commitText, region, sourceCanvas, syncMarks],
+      [commitText, region, displaySize, ensureSourceCanvas, syncMarks],
     );
 
     return (
@@ -601,7 +736,14 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           style={{
             width: view.width,
             height: view.height,
-            cursor: tool === "mosaic" ? "crosshair" : tool === "select" ? "default" : "crosshair",
+            // Spec §6.7: mosaic uses a crosshair, select tracks hover
+            // (arrow/hand/crosshair), all other tools use the arrow.
+            cursor:
+              tool === "mosaic"
+                ? "crosshair"
+                : tool === "select"
+                  ? selectCursor
+                  : "default",
           }}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -612,6 +754,9 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             editing={editing}
             onTextChange={(text) => setEditing({ ...editing, text })}
             onCommit={commitText}
+            onFinish={onFinishAfterTextCommit}
+            onUndo={() => undoRef.current()}
+            onRedo={() => redoRef.current()}
             onCancel={onCancel}
           />
         )}
@@ -624,14 +769,40 @@ function TextEditor(props: {
   editing: EditingState;
   onTextChange(text: string): void;
   onCommit(): void;
+  onFinish?(): void;
+  onUndo(): void;
+  onRedo(): void;
   onCancel(): void;
 }) {
-  const { editing, onTextChange, onCommit, onCancel } = props;
+  const { editing, onTextChange, onCommit, onFinish, onUndo, onRedo, onCancel } = props;
   const ref = useRef<HTMLTextAreaElement>(null);
+  const [size, setSize] = useState<{ width: number; height: number }>({
+    width: editing.rect.width,
+    height: editing.rect.height,
+  });
+
+  // Spec §6.6 resizeTextEditor: min 120×34, grows with text/font, clamped
+  // to the right/bottom edges of the region.
   useEffect(() => {
-    ref.current?.focus();
-    ref.current?.select();
-  }, []);
+    const el = ref.current;
+    if (!el) return;
+    const font = textFont(editing.fontSize);
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d")!;
+    ctx.font = font;
+    const text = editing.text || "Type something…";
+    const measured = ctx.measureText(text);
+    const lines = text.split("\n").length;
+    const lineHeight = editing.fontSize * 1.25;
+    const width = Math.max(120, Math.ceil(measured.width) + 16 + 2);
+    const height = Math.max(34, Math.ceil(lines * lineHeight) + 10 + 2);
+    setSize((current) =>
+      current.width === width && current.height === height ? current : { width, height },
+    );
+    el.focus();
+    el.select();
+  }, [editing.text, editing.fontSize]);
+
   return (
     <textarea
       ref={ref}
@@ -645,9 +816,18 @@ function TextEditor(props: {
         if (e.key === "Escape") {
           e.preventDefault();
           onCancel();
+        } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+          // Spec §10.1: undo/redo commit the text edit first, then act on
+          // the canvas history (never the textarea's native undo).
+          e.preventDefault();
+          onCommit();
+          if (e.shiftKey) onRedo();
+          else onUndo();
         } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
           e.preventDefault();
           onCommit();
+          // Spec §6.6: Return commits the text and completes the capture.
+          onFinish?.();
         }
         e.stopPropagation();
       }}
@@ -655,8 +835,8 @@ function TextEditor(props: {
         position: "absolute",
         left: editing.rect.x,
         top: editing.rect.y,
-        width: editing.rect.width,
-        height: editing.rect.height,
+        width: size.width,
+        height: size.height,
         boxSizing: "border-box",
         padding: "5px 8px",
         font: textFont(editing.fontSize),

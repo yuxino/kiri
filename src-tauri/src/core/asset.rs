@@ -71,6 +71,11 @@ pub struct CaptureAsset {
     )]
     pub duration: Option<f64>,
     pub filename: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub title: Option<String>,
+    /// User-assigned labels (metadata only, like the Swift roadmap's Tags).
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tags: Vec<String>,
     #[serde(serialize_with = "serialize_uuid", deserialize_with = "deserialize_uuid")]
     pub id: uuid::Uuid,
     pub is_favorite: bool,
@@ -102,11 +107,15 @@ fn deserialize_opt_ms<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Opti
 impl CaptureAsset {
     /// Mirrors `CaptureAsset.searchableText`.
     pub fn searchable_text(&self) -> String {
-        let mut parts: Vec<String> = Vec::with_capacity(3);
+        let mut parts: Vec<String> = Vec::with_capacity(6);
         parts.push(self.filename.clone());
         if let Some(app) = &self.source_application {
             parts.push(app.clone());
         }
+        if let Some(title) = &self.title {
+            parts.push(title.clone());
+        }
+        parts.extend(self.tags.iter().cloned());
         parts.push(self.kind.as_str().to_string());
         parts.join(" ").to_lowercase()
     }

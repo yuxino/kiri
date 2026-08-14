@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import "./styles/design-system.css";
+import { onLanguageChange, setLanguage } from "./i18n";
 import { OverlayWindow } from "./windows/OverlayWindow";
 import { LibraryWindow } from "./windows/LibraryWindow";
 import { CountdownWindow } from "./windows/CountdownWindow";
@@ -8,6 +9,20 @@ import { ControlPanelWindow } from "./windows/ControlPanelWindow";
 import { RippleWindow } from "./windows/RippleWindow";
 import { PinWindow } from "./windows/PinWindow";
 import { EditorWindow } from "./windows/EditorWindow";
+
+// Resolve the UI language from the real system locale (the WebView's
+// navigator.language is fixed to en in Tauri, so it cannot be trusted).
+// The backend reads the OS locale via sys_locale and maps it to
+// en / zh-Hans. All windows share the same module-level language, so
+// setting it here before first render is enough; this also handles the
+// overlay/editor windows which mount later.
+void import("@tauri-apps/api/core").then(({ invoke }) => {
+  invoke<string>("get_locale")
+    .then((locale) => {
+      if (locale === "zh-Hans") setLanguage("zh-Hans");
+    })
+    .catch(() => {});
+});
 
 // Surface runtime errors as a compact bottom banner (never blocks the UI),
 // and forward the message to the Rust log for diagnosis.
@@ -50,6 +65,10 @@ function resolveWindow(): { kind: string; params: URLSearchParams } {
 function App() {
   const { kind, params } = resolveWindow();
   document.title = `${kind}-alive`;
+  // Re-render when the UI language resolves/changes (system locale arrives
+  // asynchronously from the backend).
+  const [, force] = React.useReducer((x: number) => x + 1, 0);
+  React.useEffect(() => onLanguageChange(force), []);
   switch (kind) {
     case "overlay":
       return <OverlayWindow />;

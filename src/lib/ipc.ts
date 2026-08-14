@@ -27,6 +27,8 @@ export interface AssetDto {
   kind: "image" | "video" | "gif";
   createdAt: number;
   filename: string;
+  title: string | null;
+  tags: string[];
   pixelWidth: number;
   pixelHeight: number;
   duration: number | null;
@@ -83,6 +85,10 @@ export const api = {
     invoke<AssetDto[]>("list_assets", { query, showingTrash }),
   setFavorite: (id: string, favorite: boolean) =>
     invoke<void>("set_favorite", { id, favorite }),
+  renameAsset: (id: string, title: string) =>
+    invoke<void>("rename_asset", { id, title }),
+  setTags: (id: string, tags: string[]) =>
+    invoke<void>("set_tags", { id, tags }),
   moveToTrash: (id: string) => invoke<void>("move_to_trash", { id }),
   restoreAsset: (id: string) => invoke<void>("restore_asset", { id }),
   permanentlyDelete: (id: string) => invoke<void>("permanently_delete", { id }),
@@ -125,6 +131,10 @@ export const api = {
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
+
+export function dbg(message: string): void {
+  void invoke("frontend_log", { message }).catch(() => {});
+}
 
 export function onNotice(handler: (notice: NoticeDto) => void): Promise<UnlistenFn> {
   return listen<NoticeDto>("notice", (event) => handler(event.payload));
