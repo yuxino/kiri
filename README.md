@@ -30,6 +30,8 @@ Capture screenshots, annotate, recognize text, record regions, and keep everythi
 Download the latest build from GitHub Releases.
 
 - **macOS**: unzip and move `Kiri.app` to Applications. Kiri needs **Input Monitoring** for the global shortcut and **Screen & System Audio Recording** for capture. Everything stays on your Mac unless you export it yourself.
+
+> **macOS permission note**: GitHub release builds are ad-hoc signed (no Apple Developer ID available), so macOS treats each build as a new app and may re-prompt for **Screen Recording** after an upgrade — grant it once in System Settings → Privacy & Security → Screen Recording, then reopen Kiri. Locally built apps (`./scripts/install-app.sh`) use a stable certificate signature, so the grant persists across reinstalls.
 - **Windows**: run the installer; no capture permissions are required.
 
 ## Build from source
