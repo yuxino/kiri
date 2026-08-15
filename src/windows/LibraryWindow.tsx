@@ -818,6 +818,28 @@ function AssetCard(props: {
   } = props;
   const [hovered, setHovered] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
+  // Single-click toggles selection; a double-click opens instead. Delay the
+  // toggle ~220ms and cancel it when a second click arrives (dblclick).
+  const clickTimer = useRef<number | null>(null);
+  const handleClick = (e: React.MouseEvent) => {
+    if (e.defaultPrevented || editingTitle) return;
+    if (clickTimer.current) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      return; // second click of a double — the open (dblclick) takes over
+    }
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null;
+      onToggleSelect();
+    }, 220);
+  };
+  const handleDoubleClick = () => {
+    if (clickTimer.current) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+    }
+    onDoubleClick();
+  };
   const [titleDraft, setTitleDraft] = useState(asset.title ?? "");
   const [addingTag, setAddingTag] = useState(false);
 
@@ -843,7 +865,8 @@ function AssetCard(props: {
       draggable
       data-card={asset.id}
       onDragStart={onDragStart}
-      onDoubleClick={onDoubleClick}
+      onClick={handleClick}
+      onDoubleClick={handleDoubleClick}
       onContextMenu={(e) => {
         // Right-click shows the localized action menu at the cursor
         // (same as ⋯), never the webview's system context menu.
@@ -868,38 +891,29 @@ function AssetCard(props: {
         cursor: "default",
       }}
     >
-      {/* Selection check — visible on hover, pinned when selected. */}
-      <button
-        onMouseDown={(e) => e.preventDefault()}
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggleSelect();
-        }}
-        title={selected ? t("Cancel") : t("Select")}
-        style={{
-          position: "absolute",
-          top: 8,
-          left: 8,
-          width: 24,
-          height: 24,
-          borderRadius: "50%",
-          border: `1.5px solid ${selected ? "#7D69F5" : "rgba(255,255,255,0.9)"}`,
-          background: selected
-            ? "#7D69F5"
-            : "rgba(0,0,0,0.35)",
-          color: "#fff",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          opacity: selected || hovered ? 1 : 0,
-          transition: "opacity 0.14s ease-out, background 0.14s ease-out",
-          zIndex: 2,
-          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
-        }}
-      >
-        {selected ? <KiriIcon name="checkmark" size={13} /> : null}
-      </button>
+      {/* Selected corner badge — small, non-interactive status mark. */}
+      {selected && (
+        <div
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            width: 18,
+            height: 18,
+            borderRadius: 6,
+            background: "var(--kiri-accent)",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+            zIndex: 2,
+            pointerEvents: "none",
+          }}
+        >
+          <KiriIcon name="checkmark" size={11} />
+        </div>
+      )}
       <div
         style={{
           height: 184,
@@ -992,8 +1006,17 @@ function AssetCard(props: {
         ) : (
           <span
             title={asset.filename}
+            onClick={(e) => {
+              // Title double-click is rename; single click on it should not
+              // toggle card selection.
+              e.stopPropagation();
+            }}
             onDoubleClick={(e) => {
               e.stopPropagation();
+              if (clickTimer.current) {
+                window.clearTimeout(clickTimer.current);
+                clickTimer.current = null;
+              }
               setTitleDraft(asset.title ?? "");
               setEditingTitle(true);
             }}
