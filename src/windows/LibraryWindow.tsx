@@ -2,6 +2,7 @@
 // notices, and error recovery. Port of LibraryView.swift + AppModel.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api, onError, onLibraryChanged, onNotice, type AssetDto, type ErrorDto, type NoticeDto } from "../lib/ipc";
 import { t, fmt } from "../i18n";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -180,8 +181,8 @@ export function LibraryWindow() {
 
   // Keep the open menu inside the window (flip when near the right/bottom
   // edge) — mirrors how native context menus avoid the screen edges.
-  // Heights vary (image cards get "Copy"; trash gets "Delete Permanently"),
-  // so estimate generously and clamp to the viewport.
+  // Menu heights vary (image cards get "Copy"; trash gets "Delete
+  // Permanently"), so estimate generously and clamp to the viewport.
   const menuStyle = useMemo(() => {
     if (!menuPos) return undefined;
     const MENU_W = 196;
@@ -191,6 +192,8 @@ export function LibraryWindow() {
     const bottom = menuPos.y + 8 + MENU_H;
     const flipX = right > window.innerWidth - pad;
     const flipY = bottom > window.innerHeight - pad;
+    // Flip upward keeps the menu's bottom edge at the trigger point (the
+    // window is short, ~640px, so bottom-anchored triggers usually flip).
     const left = flipX ? Math.max(pad, menuPos.x - MENU_W) : menuPos.x;
     const top = flipY
       ? Math.max(pad, menuPos.y - MENU_H)
@@ -938,7 +941,15 @@ function AssetCard(props: {
         >
           <KiriIcon name="ellipsis.circle" size={14} />
         </button>
-        {menuOpen && menu}
+        {menuOpen &&
+          createPortal(
+            // Render the context menu outside the card subtree: the card's
+            // hover transform (translateY) would otherwise become the fixed
+            // positioning containing block, breaking both the menu's screen
+            // position and its stacking above neighboring cards.
+            menu,
+            document.body,
+          )}
       </div>
       {/* Tag chips */}
       {(asset.tags.length > 0 || addingTag) && (
