@@ -533,6 +533,14 @@ export function LibraryWindow() {
                     menu={itemMenu(asset)}
                     onDoubleClick={() => void api.openAsset(asset.id).catch(() => {})}
                     onDragStart={(e) => {
+                      // Only start a file drag from the thumbnail — dragging
+                      // from the action buttons (Copy / favorite / ⋯) would
+                      // swallow their click (HTML5 drag cancels click).
+                      const target = e.target as HTMLElement | null;
+                      if (target && target.closest("button")) {
+                        e.preventDefault();
+                        return;
+                      }
                       // Drag-out exports the file (HTML5 drag handled by Tauri).
                       void (
                         getCurrentWebview() as unknown as {
@@ -867,7 +875,19 @@ function AssetCard(props: {
         <button
           className="kiri-icon-button"
           title={t("Copy")}
+          draggable={false}
+          onDragStart={(e) => e.preventDefault()}
+          onMouseDown={(e) => {
+            // Prevent the draggable card from starting an HTML5 drag when
+            // pressing the button — a drag would swallow the click.
+            e.preventDefault();
+          }}
           onClick={(e) => {
+            e.stopPropagation();
+            void api.copyAsset(asset.id).catch(() => {});
+          }}
+          onDoubleClick={(e) => {
+            // A rapid double-click on Copy must copy, not open the asset.
             e.stopPropagation();
             void api.copyAsset(asset.id).catch(() => {});
           }}
@@ -884,7 +904,18 @@ function AssetCard(props: {
         <button
           className="kiri-icon-button"
           title={asset.isFavorite ? t("Remove Favorite") : t("Favorite")}
-          onClick={() => void api.setFavorite(asset.id, !asset.isFavorite).catch(() => {})}
+          draggable={false}
+          onDragStart={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            void api.setFavorite(asset.id, !asset.isFavorite).catch(() => {});
+          }}
+          onDoubleClick={(e) => {
+            // Rapid double-click must not open the asset.
+            e.stopPropagation();
+            void api.setFavorite(asset.id, !asset.isFavorite).catch(() => {});
+          }}
           style={{
             width: 26,
             height: 26,
@@ -905,11 +936,18 @@ function AssetCard(props: {
         <button
           className="kiri-icon-button"
           title={t("More Actions")}
+          draggable={false}
+          onDragStart={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={(e) => {
+            e.stopPropagation();
             const rect = e.currentTarget.getBoundingClientRect();
             // Anchor the menu below the ⋯ button; edge-flip handled in
             // menuStyle (left-aligned so a near-right flip stays sane).
             onMenu(rect.left, rect.bottom + 4);
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
           }}
           style={{
             width: 26,
