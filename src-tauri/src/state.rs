@@ -268,6 +268,19 @@ fn urlencode(value: &str) -> String {
 }
 
 pub fn emit_error(app: &AppHandle, message: String, recovery: Option<RecoveryAction>) {
+    // Persist every error to a log file so repeated failures are recorded
+    // even when the UI stops re-prompting (see dedupe below).
+    append_error_log(&message, recovery);
+
+    // Show a given error message at most once per launch. Repeated failures
+    // (e.g. a denied permission that the user already dismissed) would
+    // otherwise re-open the banner on every capture attempt; the first
+    // occurrence surfaces it, later ones are only logged.
+    if !mark_error_seen(&message) {
+        log::info!("[error] suppressed duplicate banner: {message}");
+        return;
+    }
+
     let recovery = recovery.map(|action| match action {
         RecoveryAction::OpenSettings => "openSettings",
         RecoveryAction::QuitKiri => "quitKiri",
@@ -282,6 +295,72 @@ pub fn emit_error(app: &AppHandle, message: String, recovery: Option<RecoveryAct
             recovery: recovery.map(String::from),
         },
     );
+}
+
+// ---------------------------------------------------------------------------
+// Error deduplication + persistent log
+// ---------------------------------------------------------------------------
+
+static SEEN_ERRORS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
+
+fn seen_errors() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    SEEN_ERRORS.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// Returns true if this message has not been shown yet this launch.
+fn mark_error_seen(message: &str) -> bool {
+    seen_errors().lock().unwrap().insert(message.to_string())
+}
+
+/// Appends `[timestamp] message (recovery)` to the per-user error log at
+/// `~/Library/Logs/io.yuxino.kiri/errors.log` (or the equivalent platform
+/// log dir). Failures are never silently dropped: even deduped repeats are
+/// recorded here for later inspection.
+fn append_error_log(message: &str, recovery: Option<RecoveryAction>) {
+    let Some(log_dir) = log_dir() else {
+        return;
+    };
+    let path = log_dir.join("errors.log");
+    let recovery = match recovery {
+        Some(RecoveryAction::OpenSettings) => " [openSettings]",
+        Some(RecoveryAction::QuitKiri) => " [quitKiri]",
+        Some(RecoveryAction::OpenAccessibilitySettings) => " [openAccessibilitySettings]",
+        Some(RecoveryAction::OpenInputMonitoringSettings) => " [openInputMonitoringSettings]",
+        Some(RecoveryAction::OpenMicrophoneSettings) => " [openMicrophoneSettings]",
+        None => "",
+    };
+    use std::io::Write;
+    let line = format!("{} {}{}\n", now_rfc3339(), message, recovery);
+    let mut file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        Ok(file) => file,
+        Err(error) => {
+            log::warn!("[error] could not write {path:?}: {error}");
+            return;
+        }
+    };
+    if let Err(error) = file.write_all(line.as_bytes()) {
+        log::warn!("[error] could not append to {path:?}: {error}");
+    }
+}
+
+fn log_dir() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        dirs::home_dir().map(|home| home.join("Library/Logs/io.yuxino.kiri"))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        dirs::data_local_dir().map(|dir| dir.join("kiri/logs"))
+    }
+}
+
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
 pub fn emit_library_changed(app: &AppHandle) {
@@ -335,7 +414,7 @@ pub fn save_recording_options(app: &AppHandle, options: &RecordingOptions) {
 
 #[cfg(test)]
 mod tests {
-    use super::urlencode;
+    use super::{mark_error_seen, urlencode};
 
     #[test]
     fn urlencode_escapes_spaces_and_keeps_words() {
@@ -343,5 +422,15 @@ mod tests {
         assert_eq!(urlencode("checkmark.circle.fill"), "checkmark.circle.fill");
         assert_eq!(urlencode("Recording Saved"), "Recording%20Saved");
         assert_eq!(urlencode("a/b c"), "a%2Fb%20c");
+    }
+
+    #[test]
+    fn duplicate_error_message_is_seen_only_once() {
+        // First occurrence surfaces; the identical message must not re-open
+        // the banner (the dedupe that stops repeated error prompts).
+        assert!(mark_error_seen("Screen Recording is off."));
+        assert!(!mark_error_seen("Screen Recording is off."));
+        assert!(mark_error_seen("A different error."));
+        assert!(!mark_error_seen("A different error."));
     }
 }
