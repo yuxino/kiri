@@ -803,43 +803,6 @@ function AssetCard(props: {
             </div>
           </div>
         )}
-        {/* Hover quick action: Copy (mirrors Swift's primary-action overlay) */}
-        {hovered && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              // Slightly translucent scrim so the button reads clearly over
-              // any thumbnail; rounded to match the thumbnail's 14px radius.
-              background: "rgba(18,14,30,0.32)",
-              borderRadius: 14,
-              backdropFilter: "blur(1.5px)",
-              WebkitBackdropFilter: "blur(1.5px)",
-              transition: "opacity 0.14s ease-out",
-            }}
-          >
-            <button
-              className="kiri-button kiri-button--primary"
-              style={{
-                minHeight: 38,
-                padding: "0 18px",
-                borderRadius: 19,
-                gap: 7,
-                boxShadow: "0 6px 16px rgba(125,105,245,0.35)",
-              }}
-              onClick={(e) => {
-                e.stopPropagation();
-                void api.copyAsset(asset.id).catch(() => {});
-              }}
-            >
-              <KiriIcon name="doc.on.doc" size={14} />
-              {t("Copy")}
-            </button>
-          </div>
-        )}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, position: "relative" }}>
         {editingTitle ? (
@@ -901,6 +864,23 @@ function AssetCard(props: {
               })}
           </span>
         )}
+        <button
+          className="kiri-icon-button"
+          title={t("Copy")}
+          onClick={(e) => {
+            e.stopPropagation();
+            void api.copyAsset(asset.id).catch(() => {});
+          }}
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 8,
+            fontSize: 13,
+            cursor: "default",
+          }}
+        >
+          <KiriIcon name="doc.on.doc" size={14} />
+        </button>
         <button
           className="kiri-icon-button"
           title={asset.isFavorite ? t("Remove Favorite") : t("Favorite")}
