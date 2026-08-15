@@ -72,7 +72,15 @@ impl AssetLibrary {
         let mut assets: Vec<CaptureAsset> = self
             .index
             .iter()
-            .filter(|asset| include_trashed || asset.trashed_at.is_none())
+            .filter(|asset| {
+                if include_trashed {
+                    // Trash view: only deleted captures.
+                    asset.trashed_at.is_some()
+                } else {
+                    // Library view: only active captures.
+                    asset.trashed_at.is_none()
+                }
+            })
             .cloned()
             .collect();
         // createdAt descending.
@@ -398,11 +406,44 @@ mod tests {
 
         library.restore(&asset.id).unwrap();
         assert_eq!(library.all_assets(false).len(), 1);
+        // Restored captures leave Trash: all_assets(true) must not include
+        // them (regression: the filter used `include_trashed || trashed.is_none()`
+        // which was always true for the Trash view, so restored captures kept
+        // appearing in both Library and Trash).
+        assert!(library.all_assets(true).is_empty());
 
         library.move_to_trash(&asset.id).unwrap();
         library.permanently_delete(&asset.id).unwrap();
         assert!(library.all_assets(true).is_empty());
         assert!(!library.asset_url(&asset).exists());
+    }
+
+    #[test]
+    fn all_assets_splits_trashed_from_active() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let active = library
+            .import_data(b"a", CaptureKind::Image, "png", 1, 1, None, None, None)
+            .unwrap();
+        let trashed = library
+            .import_data(b"t", CaptureKind::Image, "png", 1, 1, None, None, None)
+            .unwrap();
+        library.move_to_trash(&trashed.id).unwrap();
+
+        let active_ids: Vec<_> = library
+            .all_assets(false)
+            .into_iter()
+            .map(|a| a.id)
+            .collect();
+        let trashed_ids: Vec<_> = library
+            .all_assets(true)
+            .into_iter()
+            .map(|a| a.id)
+            .collect();
+
+        assert_eq!(active_ids, vec![active.id]);
+        assert_eq!(trashed_ids, vec![trashed.id]);
+        assert!(!trashed_ids.contains(&active.id));
     }
 
     #[test]
@@ -418,8 +459,11 @@ mod tests {
         library.move_to_trash(&gone.id).unwrap();
 
         library.empty_trash().unwrap();
-        assert_eq!(library.all_assets(true).len(), 1);
-        assert_eq!(library.all_assets(true)[0].id, kept.id);
+        // Only the active capture remains; the trashed one was purged and
+        // must not appear in the Trash view.
+        assert!(library.all_assets(true).is_empty());
+        assert_eq!(library.all_assets(false).len(), 1);
+        assert_eq!(library.all_assets(false)[0].id, kept.id);
     }
 
     #[test]
@@ -455,8 +499,8 @@ mod tests {
                 .unwrap();
         }
         let reloaded = AssetLibrary::open(root.clone()).unwrap();
-        assert_eq!(reloaded.all_assets(true).len(), 1);
-        assert_eq!(reloaded.all_assets(true)[0].duration, Some(3.5));
+        assert_eq!(reloaded.all_assets(false).len(), 1);
+        assert_eq!(reloaded.all_assets(false)[0].duration, Some(3.5));
 
         std::fs::write(root.join("library.json"), "{broken").unwrap();
         assert!(matches!(
