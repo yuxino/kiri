@@ -225,21 +225,6 @@ export function OverlayWindow() {
         cancel();
         return;
       }
-      // Mode switching with 1/2/3 (spec §2.4: change capture mode anytime).
-      if (!e.metaKey && !e.ctrlKey && !e.altKey && phaseRef.current !== "annotating") {
-        if (e.key === "1") {
-          switchModeRef.current("screenshot");
-          return;
-        }
-        if (e.key === "2") {
-          switchModeRef.current("record");
-          return;
-        }
-        if (e.key === "3") {
-          switchModeRef.current("ocr");
-          return;
-        }
-      }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -474,8 +459,6 @@ export function OverlayWindow() {
     },
     [],
   );
-  const switchModeRef = useRef(switchMode);
-  switchModeRef.current = switchMode;
 
   // --- toolbar placement (spec §7.6) ---
   // Defaults to 10pt below the selection, centered; flips above when the
@@ -693,21 +676,18 @@ export function OverlayWindow() {
               active={mode === "screenshot"}
               icon="camera.viewfinder"
               label={t("Screenshot")}
-              kbd="1"
               onClick={() => switchMode("screenshot")}
             />
             <ModeButton
               active={mode === "record"}
               icon="record.circle"
               label={t("Record")}
-              kbd="2"
               onClick={() => switchMode("record")}
             />
             <ModeButton
               active={mode === "ocr"}
               icon="text.viewfinder"
               label={t("OCR")}
-              kbd="3"
               onClick={() => switchMode("ocr")}
             />
           </div>
@@ -841,7 +821,6 @@ function ModeButton(props: {
   active: boolean;
   icon: IconName;
   label: string;
-  kbd?: string;
   onClick(): void;
 }) {
   return (
@@ -854,20 +833,6 @@ function ModeButton(props: {
         <KiriIcon name={props.icon} size={16} />
         {props.label}
       </span>
-      {props.kbd && (
-        <span
-          style={{
-            fontSize: 9.5,
-            fontWeight: 600,
-            color: props.active ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.30)",
-            background: "rgba(255,255,255,0.07)",
-            borderRadius: 5,
-            padding: "1px 6px",
-          }}
-        >
-          {props.kbd}
-        </span>
-      )}
     </button>
   );
 }
