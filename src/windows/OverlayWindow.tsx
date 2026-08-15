@@ -754,6 +754,8 @@ export function OverlayWindow() {
         <OcrPanel
           text={ocrText}
           failed={ocrFailed}
+          anchor={selection ?? { x: 0, y: 0, width: bounds.width, height: 0 }}
+          bounds={bounds}
           onCopy={() => {
             void api.copyText(ocrText).catch(() => {});
           }}
@@ -952,18 +954,42 @@ function SizeBadge(props: { rect: Rect; bounds: Rect }) {
   );
 }
 
-function OcrPanel(props: { text: string; failed: boolean; onCopy(): void; onClose(): void }) {
-  const { text, failed, onCopy, onClose } = props;
+function OcrPanel(props: {
+  text: string;
+  failed: boolean;
+  anchor: Rect;
+  bounds: Rect;
+  onCopy(): void;
+  onClose(): void;
+}) {
+  const { text, failed, anchor, bounds, onCopy, onClose } = props;
+  // Panel hugs the recognized region: below it, flipping above when the
+  // bottom overflows, and finally pinned inside the screen (mirrors the
+  // recording-options panel so the popup never sits oddly centered).
+  const PANEL_W = 336;
+  const PANEL_H = 200;
+  const margin = 8;
+  const maxTop = Math.max(margin, bounds.height - PANEL_H - margin);
+  const below = anchor.y + anchor.height + 10;
+  const above = anchor.y - PANEL_H - 10;
+  const top = Math.min(
+    Math.max(margin, below + PANEL_H + margin > bounds.height ? above : below),
+    maxTop,
+  );
+  const centerX = anchor.x + anchor.width / 2 - PANEL_W / 2;
+  const left = Math.min(
+    Math.max(margin, centerX),
+    Math.max(margin, bounds.width - PANEL_W - margin),
+  );
   return (
     <div
       className="kiri-hud"
       onPointerDown={(e) => e.stopPropagation()}
       style={{
         position: "absolute",
-        left: "50%",
-        top: "50%",
-        transform: "translate(-50%, -50%)",
-        width: 336,
+        left,
+        top,
+        width: PANEL_W,
         padding: 14,
         display: "flex",
         flexDirection: "column",
