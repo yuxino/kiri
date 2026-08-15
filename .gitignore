@@ -22,3 +22,8 @@ src-tauri/gen/schemas/
 src-tauri/binaries/ffmpeg-*/
 src-tauri/binaries/ffmpeg-current/*
 !src-tauri/binaries/ffmpeg-current/.gitkeep
+
+# tsc -b incremental build artifacts
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
