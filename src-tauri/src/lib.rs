@@ -116,6 +116,7 @@ pub fn run() {
             commands::pause_recording,
             commands::resume_recording,
             commands::stop_recording,
+            commands::show_confirm_dialog,
             commands::mic_supported,
             commands::log_frontend_error,
             commands::frontend_log,

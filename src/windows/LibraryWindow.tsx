@@ -11,13 +11,6 @@ import { KiriIcon, type IconName } from "../components/KiriIcons";
 
 type Section = "library" | "trash";
 
-interface ConfirmState {
-  title: string;
-  message: string;
-  confirmLabel: string;
-  onConfirm(): void;
-}
-
 function assetUrl(id: string): string {
   return `kiri://asset/${id}`;
 }
@@ -61,7 +54,6 @@ export function LibraryWindow() {
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState<NoticeDto | null>(null);
   const [error, setError] = useState<ErrorDto | null>(null);
-  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   // Menu anchor in viewport coordinates (mouse position on right-click, or
   // the ⋯ button's corner), so the menu appears where the user looked.
@@ -270,12 +262,12 @@ export function LibraryWindow() {
               label={t("Delete Permanently")}
               destructive
               onClick={run(() =>
-                setConfirm({
-                  title: t("Delete this capture permanently?"),
-                  message: t("This cannot be undone."),
-                  confirmLabel: t("Delete Permanently"),
-                  onConfirm: () => void api.permanentlyDelete(asset.id).catch(() => {}),
-                }),
+                void api.showConfirmDialog(
+                  `delete:${asset.id}`,
+                  t("Delete this capture permanently?"),
+                  t("This cannot be undone."),
+                  t("Delete Permanently"),
+                ),
               )}
             />
           </>
@@ -438,12 +430,12 @@ export function LibraryWindow() {
             className="kiri-button kiri-button--destructive"
             title={t("Empty Trash")}
             onClick={() =>
-              setConfirm({
-                title: t("Empty Trash?"),
-                message: t("All captures in Trash will be permanently deleted. This cannot be undone."),
-                confirmLabel: t("Empty Trash"),
-                onConfirm: () => void api.emptyTrash().catch(() => {}),
-              })
+              void api.showConfirmDialog(
+                "emptyTrash",
+                t("Empty Trash?"),
+                t("All captures in Trash will be permanently deleted. This cannot be undone."),
+                t("Empty Trash"),
+              )
             }
             style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
           >
@@ -652,50 +644,6 @@ export function LibraryWindow() {
         </div>
       )}
 
-      {/* Confirm sheet (custom in-app, per ADR) */}
-      {confirm && (
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: "rgba(0,0,0,0.35)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 30,
-          }}
-        >
-          <div
-            style={{
-              background: "var(--kiri-elevated)",
-              borderRadius: 18,
-              padding: 20,
-              width: 340,
-              border: "1px solid var(--kiri-surface-border)",
-            }}
-          >
-            <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>{confirm.title}</div>
-            <div style={{ fontSize: 12.5, color: "var(--kiri-secondary-label)", marginBottom: 16 }}>
-              {confirm.message}
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button className="kiri-secondary-button" onClick={() => setConfirm(null)}>
-                {t("Cancel")}
-              </button>
-              <button
-                className="kiri-primary-button"
-                style={{ background: "#FA476E" }}
-                onClick={() => {
-                  confirm.onConfirm();
-                  setConfirm(null);
-                }}
-              >
-                {confirm.confirmLabel}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

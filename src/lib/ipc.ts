@@ -94,6 +94,8 @@ export const api = {
   restoreAsset: (id: string) => invoke<void>("restore_asset", { id }),
   permanentlyDelete: (id: string) => invoke<void>("permanently_delete", { id }),
   emptyTrash: () => invoke<void>("empty_trash"),
+  showConfirmDialog: (kind: string, title: string, message: string, confirmLabel: string) =>
+    invoke<void>("show_confirm_dialog", { kind, title, message, confirmLabel }),
   copyAsset: (id: string) => invoke<void>("copy_asset", { id }),
   openAsset: (id: string) => invoke<void>("open_asset", { id }),
   revealAsset: (id: string) => invoke<void>("reveal_asset", { id }),

@@ -215,6 +215,75 @@ pub fn emit_notice_local(app: &AppHandle, title: String, symbol: String) {
     let _ = app.emit("notice", notice);
 }
 
+/// Opens a FULL-SCREEN destructive-confirmation overlay (borderless,
+/// transparent, always-on-top, covering the whole primary display). The
+/// ConfirmWindow frontend dims the screen and shows a centered card; on
+/// confirm it runs the requested action and closes itself. This makes
+/// irreversible operations (empty trash, permanent delete) unmistakable
+/// instead of a small in-window modal.
+pub fn show_confirm_dialog(
+    app: &AppHandle,
+    kind: String,
+    title: String,
+    message: String,
+    confirm_label: String,
+) {
+    let label = "confirm";
+    let window = match app.get_webview_window(label) {
+        Some(window) => window,
+        None => {
+            let (win_w, win_h) = match app.primary_monitor() {
+                Ok(Some(monitor)) => {
+                    let size = *monitor.size();
+                    let scale = monitor.scale_factor();
+                    (size.width as f64 / scale, size.height as f64 / scale)
+                }
+                _ => (1440.0, 900.0),
+            };
+            let builder = WebviewWindowBuilder::new(
+                app,
+                label,
+                WebviewUrl::App(
+                    format!(
+                        "index.html?window=confirm&kind={}&title={}&message={}&confirmLabel={}",
+                        urlencode(&kind),
+                        urlencode(&title),
+                        urlencode(&message),
+                        urlencode(&confirm_label),
+                    )
+                    .into(),
+                ),
+            )
+            .title("kiri")
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .focused(true)
+            .inner_size(win_w, win_h)
+            .position(0.0, 0.0);
+            let Ok(window) = builder.build() else {
+                return;
+            };
+            window
+        }
+    };
+    // If a confirm window already exists (e.g. re-triggered), reload it with
+    // the new content rather than stacking dialogs.
+    let url = format!(
+        "index.html?window=confirm&kind={}&title={}&message={}&confirmLabel={}",
+        urlencode(&kind),
+        urlencode(&title),
+        urlencode(&message),
+        urlencode(&confirm_label),
+    );
+    let _ = window.eval(format!("location.href = '{}'", url.replace('\'', "\\'")));
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
 /// Shows the notice as a borderless always-on-top toast near the TOP-CENTER
 /// of the primary display. Screenshots and recordings return focus to the
 /// source application, so the library-window notice alone is easy to miss;

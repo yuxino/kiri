@@ -1452,6 +1452,17 @@ pub fn log_frontend_error(message: String) {
 }
 
 #[tauri::command]
+pub fn show_confirm_dialog(
+    app: AppHandle,
+    kind: String,
+    title: String,
+    message: String,
+    confirmLabel: String,
+) {
+    crate::state::show_confirm_dialog(&app, kind, title, message, confirmLabel);
+}
+
+#[tauri::command]
 pub fn mic_supported() -> bool {
     platform::mic_supported()
 }

@@ -11,6 +11,7 @@ import { PinWindow } from "./windows/PinWindow";
 import { EditorWindow } from "./windows/EditorWindow";
 import { ViewerWindow } from "./windows/ViewerWindow";
 import { ToastWindow } from "./windows/ToastWindow";
+import { ConfirmWindow } from "./windows/ConfirmWindow";
 
 // Resolve the UI language from the real system locale (the WebView's
 // navigator.language is fixed to en in Tauri, so it cannot be trusted).
@@ -91,6 +92,15 @@ function App() {
         <ToastWindow
           title={params.get("title") ?? undefined}
           symbol={params.get("symbol") ?? undefined}
+        />
+      );
+    case "confirm":
+      return (
+        <ConfirmWindow
+          kind={params.get("kind") ?? ""}
+          title={params.get("title") ?? ""}
+          message={params.get("message") ?? ""}
+          confirmLabel={params.get("confirmLabel") ?? ""}
         />
       );
     default:
