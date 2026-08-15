@@ -218,6 +218,15 @@ export function OverlayWindow() {
     [bounds],
   );
 
+  // Auto-run OCR when the user switches to OCR mode with an existing valid
+  // selection (reuse instead of re-drawing the region). Fires once per
+  // transition because runOcr moves the phase to "ocr-result".
+  useEffect(() => {
+    if (mode === "ocr" && phase === "selecting" && selection && isValidSelection(selection, 3)) {
+      void runOcr(selection);
+    }
+  }, [mode, phase, selection, runOcr]);
+
   // --- keyboard ---
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -443,8 +452,15 @@ export function OverlayWindow() {
       setOcrFailed(false);
       setTool("select");
       if (next === "ocr") {
-        // Spec: OCR always clears the selection and re-draws a region.
-        setSelection(null);
+        // Reuse an existing region when switching into OCR: run recognition
+        // on it right away instead of forcing a fresh drag (the effect below
+        // watches for a valid selection in OCR+selecting). Only clear when
+        // there is no usable selection yet.
+        if (selectionRef.current && isValidSelection(selectionRef.current, 3)) {
+          setPhase("selecting");
+        } else {
+          setSelection(null);
+        }
       } else if (next === "record" && selectionRef.current) {
         // Existing region + record mode → show the recording options.
         setPhase("record-options");

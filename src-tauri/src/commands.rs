@@ -841,8 +841,10 @@ pub async fn recognize_text(png: Vec<u8>) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn copy_text(text: String) -> Result<(), String> {
-    platform::write_text_to_clipboard(&text).map_err(|e| e.to_string())
+pub fn copy_text(app: AppHandle, text: String) -> Result<(), String> {
+    platform::write_text_to_clipboard(&text).map_err(|e| e.to_string())?;
+    emit_notice(&app, "Text Copied".into(), "checkmark.circle.fill".into());
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
