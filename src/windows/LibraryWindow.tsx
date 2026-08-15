@@ -49,7 +49,6 @@ function groupByDay(assets: AssetDto[]): { label: string; assets: AssetDto[] }[]
 
 export function LibraryWindow() {
   const [assets, setAssets] = useState<AssetDto[]>([]);
-  const [query, setQuery] = useState("");
   const [section, setSection] = useState<Section>("library");
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState<NoticeDto | null>(null);
@@ -65,7 +64,6 @@ export function LibraryWindow() {
   // Batch selection (ids currently selected). A non-empty selection turns
   // the grid into selection mode with a batch action bar.
   const [selection, setSelection] = useState<Set<string>>(new Set());
-  const searchRef = useRef<HTMLInputElement>(null);
   // Drag-to-select (rubber band): pointer origin + current corner in the
   // scroll container's coordinates; null when not band-selecting.
   const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -186,7 +184,7 @@ export function LibraryWindow() {
   // assets that are no longer visible.
   useEffect(() => {
     clearSelection();
-  }, [section, query, kindFilter, favoritesOnly, tagFilter]);
+  }, [section, kindFilter, favoritesOnly, tagFilter]);
 
   useEffect(() => {
     api.getShortcutLabel().then(setShortcutLabel).catch(() => {});
@@ -195,10 +193,10 @@ export function LibraryWindow() {
   const showingTrash = section === "trash";
 
   const refresh = useCallback(async () => {
-    const list = await api.listAssets(query, showingTrash);
+    const list = await api.listAssets("", showingTrash);
     setAssets(list);
     setLoaded(true);
-  }, [query, showingTrash]);
+  }, [showingTrash]);
 
   useEffect(() => {
     void refresh().catch(() => {});
@@ -224,11 +222,7 @@ export function LibraryWindow() {
   // ⌘F focuses search; ⌘⌥I toggles the developer tools.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
-        e.preventDefault();
-        searchRef.current?.focus();
-        searchRef.current?.select();
-      } else if ((e.metaKey || e.ctrlKey) && e.altKey && e.key.toLowerCase() === "i") {
+      if ((e.metaKey || e.ctrlKey) && e.altKey && e.key.toLowerCase() === "i") {
         e.preventDefault();
         void import("@tauri-apps/api/core").then(({ invoke }) => {
           invoke("open_devtools").catch(() => {});
@@ -269,9 +263,8 @@ export function LibraryWindow() {
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [assets]);
 
-  const isSearchEmpty = query.trim() !== "" && assets.length === 0 && loaded;
-  const isEmpty = query.trim() === "" && assets.length === 0 && loaded;
-  const isFilterEmpty = !isSearchEmpty && !isEmpty && filteredAssets.length === 0 && loaded;
+  const isEmpty = assets.length === 0 && loaded;
+  const isFilterEmpty = !isEmpty && filteredAssets.length === 0 && loaded;
 
   const openMenu = (id: string, x: number, y: number) => {
     if (menuFor === id) {
@@ -449,76 +442,11 @@ export function LibraryWindow() {
           </span>
         </div>
         <div style={{ flex: 1 }} />
-        <div style={{ position: "relative", flexShrink: 0 }}>
-          <span
-            style={{
-              position: "absolute",
-              left: 10,
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "var(--kiri-disabled-label)",
-              display: "flex",
-              alignItems: "center",
-              pointerEvents: "none",
-            }}
-          >
-            <KiriIcon name="magnifyingglass" size={13} />
-          </span>
-          <input
-            ref={searchRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("Search captures")}
-            style={{
-              width: 200,
-              height: 32,
-              borderRadius: 10,
-              border: "1px solid var(--kiri-surface-border)",
-              background: "var(--kiri-group-fill)",
-              color: "var(--kiri-label)",
-              padding: "0 30px 0 30px",
-              fontSize: 12,
-              transition: "border-color 0.14s ease-out, box-shadow 0.14s ease-out",
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = "var(--kiri-accent)";
-              e.currentTarget.style.boxShadow = "0 0 0 3px var(--kiri-accent-soft-alpha-10)";
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = "var(--kiri-surface-border)";
-              e.currentTarget.style.boxShadow = "none";
-            }}
-          />
-          {query !== "" && (
-            <button
-              onClick={() => setQuery("")}
-              title={t("Clear Search")}
-              style={{
-                position: "absolute",
-                right: 5,
-                top: 4,
-                width: 24,
-                height: 24,
-                borderRadius: 6,
-                border: "none",
-                background: "transparent",
-                color: "var(--kiri-secondary-label)",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <KiriIcon name="xmark" size={10} />
-            </button>
-          )}
-        </div>
         <SegmentedPicker
           options={[t("Library"), t("Trash")]}
           value={section === "library" ? 0 : 1}
           onChange={(index) => {
             setSection(index === 0 ? "library" : "trash");
-            setQuery("");
             setKindFilter("all");
             setFavoritesOnly(false);
             setTagFilter(null);
@@ -615,9 +543,8 @@ export function LibraryWindow() {
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--kiri-secondary-label)" }}>
           {t("Loading Library…")}
         </div>
-      ) : isEmpty || isSearchEmpty ? (
+      ) : isEmpty ? (
         <EmptyState
-          isSearchEmpty={isSearchEmpty}
           isTrashEmpty={isEmpty && showingTrash}
           shortcutLabel={shortcutLabel}
         />
@@ -1049,14 +976,17 @@ function AssetCard(props: {
             style={{
               flex: 1,
               minWidth: 0,
-              fontSize: 12,
-              fontWeight: 500,
+              height: 28,
+              fontSize: 11.5,
+              fontWeight: 600,
               color: "var(--kiri-label)",
-              border: "1px solid var(--kiri-accent)",
-              borderRadius: 7,
+              border: "1px solid rgba(125,105,245,0.7)",
+              borderRadius: 9,
               background: "var(--kiri-group-fill)",
-              padding: "3px 6px",
+              padding: "0 10px",
               outline: "none",
+              boxShadow: "0 0 0 3px rgba(125,105,245,0.18)",
+              caretColor: "var(--kiri-accent)",
             }}
           />
         ) : (
@@ -1738,22 +1668,18 @@ function SegmentedPicker(props: {
   );
 }
 
-function EmptyState(props: { isSearchEmpty: boolean; isTrashEmpty: boolean; shortcutLabel: string }) {
-  const { isSearchEmpty, isTrashEmpty, shortcutLabel } = props;
-  const title = isSearchEmpty
-    ? t("No matching captures")
-    : isTrashEmpty
-      ? t("Trash is empty")
-      : t("Ready for your first capture");
-  const message = isSearchEmpty
-    ? t("Try a different search, or clear the current one.")
-    : isTrashEmpty
-      ? t("Captures you delete stay recoverable here.")
-      : null;
-  const guidance = !isSearchEmpty && !isTrashEmpty
+function EmptyState(props: { isTrashEmpty: boolean; shortcutLabel: string }) {
+  const { isTrashEmpty, shortcutLabel } = props;
+  const title = isTrashEmpty
+    ? t("Trash is empty")
+    : t("Ready for your first capture");
+  const message = isTrashEmpty
+    ? t("Captures you delete stay recoverable here.")
+    : null;
+  const guidance = !isTrashEmpty
     ? t("Choose Screenshot or Record, then select the region you need.")
     : null;
-  const hint = !isSearchEmpty && !isTrashEmpty && shortcutLabel
+  const hint = !isTrashEmpty && shortcutLabel
     ? fmt("or press  %@", shortcutLabel)
     : null;
   return (
