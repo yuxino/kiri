@@ -788,11 +788,17 @@ function TextEditor(props: {
     const ctx = canvas.getContext("2d")!;
     ctx.font = font;
     const text = editing.text || "Type something…";
-    const measured = ctx.measureText(text);
-    const lines = text.split("\n").length;
+    // Width follows the longest line (measureText on the whole string with
+    // newlines yields a wrong width).
+    const lines = text.split("\n");
+    let maxLineWidth = 0;
+    for (const line of lines) maxLineWidth = Math.max(maxLineWidth, ctx.measureText(line).width);
     const lineHeight = editing.fontSize * 1.25;
-    const width = Math.max(120, Math.ceil(measured.width) + 16 + 2);
-    const height = Math.max(34, Math.ceil(lines * lineHeight) + 10 + 2);
+    const width = Math.min(
+      Math.max(120, Math.ceil(maxLineWidth) + 16 + 2),
+      Math.max(120, editing.rect.width),
+    );
+    const height = Math.max(34, Math.ceil(lines.length * lineHeight) + 10 + 2);
     setSize((current) =>
       current.width === width && current.height === height ? current : { width, height },
     );
@@ -843,12 +849,7 @@ function TextEditor(props: {
         padding: "5px 8px",
         font: textFont(editing.fontSize),
         color: editing.color,
-        background:
-          editing.background === "dark"
-            ? "rgba(0,0,0,0.72)"
-            : editing.background === "light"
-              ? "rgba(255,255,255,0.9)"
-              : "transparent",
+        background: editing.background === "dark" ? "rgba(0,0,0,0.72)" : "transparent",
         border: `1px solid ${editing.color}cc`,
         borderRadius: 7,
         resize: "none",

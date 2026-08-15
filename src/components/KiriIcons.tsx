@@ -30,7 +30,6 @@ import {
   Square,
   SquareDashed,
   Star,
-  Sun,
   Tag,
   TextCursorInput,
   Trash2,
@@ -58,7 +57,6 @@ export type IconName =
   | "text.viewfinder" // OCR mode
   | "square.dashed" // text background: transparent
   | "moon.fill" // text background: dark
-  | "sun.max.fill" // text background: light
   | "character.textbox" // text context icon
   | "play.fill" // resume recording
   | "pause.fill" // pause recording
@@ -97,7 +95,6 @@ const ICONS: Record<IconName, React.ComponentType<Record<string, unknown>>> = {
   "text.viewfinder": ScanText,
   "square.dashed": SquareDashed,
   "moon.fill": Moon,
-  "sun.max.fill": Sun,
   "character.textbox": TextCursorInput,
   "play.fill": Play,
   "pause.fill": Pause,

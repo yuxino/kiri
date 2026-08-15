@@ -167,11 +167,10 @@ export function EditorWindow(props: { id: string }) {
             segments={[
               { icon: "square.dashed", label: t("Transparent"), title: t("No background") },
               { icon: "moon.fill", label: t("Dark"), title: t("Dark background") },
-              { icon: "sun.max.fill", label: t("Light"), title: t("Light background") },
             ]}
-            value={appearance.textBackgroundStyle === "transparent" ? 0 : appearance.textBackgroundStyle === "dark" ? 1 : 2}
+            value={appearance.textBackgroundStyle === "transparent" ? 0 : 1}
             onChange={(i) =>
-              setAppearance({ ...appearance, textBackgroundStyle: (["transparent", "dark", "light"] as TextBackgroundStyle[])[i] })
+              setAppearance({ ...appearance, textBackgroundStyle: (["transparent", "dark"] as TextBackgroundStyle[])[i] })
             }
           />
         ) : tool === "mosaic" ? (

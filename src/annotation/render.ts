@@ -23,8 +23,6 @@ function backgroundValue(style: TextBackgroundStyle): string | null {
       return null;
     case "dark":
       return "rgba(0, 0, 0, 0.72)";
-    case "light":
-      return "rgba(255, 255, 255, 0.9)";
   }
 }
 

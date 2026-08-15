@@ -48,7 +48,7 @@ export const COLOR_HEX: Record<ColorPreset, string> = {
   black: "#141414",
 };
 
-export type TextBackgroundStyle = "transparent" | "dark" | "light";
+export type TextBackgroundStyle = "transparent" | "dark";
 export type MosaicIntensity = "soft" | "standard" | "strong";
 export type MosaicStyle = "pixel" | "blur";
 
