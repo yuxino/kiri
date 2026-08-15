@@ -102,6 +102,7 @@ impl AssetLibrary {
     }
 
     /// Mirrors `AssetLibrary.importData(...)`.
+    #[allow(clippy::too_many_arguments)]
     pub fn import_data(
         &mut self,
         data: &[u8],
@@ -137,6 +138,7 @@ impl AssetLibrary {
     }
 
     /// Mirrors `AssetLibrary.importFile(at:...)`.
+    #[allow(clippy::too_many_arguments)]
     pub fn import_file(
         &mut self,
         source_url: &Path,

@@ -201,7 +201,7 @@ impl SegmentEncoder {
         ffmpeg: &Path,
         video_rx: mpsc::Receiver<Vec<u8>>,
         audio_rx: Option<mpsc::Receiver<Vec<u8>>>,
-        _mic_rx: Option<mpsc::Receiver<Vec<u8>>>,
+        mic_rx: Option<mpsc::Receiver<Vec<u8>>>,
     ) -> Result<SegmentEncoder> {
         let mut command = ffmpeg_command(ffmpeg);
 
@@ -299,18 +299,20 @@ impl SegmentEncoder {
         }
         command.args(["-movflags", "+faststart"]).arg(&out_path);
 
-        command.stdin(Stdio::null()).stdout(Stdio::null());
-        if mic_pipe.is_some() {
-            command.stderr(Stdio::null());
-        } else {
-            command.stderr(Stdio::piped());
-        }
-
-        // Replace stdin/stdout with the OS pipes.
+        // Replace stdin/stdout with the OS pipes. ffmpeg reads video from its
+        // stdin (pipe:0) and audio from its stdout (pipe:1); the writers own
+        // the *write* ends of those pipes, ffmpeg gets a *read* end. Wiring a
+        // write end into ffmpeg's fd made the audio input fail with EBADF,
+        // silently producing MP4s with no audio stream.
         let (video_rx_pipe, video_tx_pipe) = os_pipe::pipe()?;
         command.stdin(video_rx_pipe);
-        if let Some((_audio_rx_pipe, audio_tx_pipe)) = &audio_pipe {
-            command.stdout(audio_tx_pipe.try_clone()?);
+        if let Some((audio_rx_pipe, _audio_tx_pipe)) = &audio_pipe {
+            command.stdout(audio_rx_pipe.try_clone()?);
+        }
+        if let Some((mic_rx_pipe, _mic_tx_pipe)) = &mic_pipe {
+            command.stderr(mic_rx_pipe.try_clone()?);
+        } else {
+            command.stderr(Stdio::piped());
         }
 
         let child = command.spawn().context("failed to start ffmpeg")?;
@@ -336,6 +338,9 @@ impl SegmentEncoder {
         writers.push(spawn_writer(video_rx, video_tx_pipe));
         if let (Some((_audio_rx_pipe, audio_tx_pipe)), Some(rx)) = (&audio_pipe, audio_rx) {
             writers.push(spawn_writer(rx, audio_tx_pipe.try_clone()?));
+        }
+        if let (Some((_mic_rx_pipe, mic_tx_pipe)), Some(rx)) = (&mic_pipe, mic_rx) {
+            writers.push(spawn_writer(rx, mic_tx_pipe.try_clone()?));
         }
 
         Ok(SegmentEncoder {
@@ -510,5 +515,92 @@ pub fn merge_segments(segments: &[PathBuf], out_path: &Path, ffmpeg: &Path) -> R
     match status {
         Ok(status) if status.success() => Ok(()),
         _ => bail!("The paused recording could not be merged."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression test for the silent-recording bug: audio must flow through
+    /// ffmpeg's stdout (pipe:1) read end. Previously the pipe *write* end was
+    /// wired into ffmpeg's stdout, so reading pipe:1 failed with EBADF and
+    /// every recording came out without an audio stream.
+    #[test]
+    fn encoder_writes_audio_stream() {
+        let Some(ffmpeg) = ffmpeg_available() else {
+            eprintln!("ffmpeg not found; skipping audio-pipe regression test");
+            return;
+        };
+        let out_path = std::env::temp_dir().join(format!(
+            "kiri-test-audio-{}.mp4",
+            std::process::id()
+        ));
+        let config = EncoderConfig {
+            width: 64,
+            height: 64,
+            fps: 30,
+            bitrate: 500_000,
+            audio: Some(AudioSpec {
+                sample_rate: 48_000,
+                channels: 2,
+                is_float: true,
+            }),
+            mic: None,
+            video_encoder: "libx264".into(),
+        };
+
+        let (video_tx, video_rx) = mpsc::channel::<Vec<u8>>();
+        let (audio_tx, audio_rx) = mpsc::channel::<Vec<u8>>();
+        let encoder = SegmentEncoder::start(&config, out_path.clone(), &ffmpeg, video_rx, Some(audio_rx), None)
+            .expect("encoder should start");
+        drop(video_tx);
+
+        // 0.5 s of 440 Hz sine, f32le interleaved stereo.
+        let rate = 48_000u32;
+        let frames = rate / 2;
+        let mut audio = Vec::with_capacity(frames as usize * 8);
+        for i in 0..frames {
+            let v = (0.5f32 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / rate as f32).sin())
+                .to_le_bytes();
+            audio.extend_from_slice(&v);
+            audio.extend_from_slice(&v);
+        }
+        audio_tx.send(audio).unwrap();
+        drop(audio_tx);
+
+        let finished = encoder.finish().expect("encoder should finish");
+        let streams = probe_streams(&ffmpeg, &finished);
+        let _ = std::fs::remove_file(&finished);
+        assert!(
+            streams.contains("Audio:"),
+            "output must contain an audio stream, got: {streams}"
+        );
+    }
+
+    fn ffmpeg_available() -> Option<PathBuf> {
+        let candidates = [
+            std::env::var("KIRI_FFMPEG_PATH").ok().map(PathBuf::from),
+            Some(ffmpeg_cache_path()),
+        ];
+        for candidate in candidates.into_iter().flatten() {
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+
+    fn probe_streams(ffmpeg: &Path, video: &Path) -> String {
+        let output = Command::new(ffmpeg)
+            .arg("-hide_banner")
+            .arg("-i")
+            .arg(video)
+            .arg("-f")
+            .arg("null")
+            .arg("-")
+            .output()
+            .expect("ffprobe via ffmpeg -i should run");
+        String::from_utf8_lossy(&output.stderr).to_string()
     }
 }

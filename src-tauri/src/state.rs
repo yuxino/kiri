@@ -94,6 +94,7 @@ pub struct ActiveRecording {
     pub recorder: Option<Box<dyn PlatformRecorder + Send>>,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for ActiveRecording {
     fn default() -> Self {
         Self {

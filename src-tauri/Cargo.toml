@@ -1,6 +1,6 @@
 [package]
 name = "kiri"
-version = "1.0.0"
+version = "1.0.1"
 description = "Kiri - a fast, local-first capture workspace"
 authors = ["yuxino"]
 edition = "2021"

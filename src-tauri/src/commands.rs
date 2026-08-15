@@ -586,9 +586,9 @@ fn confirm_capture_inner(
     if action == "copy" {
         if let Err(error) = platform::write_image_to_clipboard(&request.png) {
             log::error!("confirm_capture: clipboard write failed: {error}");
-            emit_error(&app, "Could not copy the capture to the clipboard.".into(), None);
+            emit_error(app, "Could not copy the capture to the clipboard.".into(), None);
         } else {
-            emit_notice(&app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
+            emit_notice(app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
         }
     }
 
@@ -611,7 +611,7 @@ fn confirm_capture_inner(
         )
         .map_err(|e| e.to_string())?;
     drop(library);
-    emit_library_changed(&app);
+    emit_library_changed(app);
 
     match action.as_str() {
         "save" => {
@@ -622,9 +622,9 @@ fn confirm_capture_inner(
             if let Ok(Some(path)) = save_file_dialog(app.clone(), default_name) {
                 if let Err(error) = std::fs::write(&path, &request.png) {
                     log::error!("confirm_capture: save failed: {error}");
-                    emit_error(&app, "Could not save the capture.".into(), None);
+                    emit_error(app, "Could not save the capture.".into(), None);
                 } else {
-                    emit_notice(&app, "Saved".into(), "checkmark.circle.fill".into());
+                    emit_notice(app, "Saved".into(), "checkmark.circle.fill".into());
                 }
             }
         }
@@ -666,7 +666,7 @@ fn confirm_capture_inner(
         _ => {}
     }
 
-    restore_focus(&app, &session);
+    restore_focus(app, &session);
     Ok(())
 }
 
@@ -723,10 +723,8 @@ pub fn update_asset(app: AppHandle, id: String, request: UpdateAssetRequest) -> 
     if let Some(save_path) = &request.save_path {
         let _ = std::fs::write(save_path, &request.png);
     }
-    if request.copy_to_clipboard {
-        if platform::write_image_to_clipboard(&request.png).is_ok() {
-            emit_notice(&app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
-        }
+    if request.copy_to_clipboard && platform::write_image_to_clipboard(&request.png).is_ok() {
+        emit_notice(&app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
     }
     emit_library_changed(&app);
     Ok(())
@@ -898,7 +896,6 @@ pub fn cancel_recording_flow(app: AppHandle) -> Result<(), String> {
     {
         let state = app.state::<AppState>();
         let monitor = state.click_monitor.lock().unwrap().take();
-        drop(state);
         if let Some(monitor) = monitor {
             monitor.stop();
         }
@@ -1031,7 +1028,7 @@ fn start_encoder(
     mic_rx: Option<mpsc::Receiver<Vec<u8>>>,
 ) -> Result<crate::record::SegmentEncoder, String> {
     let state = app.state::<AppState>();
-    let ffmpeg = state.ffmpeg(&app).map_err(|e| e.to_string())?;
+    let ffmpeg = state.ffmpeg(app).map_err(|e| e.to_string())?;
     let width = crate::core::policy::RecordingPolicy::pixel_dimension(
         configuration.region.width,
         configuration.backing_scale,
@@ -1048,7 +1045,7 @@ fn start_encoder(
         audio: configuration
             .options
             .captures_system_audio
-            .then(|| crate::record::AudioSpec {
+            .then_some(crate::record::AudioSpec {
                 sample_rate: 48_000,
                 channels: 2,
                 is_float: true,
@@ -1056,7 +1053,7 @@ fn start_encoder(
         mic: configuration
             .options
             .captures_microphone
-            .then(|| crate::record::AudioSpec {
+            .then_some(crate::record::AudioSpec {
                 sample_rate: 48_000,
                 channels: 2,
                 is_float: true,
@@ -1123,13 +1120,13 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
     let (audio_tx, audio_rx) = configuration
         .options
         .captures_system_audio
-        .then(|| mpsc::channel::<Vec<u8>>())
+        .then(mpsc::channel::<Vec<u8>>)
         .map(|(tx, rx)| (Some(tx), Some(rx)))
         .unwrap_or((None, None));
     let (mic_tx, mic_rx) = configuration
         .options
         .captures_microphone
-        .then(|| mpsc::channel::<Vec<u8>>())
+        .then(mpsc::channel::<Vec<u8>>)
         .map(|(tx, rx)| (Some(tx), Some(rx)))
         .unwrap_or((None, None));
 
@@ -1272,13 +1269,13 @@ pub fn resume_recording(app: AppHandle) -> Result<(), String> {
     let (audio_tx, audio_rx) = configuration
         .options
         .captures_system_audio
-        .then(|| mpsc::channel::<Vec<u8>>())
+        .then(mpsc::channel::<Vec<u8>>)
         .map(|(tx, rx)| (Some(tx), Some(rx)))
         .unwrap_or((None, None));
     let (mic_tx, mic_rx) = configuration
         .options
         .captures_microphone
-        .then(|| mpsc::channel::<Vec<u8>>())
+        .then(mpsc::channel::<Vec<u8>>)
         .map(|(tx, rx)| (Some(tx), Some(rx)))
         .unwrap_or((None, None));
 
@@ -1326,7 +1323,6 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
     {
         let state = app.state::<AppState>();
         let monitor = state.click_monitor.lock().unwrap().take();
-        drop(state);
         if let Some(monitor) = monitor {
             monitor.stop();
         }

@@ -63,11 +63,10 @@ pub fn run() {
             let options = state::load_recording_options(app.handle());
             *state.saved_recording_options.lock().unwrap() = options;
             app.manage(state);
-            app.get_webview_window("library")
-                .map(|window| {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                });
+            if let Some(window) = app.get_webview_window("library") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
 
             register_shortcut(app.handle())?;
             install_tray(app.handle())?;
@@ -224,7 +223,7 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
             });
             let _ = handle.emit("ripple-click", payload);
         });
-    let monitor = platform::start_click_monitor(callback).map_err(|e| tauri::Error::Anyhow(e.into()))?;
+    let monitor = platform::start_click_monitor(callback).map_err(tauri::Error::Anyhow)?;
     let state = app.state::<AppState>();
     *state.click_monitor.lock().unwrap() = Some(monitor);
     Ok(())

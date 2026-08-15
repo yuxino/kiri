@@ -31,7 +31,7 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
     let languages = NSArray::from_slice(&[&*zh_hans, &*zh_hant, &*en_us, &*ja_jp]);
     request.setRecognitionLanguages(&languages);
 
-    let request_ref: &objc2_vision::VNRequest = &*request;
+    let request_ref: &objc2_vision::VNRequest = &request;
     let requests: Retained<NSArray<objc2_vision::VNRequest>> =
         NSArray::from_slice(&[request_ref]);
     let result = handler.performRequests_error(&requests);
