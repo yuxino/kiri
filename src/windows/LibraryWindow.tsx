@@ -1440,7 +1440,7 @@ function FilterBar(props: {
  * persisted via setLanguage (localStorage) and re-applies on next launch. */
 function LanguageSwitcher() {
   const current = getLanguage();
-  const switchTo = (lang: "en" | "zh-Hans") => {
+  const switchTo = (lang: "en" | "zh-Hans" | "ja") => {
     setLanguage(lang);
     // Persist via the backend (survives relaunch, shared across windows).
     void api.setLanguage(lang).catch(() => {});
@@ -1456,7 +1456,7 @@ function LanguageSwitcher() {
         flexShrink: 0,
       }}
     >
-      {(["en", "zh-Hans"] as const).map((lang) => (
+      {(["en", "zh-Hans", "ja"] as const).map((lang) => (
         <button
           key={lang}
           onClick={() => switchTo(lang)}
@@ -1472,9 +1472,9 @@ function LanguageSwitcher() {
             cursor: "pointer",
             transition: "background 0.14s ease-out, color 0.14s ease-out",
           }}
-          title={lang === "en" ? "English" : "简体中文"}
+          title={lang === "en" ? "English" : lang === "zh-Hans" ? "简体中文" : "日本語"}
         >
-          {lang === "en" ? "EN" : "中文"}
+          {lang === "en" ? "EN" : lang === "zh-Hans" ? "中文" : "日本語"}
         </button>
       ))}
     </div>

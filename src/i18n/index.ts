@@ -8,12 +8,14 @@
  */
 import en from "./en.json";
 import zhHans from "./zh-Hans.json";
+import ja from "./ja.json";
 
-export type KiriLanguage = "en" | "zh-Hans";
+export type KiriLanguage = "en" | "zh-Hans" | "ja";
 
 const DICTIONARIES: Record<KiriLanguage, Record<string, string>> = {
   en,
   "zh-Hans": zhHans,
+  ja,
 };
 
 function detectLanguage(): KiriLanguage {
@@ -21,6 +23,10 @@ function detectLanguage(): KiriLanguage {
   // Match macOS zh-Hans preference and Windows zh-CN/zh-SG locales.
   if (/^zh-(hans|cn|sg)|zh-(hans|cn|sg)-/i.test(locale) || locale === "zh-hans") {
     return "zh-Hans";
+  }
+  // Japanese (macOS ja / ja-JP, Windows ja-JP).
+  if (/^ja(-|$)/i.test(locale)) {
+    return "ja";
   }
   return "en";
 }

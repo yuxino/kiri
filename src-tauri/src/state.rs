@@ -544,13 +544,13 @@ pub fn load_language(app: &AppHandle) -> String {
     std::fs::read(&path)
         .ok()
         .and_then(|data| serde_json::from_slice::<String>(&data).ok())
-        .filter(|lang| lang == "en" || lang == "zh-Hans")
+        .filter(|lang| lang == "en" || lang == "zh-Hans" || lang == "ja")
         .unwrap_or_default()
 }
 
 pub fn save_language(app: &AppHandle, language: &str) {
     let path = language_path(app);
-    if language == "en" || language == "zh-Hans" {
+    if language == "en" || language == "zh-Hans" || language == "ja" {
         if let Ok(data) = serde_json::to_vec_pretty(language) {
             let _ = std::fs::write(path, data);
         }

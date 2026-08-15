@@ -22,7 +22,7 @@ void import("@tauri-apps/api/core").then(({ invoke }) => {
   invoke<string>("get_language")
     .then((saved) => {
       if (saved) {
-        setLanguage(saved as "en" | "zh-Hans");
+        setLanguage(saved as "en" | "zh-Hans" | "ja");
         return;
       }
       invoke<string>("get_locale").then((locale) => {

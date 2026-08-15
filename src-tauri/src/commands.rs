@@ -1549,6 +1549,8 @@ pub fn get_locale() -> String {
         && (lower.contains("hans") || lower.contains("-cn") || lower.contains("_cn"))
     {
         "zh-Hans".into()
+    } else if lower.starts_with("ja") {
+        "ja".into()
     } else {
         "en".into()
     }
