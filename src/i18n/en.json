@@ -230,5 +230,9 @@
   "Add Tag…": "Add Tag…",
   "Add tag…": "Add tag…",
   "Tag captures via the ⋯ menu to filter by category": "Tag captures via the ⋯ menu to filter by category",
-  "No background": "No background"
+  "No background": "No background",
+  "Pixel": "Pixel",
+  "Blur": "Blur",
+  "Pixel mosaic": "Pixel mosaic",
+  "Gaussian blur": "Gaussian blur"
 }

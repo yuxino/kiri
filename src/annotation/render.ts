@@ -280,8 +280,6 @@ function drawMosaicMark(
   const viewRect = mosaicStrokeBounds(mark.points, mark.brushDiameter, region);
   if (!viewRect) return;
 
-  const blockSize = MOSAIC_VIEW_BLOCK_SIZE[mark.intensity] * Math.max(r.scaleX, r.scaleY);
-
   // Source-pixel crop: mark coordinates are region-local; add the source
   // offset of the region within the full-resolution image.
   const crop = {
@@ -297,6 +295,36 @@ function drawMosaicMark(
   const cw = Math.max(1, Math.min(crop.width, sourceW - cx));
   const ch = Math.max(1, Math.min(crop.height, sourceH - cy));
 
+  const clipDiameter = r.exporting
+    ? mark.brushDiameter * Math.min(r.scaleX, r.scaleY)
+    : mark.brushDiameter;
+  const points = r.exporting ? mark.points.map((p) => exportPoint(p, r)) : mark.points;
+  const drawW = r.exporting ? viewRect.width * r.scaleX : viewRect.width;
+  const drawH = r.exporting ? viewRect.height * r.scaleY : viewRect.height;
+  const drawX = r.exporting ? minX(viewRect) * r.scaleX : minX(viewRect);
+  const drawY = r.exporting ? minY(viewRect) * r.scaleY : minY(viewRect);
+
+  if (mark.style === "blur") {
+    // Gaussian-blur mosaic: draw the source crop into an offscreen canvas,
+    // blur it, and stamp it through the brush-stroke clip. The blur radius
+    // scales with the brush diameter and the intensity preset.
+    const off = document.createElement("canvas");
+    off.width = cw;
+    off.height = ch;
+    const offCtx = off.getContext("2d")!;
+    offCtx.drawImage(r.sourceImage, cx, cy, cw, ch, 0, 0, cw, ch);
+    const intensityFactor = mark.intensity === "soft" ? 0.18 : mark.intensity === "standard" ? 0.25 : 0.34;
+    const blurPx = Math.max(2, Math.round(mark.brushDiameter * intensityFactor));
+    clipToMosaicStroke(ctx, points, clipDiameter);
+    ctx.filter = `blur(${blurPx}px)`;
+    ctx.drawImage(off, 0, 0, cw, ch, drawX, drawY, drawW, drawH);
+    ctx.filter = "none";
+    ctx.restore();
+    return;
+  }
+
+  const blockSize = MOSAIC_VIEW_BLOCK_SIZE[mark.intensity] * Math.max(r.scaleX, r.scaleY);
+
   const smallW = Math.max(1, Math.ceil(cw / blockSize));
   const smallH = Math.max(1, Math.ceil(ch / blockSize));
   const small = document.createElement("canvas");
@@ -306,38 +334,9 @@ function drawMosaicMark(
   smallCtx.imageSmoothingEnabled = false;
   smallCtx.drawImage(r.sourceImage, cx, cy, cw, ch, 0, 0, smallW, smallH);
 
-  clipToMosaicStroke(
-    ctx,
-    r.exporting ? mark.points.map((p) => exportPoint(p, r)) : mark.points,
-    // Spec §9: export clip diameter is brushDiameter * min(scaleX, scaleY).
-    r.exporting ? mark.brushDiameter * Math.min(r.scaleX, r.scaleY) : mark.brushDiameter,
-  );
+  clipToMosaicStroke(ctx, points, clipDiameter);
   ctx.imageSmoothingEnabled = false;
-  if (r.exporting) {
-    ctx.drawImage(
-      small,
-      0,
-      0,
-      smallW,
-      smallH,
-      minX(viewRect) * r.scaleX,
-      minY(viewRect) * r.scaleY,
-      viewRect.width * r.scaleX,
-      viewRect.height * r.scaleY,
-    );
-  } else {
-    ctx.drawImage(
-      small,
-      0,
-      0,
-      smallW,
-      smallH,
-      minX(viewRect),
-      minY(viewRect),
-      viewRect.width,
-      viewRect.height,
-    );
-  }
+  ctx.drawImage(small, 0, 0, smallW, smallH, drawX, drawY, drawW, drawH);
   ctx.restore();
 }
 

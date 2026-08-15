@@ -35,6 +35,7 @@ import {
   DEFAULT_APPEARANCE,
   type AppearanceSettings,
   type MosaicIntensity,
+  type MosaicStyle,
   type TextBackgroundStyle,
   type Tool,
 } from "../annotation/model";
@@ -1296,21 +1297,36 @@ function Toolbar(props: ToolbarProps) {
             }
           />
         ) : tool === "mosaic" ? (
-          <SegmentedControl
-            width={24}
-            segments={[
-              { label: "1", title: t("Soft") },
-              { label: "2", title: t("Standard") },
-              { label: "3", title: t("Strong") },
-            ]}
-            value={appearance.mosaicIntensity === "soft" ? 0 : appearance.mosaicIntensity === "standard" ? 1 : 2}
-            onChange={(index) =>
-              setAppearance({
-                ...appearance,
-                mosaicIntensity: (["soft", "standard", "strong"] as MosaicIntensity[])[index],
-              })
-            }
-          />
+          <>
+            <SegmentedControl
+              segments={[
+                { label: t("Pixel"), title: t("Pixel mosaic") },
+                { label: t("Blur"), title: t("Gaussian blur") },
+              ]}
+              value={appearance.mosaicStyle === "pixel" ? 0 : 1}
+              onChange={(index) =>
+                setAppearance({
+                  ...appearance,
+                  mosaicStyle: (["pixel", "blur"] as MosaicStyle[])[index],
+                })
+              }
+            />
+            <SegmentedControl
+              width={24}
+              segments={[
+                { label: "1", title: t("Soft") },
+                { label: "2", title: t("Standard") },
+                { label: "3", title: t("Strong") },
+              ]}
+              value={appearance.mosaicIntensity === "soft" ? 0 : appearance.mosaicIntensity === "standard" ? 1 : 2}
+              onChange={(index) =>
+                setAppearance({
+                  ...appearance,
+                  mosaicIntensity: (["soft", "standard", "strong"] as MosaicIntensity[])[index],
+                })
+              }
+            />
+          </>
         ) : null}
         {slider && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>

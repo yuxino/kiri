@@ -354,6 +354,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             points,
             brushDiameter: ap.mosaicBrushDiameter,
             intensity: ap.mosaicIntensity,
+            style: ap.mosaicStyle,
           });
         } else if (t === "rectangle") {
           setDraft({
@@ -418,6 +419,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
                 points: [...points],
                 brushDiameter: appearanceRef.current.mosaicBrushDiameter,
                 intensity: appearanceRef.current.mosaicIntensity,
+                style: appearanceRef.current.mosaicStyle,
               });
             }
           } else {
@@ -512,6 +514,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
               points: [...points],
               brushDiameter: ap.mosaicBrushDiameter,
               intensity: ap.mosaicIntensity,
+              style: ap.mosaicStyle,
             });
             syncMarks();
           } else if (t === "rectangle") {

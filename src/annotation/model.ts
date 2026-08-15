@@ -50,6 +50,7 @@ export const COLOR_HEX: Record<ColorPreset, string> = {
 
 export type TextBackgroundStyle = "transparent" | "dark" | "light";
 export type MosaicIntensity = "soft" | "standard" | "strong";
+export type MosaicStyle = "pixel" | "blur";
 
 export const MOSAIC_VIEW_BLOCK_SIZE: Record<MosaicIntensity, number> = {
   soft: 7,
@@ -77,12 +78,14 @@ export type AnnotationMark =
       points: Point[];
       brushDiameter: number;
       intensity: MosaicIntensity;
+      style: MosaicStyle;
     };
 
 export interface AppearanceSettings {
   colorPreset: ColorPreset;
   textBackgroundStyle: TextBackgroundStyle;
   mosaicIntensity: MosaicIntensity;
+  mosaicStyle: MosaicStyle;
   penWidth: number;
   shapeWidth: number;
   textFontSize: number;
@@ -93,10 +96,11 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   colorPreset: "violet",
   textBackgroundStyle: "transparent",
   mosaicIntensity: "standard",
+  mosaicStyle: "pixel",
   penWidth: 3,
   shapeWidth: 3,
   textFontSize: 18,
-  mosaicBrushDiameter: 36,
+  mosaicBrushDiameter: 20,
 };
 
 interface HistoryStep {

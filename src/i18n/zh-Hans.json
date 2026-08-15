@@ -230,5 +230,9 @@
   "Add Tag…": "添加标签…",
   "Add tag…": "添加标签…",
   "Tag captures via the ⋯ menu to filter by category": "通过 ⋯ 菜单给截图打标签，即可按分类筛选",
-  "No background": "无背景"
+  "No background": "无背景",
+  "Pixel": "像素",
+  "Blur": "模糊",
+  "Pixel mosaic": "像素马赛克",
+  "Gaussian blur": "高斯模糊"
 }

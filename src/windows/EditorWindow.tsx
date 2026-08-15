@@ -11,6 +11,7 @@ import {
   DEFAULT_APPEARANCE,
   type AppearanceSettings,
   type MosaicIntensity,
+  type MosaicStyle,
   type TextBackgroundStyle,
   type Tool,
 } from "../annotation/model";
@@ -174,13 +175,25 @@ export function EditorWindow(props: { id: string }) {
             }
           />
         ) : tool === "mosaic" ? (
-          <EditorSegments
-            segments={[{ label: "1" }, { label: "2" }, { label: "3" }]}
-            value={appearance.mosaicIntensity === "soft" ? 0 : appearance.mosaicIntensity === "standard" ? 1 : 2}
-            onChange={(i) =>
-              setAppearance({ ...appearance, mosaicIntensity: (["soft", "standard", "strong"] as MosaicIntensity[])[i] })
-            }
-          />
+          <>
+            <EditorSegments
+              segments={[
+                { label: t("Pixel"), title: t("Pixel mosaic") },
+                { label: t("Blur"), title: t("Gaussian blur") },
+              ]}
+              value={appearance.mosaicStyle === "pixel" ? 0 : 1}
+              onChange={(i) =>
+                setAppearance({ ...appearance, mosaicStyle: (["pixel", "blur"] as MosaicStyle[])[i] })
+              }
+            />
+            <EditorSegments
+              segments={[{ label: "1", title: t("Soft") }, { label: "2", title: t("Standard") }, { label: "3", title: t("Strong") }]}
+              value={appearance.mosaicIntensity === "soft" ? 0 : appearance.mosaicIntensity === "standard" ? 1 : 2}
+              onChange={(i) =>
+                setAppearance({ ...appearance, mosaicIntensity: (["soft", "standard", "strong"] as MosaicIntensity[])[i] })
+              }
+            />
+          </>
         ) : null}
         {slider && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
