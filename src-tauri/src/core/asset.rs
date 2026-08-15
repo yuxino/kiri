@@ -119,11 +119,6 @@ impl CaptureAsset {
         parts.push(self.kind.as_str().to_string());
         parts.join(" ").to_lowercase()
     }
-
-    /// Sort key matching `AssetLibrary.allAssets` (createdAt descending).
-    pub fn created_at_ms(&self) -> i64 {
-        self.created_at.floor() as i64
-    }
 }
 
 #[cfg(test)]

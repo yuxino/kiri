@@ -15,13 +15,11 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
     };
 
     let data = NSData::with_bytes(png);
-    let handler = unsafe {
-        VNImageRequestHandler::initWithData_options(
-            VNImageRequestHandler::alloc(),
-            &data,
-            &NSDictionary::new(),
-        )
-    };
+    let handler = VNImageRequestHandler::initWithData_options(
+        VNImageRequestHandler::alloc(),
+        &data,
+        &NSDictionary::new(),
+    );
 
     let request = VNRecognizeTextRequest::new();
     request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
@@ -36,7 +34,7 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
     let request_ref: &objc2_vision::VNRequest = &*request;
     let requests: Retained<NSArray<objc2_vision::VNRequest>> =
         NSArray::from_slice(&[request_ref]);
-    let result = unsafe { handler.performRequests_error(&requests) };
+    let result = handler.performRequests_error(&requests);
     if result.is_err() {
         return Err(anyhow!("Text Recognition Failed"));
     }
@@ -104,11 +102,4 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
     } else {
         Ok(text)
     }
-}
-
-#[cfg(windows)]
-mod windows_ocr {
-    // Windows.Media.Ocr implementation (compiled on Windows builds).
-    #[allow(dead_code)]
-    pub fn _unused() {}
 }

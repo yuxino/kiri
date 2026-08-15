@@ -281,8 +281,7 @@ export function EditorWindow(props: { id: string }) {
 }
 
 function EditorToolButton(props: {
-  icon?: IconName;
-  label?: string;
+  icon: IconName;
   title: string;
   active?: boolean;
   disabled?: boolean;
@@ -309,7 +308,7 @@ function EditorToolButton(props: {
         justifyContent: "center",
       }}
     >
-      {props.icon ? <KiriIcon name={props.icon} size={15} /> : props.label}
+      <KiriIcon name={props.icon} size={15} />
     </button>
   );
 }

@@ -2,14 +2,13 @@
 //! asset files to the webview (never exposing arbitrary disk paths).
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Mutex;
 
 use tauri::Manager;
 
 use tauri::http::{Request, Response, StatusCode};
 
-use crate::core::asset::{CaptureAsset, CaptureKind};
+use crate::core::asset::CaptureKind;
 use crate::state::AppState;
 
 pub struct ProtocolStore {
@@ -30,10 +29,6 @@ impl ProtocolStore {
 
 pub fn set_frozen_png(store: &ProtocolStore, png: Vec<u8>) {
     *store.frozen_png.lock().unwrap() = Some(png);
-}
-
-pub fn store_pin_image(store: &ProtocolStore, id: &str, png: Vec<u8>) {
-    store.pin_images.lock().unwrap().insert(id.to_string(), png);
 }
 
 pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
@@ -108,12 +103,6 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     not_found()
 }
 
-/// Removed helpers kept referenced by tests/other code.
-#[allow(dead_code)]
-fn _content_type_hint(_: &str) -> &'static str {
-    "image/png"
-}
-
 fn respond(bytes: Vec<u8>, content_type: &str) -> Response<Vec<u8>> {
     Response::builder()
         .status(StatusCode::OK)
@@ -135,10 +124,4 @@ fn not_found() -> Response<Vec<u8>> {
         .status(StatusCode::NOT_FOUND)
         .body(Vec::new())
         .unwrap()
-}
-
-/// Placeholder trait impl helper (unused when thumbnail module is active).
-#[allow(dead_code)]
-fn asset_url(state: &AppState, asset: &CaptureAsset) -> PathBuf {
-    state.library_root.join("Assets").join(&asset.filename)
 }

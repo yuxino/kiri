@@ -63,18 +63,6 @@ impl AssetLibrary {
         dirs::data_dir().map(|dir| dir.join("kiri"))
     }
 
-    pub fn root_url(&self) -> &Path {
-        &self.root_url
-    }
-
-    pub fn assets_url(&self) -> &Path {
-        &self.assets_url
-    }
-
-    pub fn thumbnails_url(&self) -> &Path {
-        &self.thumbnails_url
-    }
-
     pub fn asset_url(&self, asset: &CaptureAsset) -> PathBuf {
         self.assets_url.join(&asset.filename)
     }

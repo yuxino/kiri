@@ -9,7 +9,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::capture::{CapturedDisplay, PlatformRecorder};
-use crate::core::asset::{CaptureAsset, CaptureKind};
+use crate::core::asset::CaptureAsset;
 use crate::core::library::AssetLibrary;
 use crate::core::policy::RecordingOptions;
 use crate::record::SegmentEncoder;
@@ -259,30 +259,5 @@ pub fn save_recording_options(app: &AppHandle, options: &RecordingOptions) {
     let path = recording_options_path(app);
     if let Ok(data) = serde_json::to_vec_pretty(&options.normalized()) {
         let _ = std::fs::write(path, data);
-    }
-}
-
-/// Converts a top-left display-local region (points) to its pixel rect within
-/// the frozen capture image.
-pub fn pixel_rect_for_region(
-    display: &CapturedDisplay,
-    region: &crate::core::geometry::Rect,
-) -> crate::core::geometry::Rect {
-    let scale_x = display.pixel_width as f64 / display.screen_frame.width.max(1.0);
-    let scale_y = display.pixel_height as f64 / display.screen_frame.height.max(1.0);
-    crate::core::geometry::Rect::new(
-        region.x * scale_x,
-        region.y * scale_y,
-        region.width * scale_x,
-        region.height * scale_y,
-    )
-    .integral()
-}
-
-pub fn asset_kind_label(kind: CaptureKind) -> &'static str {
-    match kind {
-        CaptureKind::Image => "image",
-        CaptureKind::Video => "video",
-        CaptureKind::Gif => "gif",
     }
 }

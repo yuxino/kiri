@@ -472,7 +472,7 @@ fn raise_overlay_window(window: &tauri::WebviewWindow) {
     if let Ok(ns_window) = window.ns_window() {
         let ns_window = ns_window as *mut NSWindow;
         let ns_window = unsafe { &*ns_window };
-        unsafe { ns_window.setLevel(NSScreenSaverWindowLevel) };
+        ns_window.setLevel(NSScreenSaverWindowLevel);
     }
 }
 
@@ -1457,7 +1457,7 @@ pub fn open_settings(action: String) -> Result<(), String> {
         let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();
         let url = objc2_foundation::NSURL::URLWithString(&objc2_foundation::NSString::from_str(url))
             .ok_or_else(|| "bad url".to_string())?;
-        unsafe { workspace.openURL(&url) };
+        workspace.openURL(&url);
     }
     #[cfg(windows)]
     {

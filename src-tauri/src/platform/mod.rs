@@ -86,10 +86,6 @@ pub fn window_capture_id(_app: &tauri::AppHandle, _label: &str) -> Option<u32> {
     None
 }
 
-pub fn ensure_permissions() -> Result<()> {
-    current::ensure_permissions()
-}
-
 /// Brings the app itself to the foreground (so overlay webviews get keys).
 pub fn activate_self() {
     current::activate_self();
@@ -103,8 +99,4 @@ pub fn mic_supported() -> bool {
 /// Makes a window click-through so it never blocks the cursor.
 pub fn set_window_click_through(app: &tauri::AppHandle, label: &str) {
     current::set_window_click_through(app, label);
-}
-
-pub fn dummy_error() -> anyhow::Error {
-    anyhow::anyhow!("unimplemented")
 }

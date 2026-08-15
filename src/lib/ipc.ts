@@ -114,7 +114,6 @@ export const api = {
   stopRecording: () => invoke<void>("stop_recording"),
 
   micSupported: () => invoke<boolean>("mic_supported"),
-  getLocale: () => invoke<string>("get_locale"),
   getShortcutLabel: () => invoke<string>("get_shortcut_label"),
   openSettings: (action: string) => invoke<void>("open_settings", { action }),
   quitApp: () => invoke<void>("quit_app"),

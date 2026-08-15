@@ -89,10 +89,6 @@ fn window_title(hwnd: HWND) -> Option<String> {
     }
 }
 
-pub fn ensure_permissions() -> Result<()> {
-    Ok(())
-}
-
 pub fn activate_self() {
     // set_focus on the overlay window already foregrounds it.
 }

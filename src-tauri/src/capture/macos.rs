@@ -279,7 +279,7 @@ fn make_filter(
 }
 
 fn collect_window_rects(content: &SCShareableContent, display_id: CGDirectDisplayID) -> Vec<Rect> {
-    let display_bounds = unsafe { CGDisplayBounds(display_id) };
+    let display_bounds = CGDisplayBounds(display_id);
     let own_process_id = std::process::id() as i32;
     let mut rects = Vec::new();
     let windows = unsafe { content.windows() };
@@ -325,7 +325,7 @@ fn collect_window_rects(content: &SCShareableContent, display_id: CGDirectDispla
 
 fn cgimage_to_png(image: &CFRetained<CGImage>) -> Result<(Vec<u8>, i64, i64)> {
     let image_ref: &CGImage = image;
-    let rep = unsafe { NSBitmapImageRep::initWithCGImage(NSBitmapImageRep::alloc(), image_ref) };
+    let rep = NSBitmapImageRep::initWithCGImage(NSBitmapImageRep::alloc(), image_ref);
     let width = rep.pixelsWide() as i64;
     let height = rep.pixelsHigh() as i64;
     let data = unsafe {

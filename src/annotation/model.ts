@@ -3,7 +3,16 @@
 // image rect (top-left origin).
 
 import type { Point, Rect } from "./geom";
-import { distanceToSegment, maxX, maxY, minX, minY, polylineDistance, standardized } from "./geom";
+import {
+  distanceToSegment,
+  maxX,
+  maxY,
+  minX,
+  minY,
+  pointBounds,
+  polylineDistance,
+  standardized,
+} from "./geom";
 
 export type Tool = "select" | "pen" | "rectangle" | "line" | "arrow" | "text" | "mosaic";
 
@@ -69,11 +78,6 @@ export type AnnotationMark =
       brushDiameter: number;
       intensity: MosaicIntensity;
     };
-
-let nextMarkId = 1;
-export function markId(): number {
-  return nextMarkId++;
-}
 
 export interface AppearanceSettings {
   colorPreset: ColorPreset;
@@ -338,14 +342,6 @@ export function selectionBounds(mark: AnnotationMark): Rect {
       return { x: b.x - pad, y: b.y - pad, width: b.width + pad * 2, height: b.height + pad * 2 };
     }
   }
-}
-
-function pointBounds(points: Point[]): Rect {
-  const xs = points.map((p) => p.x);
-  const ys = points.map((p) => p.y);
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
 /** Arrow head geometry (spec §5.4). */

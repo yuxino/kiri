@@ -19,16 +19,14 @@ pub fn activate_application(pid: u32) {
     if let Some(application) =
         NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
     {
-        unsafe {
-            application.activateWithOptions(objc2_app_kit::NSApplicationActivationOptions::ActivateAllWindows)
-        };
+        application.activateWithOptions(objc2_app_kit::NSApplicationActivationOptions::ActivateAllWindows);
     }
 }
 
 pub fn reveal_path(path: &Path) {
     let url = NSURL::fileURLWithPath(&NSString::from_str(&path.display().to_string()));
     let workspace = NSWorkspace::sharedWorkspace();
-    unsafe { workspace.activateFileViewerSelectingURLs(&NSArray::from_slice(&[&*url])) };
+    workspace.activateFileViewerSelectingURLs(&NSArray::from_slice(&[&*url]));
 }
 
 pub fn frontmost_application() -> Option<(u32, Option<String>)> {
@@ -39,15 +37,11 @@ pub fn frontmost_application() -> Option<(u32, Option<String>)> {
     Some((pid, name))
 }
 
-pub fn ensure_permissions() -> Result<()> {
-    Ok(())
-}
-
 pub fn activate_self() {
     use objc2_app_kit::NSApplication;
     let mtm = objc2::MainThreadMarker::new().unwrap();
     let application = NSApplication::sharedApplication(mtm);
-    unsafe { application.activate() };
+    application.activate();
 }
 
 pub fn mic_supported() -> bool {

@@ -86,7 +86,7 @@ export function ControlPanelWindow() {
   stateRef.current = state;
 
   const busy =
-    state?.isStarting || state?.isTransitioning || state?.isFinalizing || false;
+    state?.isStarting || state?.isTransitioning || state?.isFinalizing;
 
   // All text is white on the dark material panel (spec: white foreground).
   const textStyle: React.CSSProperties = { color: "#fff" };

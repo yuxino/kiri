@@ -13,11 +13,11 @@ export function textFont(size: number): string {
   return `600 ${size}px ${FONT_STACK}`;
 }
 
-export function colorValue(color: ColorPreset): string {
+function colorValue(color: ColorPreset): string {
   return COLOR_HEX[color];
 }
 
-export function backgroundValue(style: TextBackgroundStyle): string | null {
+function backgroundValue(style: TextBackgroundStyle): string | null {
   switch (style) {
     case "transparent":
       return null;
@@ -71,7 +71,7 @@ function strokePolyline(ctx: CanvasRenderingContext2D, points: Point[]) {
 }
 
 /** Draws one mark into the given context (already in the right space). */
-export function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRenderingContext2D) {
+function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRenderingContext2D) {
   switch (mark.kind) {
     case "pen": {
       const points = mark.points.map((p) => exportPoint(p, r));
@@ -271,7 +271,7 @@ function clipToMosaicStroke(ctx: CanvasRenderingContext2D, points: Point[], diam
   ctx.clip();
 }
 
-export function drawMosaicMark(
+function drawMosaicMark(
   mark: AnnotationMark & { kind: "mosaic" },
   r: RenderContext,
   ctx: CanvasRenderingContext2D,
@@ -413,7 +413,7 @@ export function renderAll(
   }
 }
 
-export function drawBrushCursor(ctx: CanvasRenderingContext2D, p: Point, diameter: number) {
+function drawBrushCursor(ctx: CanvasRenderingContext2D, p: Point, diameter: number) {
   ctx.beginPath();
   ctx.arc(p.x, p.y, diameter / 2, 0, Math.PI * 2);
   ctx.strokeStyle = "rgba(0, 0, 0, 0.72)";

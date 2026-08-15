@@ -6,8 +6,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   api,
   dbg,
+  DEFAULT_RECORDING_OPTIONS,
   frozenImageUrl,
-  onNotice,
   type CaptureContextDto,
   type RecordingOptions,
 } from "../lib/ipc";
@@ -95,31 +95,18 @@ export function OverlayWindow() {
   const [canRedo, setCanRedo] = useState(false);
   const [ocrText, setOcrText] = useState("");
   const [ocrFailed, setOcrFailed] = useState(false);
-  const [ocrBusy, setOcrBusy] = useState(false);
-  const [recordOptions, setRecordOptions] = useState<RecordingOptions>({
-    usesCountdown: true,
-    capturesSystemAudio: false,
-    capturesMicrophone: false,
-    showsCursor: true,
-    highlightsClicks: false,
-  });
+  const [recordOptions, setRecordOptions] = useState<RecordingOptions>(DEFAULT_RECORDING_OPTIONS);
   const [micSupported, setMicSupported] = useState(true);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const canvasRef = useRef<AnnotationCanvasHandle>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const modeRef = useRef<Mode>("screenshot");
   modeRef.current = mode;
-  const toolRef = useRef<Tool>("select");
-  toolRef.current = tool;
 
   // Load context on mount.
   useEffect(() => {
     dbg(`overlay mount: inner=${window.innerWidth}x${window.innerHeight} dpr=${window.devicePixelRatio}`);
     (window as unknown as { __kiriOverlay: boolean }).__kiriOverlay = true;
-    let unlistenNotice: (() => void) | undefined;
-    onNotice(() => {}).then((unlisten) => {
-      unlistenNotice = unlisten;
-    });
     api.startCapture()
       .then((ctx) => {
         dbg(`overlay startCapture ok: display=${ctx.displayWidth}x${ctx.displayHeight} windows=${ctx.windowRects.length} scale=${ctx.scale}`);
@@ -156,9 +143,6 @@ export function OverlayWindow() {
         setFrozenSrc(img.src);
       })
       .catch((error) => dbg(`frozen fetch failed: ${String(error)}`));
-    return () => {
-      unlistenNotice?.();
-    };
   }, []);
 
   const bounds: Rect = context
@@ -196,7 +180,6 @@ export function OverlayWindow() {
 
   const runOcr = useCallback(
     async (sel: Rect) => {
-      setOcrBusy(true);
       const image = imageRef.current;
       if (!image) return;
       const scale = image.naturalWidth / bounds.width;
@@ -230,7 +213,6 @@ export function OverlayWindow() {
         setOcrText("");
         setPhase("ocr-result");
       } finally {
-        setOcrBusy(false);
       }
     },
     [bounds],
@@ -552,18 +534,16 @@ export function OverlayWindow() {
       {/* Hover dim (spec: hover dims to 0.34, selection dims to 0.48) */}
       {(hoverWindow || displayRect) && phase !== "annotating" && (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
-          {(hoverWindow ?? displayRect) && (
-            <div
-              style={{
-                position: "absolute",
-                left: (hoverWindow ?? displayRect)!.x,
-                top: (hoverWindow ?? displayRect)!.y,
-                width: (hoverWindow ?? displayRect)!.width,
-                height: (hoverWindow ?? displayRect)!.height,
-                boxShadow: "0 0 0 9999px rgba(0,0,0," + (displayRect ? "0.48" : "0.34") + ")",
-              }}
-            />
-          )}
+          <div
+            style={{
+              position: "absolute",
+              left: (hoverWindow ?? displayRect)!.x,
+              top: (hoverWindow ?? displayRect)!.y,
+              width: (hoverWindow ?? displayRect)!.width,
+              height: (hoverWindow ?? displayRect)!.height,
+              boxShadow: "0 0 0 9999px rgba(0,0,0," + (displayRect ? "0.48" : "0.34") + ")",
+            }}
+          />
         </div>
       )}
 
@@ -841,8 +821,6 @@ export function OverlayWindow() {
         />
       )}
 
-      {/* Busy veil while OCR runs */}
-      {ocrBusy && <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }} />}
     </div>
   );
 }

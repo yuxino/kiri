@@ -192,23 +192,6 @@ export function resized(
   return rect(newMinX, newMinY, newMaxX - newMinX, newMaxY - newMinY);
 }
 
-export function moved(selection: Rect, translation: Point, bounds: Rect): Rect {
-  const r = standardized(selection);
-  const limits = standardized(bounds);
-  if (r.width > limits.width || r.height > limits.height) {
-    return intersection(r, limits);
-  }
-  const x = Math.min(
-    Math.max(minX(r) + translation.x, minX(limits)),
-    maxX(limits) - r.width,
-  );
-  const y = Math.min(
-    Math.max(minY(r) + translation.y, minY(limits)),
-    maxY(limits) - r.height,
-  );
-  return rect(x, y, r.width, r.height);
-}
-
 export function distanceToSegment(
   p: Point,
   a: Point,

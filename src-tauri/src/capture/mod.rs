@@ -31,13 +31,6 @@ pub struct CapturedDisplay {
     pub backing_scale: f64,
 }
 
-/// Optional capture capabilities offered while recording.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct RecordingSources {
-    pub system_audio: bool,
-    pub microphone: bool,
-}
-
 /// Platform recording session (SCK stream on macOS, WGC + WASAPI on Windows).
 pub trait PlatformRecorder: Send {
     fn stop(&mut self) -> anyhow::Result<()>;

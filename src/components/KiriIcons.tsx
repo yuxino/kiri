@@ -23,10 +23,7 @@ export type IconName =
   | "square.dashed" // text background: transparent
   | "moon.fill" // text background: dark
   | "sun.max.fill" // text background: light
-  | "lineweight" // stroke context icon
   | "character.textbox" // text context icon
-  | "timer" // countdown toggle
-  | "checkmark.circle.fill" // notice
   | "play.fill" // resume recording
   | "pause.fill" // pause recording
   | "stop.fill" // stop recording
@@ -37,12 +34,10 @@ export type IconName =
   | "trash" // more menu: clear annotations
   | "trash.fill" // library: move to trash
   | "doc.on.doc" // library: copy
-  | "arrow.uturn.backward" // library: restore (reuse)
   | "sparkles.rectangle.stack" // library: convert to GIF
   | "star" // library: favorite
   | "star.fill" // library: favorite (filled)
   | "magnifyingglass" // library: search
-  | "power" // quit
   | "folder" // show in finder
   | "photo.on.rectangle" // open in library
   | "play.rectangle" // open video
@@ -301,13 +296,6 @@ const PATHS: Record<IconName, React.ReactNode> = {
     </>
   ),
   // --- context icons (spec §7.5) ---
-  lineweight: (
-    <>
-      <path d="M4 6h16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M4 11h16" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M4 16.5h16" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-    </>
-  ),
   "character.textbox": (
     <>
       <rect
@@ -325,37 +313,6 @@ const PATHS: Record<IconName, React.ReactNode> = {
         stroke="currentColor"
         strokeWidth="1.6"
         strokeLinecap="round"
-      />
-    </>
-  ),
-  timer: (
-    <>
-      <circle
-        cx="12"
-        cy="13"
-        r="7"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-      />
-      <path
-        d="M12 13V8.5M9.5 3.5h5"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
-    </>
-  ),
-  "checkmark.circle.fill": (
-    <>
-      <circle cx="12" cy="12" r="8.5" fill="currentColor" opacity="0.95" />
-      <path
-        d="M8 12.5 11 15.5 16.5 9.5"
-        fill="none"
-        stroke="#fff"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
       />
     </>
   ),
@@ -551,24 +508,6 @@ const PATHS: Record<IconName, React.ReactNode> = {
         d="M15.5 15.5 20 20"
         stroke="currentColor"
         strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </>
-  ),
-  power: (
-    <>
-      <path
-        d="M12 4v7"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-      />
-      <path
-        d="M7.5 6.5a7.5 7.5 0 1 0 9 0"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
         strokeLinecap="round"
       />
     </>
