@@ -248,6 +248,18 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       // undo, export) do not complete the capture.
     }, [syncMarks]);
 
+    // Switching tools while a text edit is open should commit it (the text
+    // becomes a mark and the editor closes), matching the canvas click
+    // behavior. Without this the textarea stays up after choosing another
+    // tool.
+    const prevTool = useRef(tool);
+    useEffect(() => {
+      if (prevTool.current !== tool && editingRef.current) {
+        commitText();
+      }
+      prevTool.current = tool;
+    }, [tool, commitText]);
+
     const onPointerDown = useCallback(
       (e: React.PointerEvent) => {
         const canvas = canvasRef.current!;
