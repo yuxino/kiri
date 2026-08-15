@@ -164,9 +164,9 @@ export function EditorWindow(props: { id: string }) {
         {tool === "text" ? (
           <EditorSegments
             segments={[
-              { icon: "square.dashed" },
-              { icon: "moon.fill" },
-              { icon: "sun.max.fill" },
+              { icon: "square.dashed", label: t("Transparent"), title: t("No background") },
+              { icon: "moon.fill", label: t("Dark"), title: t("Dark background") },
+              { icon: "sun.max.fill", label: t("Light"), title: t("Light background") },
             ]}
             value={appearance.textBackgroundStyle === "transparent" ? 0 : appearance.textBackgroundStyle === "dark" ? 1 : 2}
             onChange={(i) =>
@@ -346,7 +346,7 @@ function EditorSwatch(props: { color: string; selected: boolean; onClick(): void
 }
 
 function EditorSegments(props: {
-  segments: { label?: string; icon?: IconName }[];
+  segments: { label?: string; icon?: IconName; title?: string }[];
   value: number;
   onChange(i: number): void;
 }) {
@@ -355,10 +355,12 @@ function EditorSegments(props: {
       {props.segments.map((segment, index) => (
         <button
           key={index}
+          title={segment.title}
           onClick={() => props.onChange(index)}
           style={{
-            width: 28,
-            height: 22,
+            minWidth: 28,
+            height: 24,
+            padding: "0 7px",
             borderRadius: 6,
             border: "none",
             background: props.value === index ? "#634FDB" : "transparent",
@@ -368,9 +370,12 @@ function EditorSegments(props: {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            gap: 4,
+            whiteSpace: "nowrap",
           }}
         >
-          {segment.icon ? <KiriIcon name={segment.icon} size={12} style={{ opacity: 0.75 }} /> : segment.label}
+          {segment.icon ? <KiriIcon name={segment.icon} size={12} style={{ opacity: 0.85 }} /> : null}
+          {segment.label}
         </button>
       ))}
     </div>

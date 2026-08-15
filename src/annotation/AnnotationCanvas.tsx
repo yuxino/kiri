@@ -745,7 +745,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         {editing && (
           <TextEditor
             editing={editing}
-            onTextChange={(text) => setEditing({ ...editing, text })}
+            onTextChange={(text) => setEditing((prev) => (prev ? { ...prev, text } : prev))}
             onCommit={commitText}
             onFinish={onFinishAfterTextCommit}
             onUndo={() => undoRef.current()}
@@ -776,6 +776,7 @@ function TextEditor(props: {
 
   // Spec §6.6 resizeTextEditor: min 120×34, grows with text/font, clamped
   // to the right/bottom edges of the region.
+  const focusedOnce = useRef(false);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -792,8 +793,13 @@ function TextEditor(props: {
     setSize((current) =>
       current.width === width && current.height === height ? current : { width, height },
     );
-    el.focus();
-    el.select();
+    // Focus + select only on first mount; re-running el.select() on every
+    // keystroke would yank the caret to the end and break mid-text edits.
+    if (!focusedOnce.current) {
+      focusedOnce.current = true;
+      el.focus();
+      el.select();
+    }
   }, [editing.text, editing.fontSize]);
 
   return (

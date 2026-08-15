@@ -1282,11 +1282,10 @@ function Toolbar(props: ToolbarProps) {
         {/* Context row */}
         {tool === "text" ? (
           <SegmentedControl
-            width={26}
             segments={[
-              { icon: "square.dashed", title: t("Transparent background") },
-              { icon: "moon.fill", title: t("Dark background") },
-              { icon: "sun.max.fill", title: t("Light background") },
+              { icon: "square.dashed", label: t("Transparent"), title: t("No background") },
+              { icon: "moon.fill", label: t("Dark"), title: t("Dark background") },
+              { icon: "sun.max.fill", label: t("Light"), title: t("Light background") },
             ]}
             value={appearance.textBackgroundStyle === "transparent" ? 0 : appearance.textBackgroundStyle === "dark" ? 1 : 2}
             onChange={(index) =>
@@ -1496,7 +1495,7 @@ function ColorSwatch(props: { color: string; selected: boolean; onClick(): void 
 }
 
 function SegmentedControl(props: {
-  width: number;
+  width?: number;
   segments: { label?: string; icon?: IconName; title?: string }[];
   value: number;
   onChange(index: number): void;
@@ -1517,25 +1516,27 @@ function SegmentedControl(props: {
           title={segment.title}
           onClick={() => props.onChange(index)}
           style={{
-            width: props.width,
-            height: 22,
+            minWidth: props.width,
+            height: 24,
+            padding: "0 7px",
             borderRadius: 6,
             border: "none",
             background: props.value === index ? "#634FDB" : "transparent",
             color: "#fff",
-            fontSize: 9,
+            fontSize: 10,
             fontWeight: 500,
             cursor: "default",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            gap: 4,
+            whiteSpace: "nowrap",
           }}
         >
           {segment.icon ? (
-            <KiriIcon name={segment.icon} size={12} style={{ opacity: 0.75 }} />
-          ) : (
-            segment.label
-          )}
+            <KiriIcon name={segment.icon} size={12} style={{ opacity: 0.85 }} />
+          ) : null}
+          {segment.label}
         </button>
       ))}
     </div>
