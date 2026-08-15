@@ -44,18 +44,14 @@ export function ControlPanelWindow() {
     });
   };
 
-  // Recording hotkeys: Space toggles pause/resume, Esc stops. The panel
-  // window takes focus while recording so it receives key events.
+  // Recording hotkey: Esc stops. (Pause/resume was removed — not needed
+  // for now; Space is left alone so it does not fight the OS.)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const s = stateRef.current;
       if (!s) return;
-      if (e.key === " " || e.code === "Space") {
-        e.preventDefault();
-        if (s.isPaused) void api.resumeRecording().catch(() => {});
-        else if (s.isRecording) void api.pauseRecording().catch(() => {});
-      } else if (e.key === "Escape") {
-        if (s.isRecording || s.isPaused) void api.stopRecording().catch(() => {});
+      if (e.key === "Escape") {
+        if (s.isRecording) void api.stopRecording().catch(() => {});
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -124,37 +120,6 @@ export function ControlPanelWindow() {
       >
         {busy ? (
           <Spinner />
-        ) : state?.isPaused ? (
-          <>
-            <span
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: "50%",
-                background: "#FF80A8",
-              }}
-            />
-            <span style={{ ...textStyle, fontSize: 12.5, fontWeight: 600 }}>
-              {t("Paused")}
-            </span>
-            <span
-              style={{
-                ...textStyle,
-                fontSize: 12,
-                fontVariantNumeric: "tabular-nums",
-                opacity: 0.8,
-                minWidth: 58,
-                textAlign: "right",
-              }}
-            >
-              {state.elapsedLabel}
-            </span>
-            <ControlButton
-              icon="play.fill"
-              title={t("Resume Recording")}
-              onClick={() => void api.resumeRecording().catch(() => {})}
-            />
-          </>
         ) : state?.isRecording ? (
           <>
             <span
@@ -176,11 +141,6 @@ export function ControlPanelWindow() {
             >
               {state.elapsedLabel}
             </span>
-            <ControlButton
-              icon="pause.fill"
-              title={t("Pause Recording")}
-              onClick={() => void api.pauseRecording().catch(() => {})}
-            />
           </>
         ) : (
           <span style={{ ...textStyle, fontSize: 12, opacity: 0.8 }}>

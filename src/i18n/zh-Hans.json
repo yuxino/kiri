@@ -1,7 +1,5 @@
 {
   "Capture": "截图 / 录屏",
-  "Resume Recording": "继续录制",
-  "Pause Recording": "暂停录制",
   "Stop and Save  %@": "停止并保存  %@",
   "Find in Library": "在素材库中查找",
   "Finalizing Recording…": "正在处理录屏…",
@@ -65,7 +63,6 @@
   "Highlight clicks": "显示点击轨迹",
   "Start Recording": "开始录制",
   "Recording Controls": "录屏控制",
-  "Paused": "已暂停",
   "Preparing recording": "正在准备录制",
   "Stop and Save Recording": "停止并保存录屏",
   "Stop Recording": "停止录制",

@@ -1,7 +1,5 @@
 {
   "Capture": "Capture",
-  "Resume Recording": "Resume Recording",
-  "Pause Recording": "Pause Recording",
   "Stop and Save  %@": "Stop and Save  %@",
   "Find in Library": "Find in Library",
   "Finalizing Recording…": "Finalizing Recording…",
@@ -65,7 +63,6 @@
   "Highlight clicks": "Highlight clicks",
   "Start Recording": "Start Recording",
   "Recording Controls": "Recording Controls",
-  "Paused": "Paused",
   "Preparing recording": "Preparing recording",
   "Stop and Save Recording": "Stop and Save Recording",
   "Stop Recording": "Stop Recording",

@@ -21,7 +21,7 @@ Capture screenshots, annotate, recognize text, record regions, and keep everythi
 - **Screenshots** — window or region capture with precise selection.
 - **Annotations** — pen, shapes, arrows, text, and mosaic with undo/redo; existing annotations stay selectable and editable.
 - **OCR** — local text recognition (macOS Vision / Windows.Media.Ocr).
-- **Recording** — region recording with optional audio, pointer, and click highlights; a 3-2-1 countdown, a draggable control bar (space to pause, Esc to stop), and Retina-quality MP4 output.
+- **Recording** — region recording with optional audio, pointer, and click highlights; a 3-2-1 countdown, a draggable control bar (Esc to stop), and Retina-quality MP4 output.
 - **GIF** — convert short recordings into looping GIFs.
 - **Library** — date-grouped captures with favorites, tags, rename, search, copy, reveal, and a recoverable Trash. The sidebar and filter bar let you browse by type, favorites, and tags.
 
@@ -58,7 +58,7 @@ macOS packaging also requires Xcode Command Line Tools.
 - **V** — select / move annotations
 - **P / R / L / A / T / M** — pen / rectangle / line / arrow / text / mosaic
 - **Delete** — delete selected annotation
-- **Space** (while recording) — pause / resume; **Esc** — stop
+- **Esc** (while recording) — stop
 - **⌘F** (macOS) / **Ctrl+F** (Windows) — search the library
 - **⌘Z / ⇧⌘Z** (macOS) / **Ctrl+Z / Shift+Ctrl+Z** (Windows) — undo / redo
 
