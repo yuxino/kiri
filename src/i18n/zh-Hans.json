@@ -234,5 +234,13 @@
   "Gaussian blur": "高斯模糊",
   "View": "查看",
   "Esc to close": "按 Esc 关闭",
-  "Close · Esc": "关闭 · Esc"
+  "Close · Esc": "关闭 · Esc",
+  "Select Items": "选择",
+  "Delete (N)": "删除 ({n})",
+  "Restore (N)": "恢复 ({n})",
+  "Delete Permanently (N)": "永久删除 ({n})",
+  "Add to Favorites": "加入收藏",
+  "Remove from Favorites": "取消收藏",
+  "Selected {n}": "已选 {n} 项",
+  "Delete these captures permanently?": "要永久删除这些内容吗？"
 }

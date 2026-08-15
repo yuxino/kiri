@@ -234,5 +234,13 @@
   "Gaussian blur": "Gaussian blur",
   "View": "View",
   "Esc to close": "Esc to close",
-  "Close · Esc": "Close · Esc"
+  "Close · Esc": "Close · Esc",
+  "Select Items": "Select Items",
+  "Delete (N)": "Delete ({n})",
+  "Restore (N)": "Restore ({n})",
+  "Delete Permanently (N)": "Delete Permanently ({n})",
+  "Add to Favorites": "Add to Favorites",
+  "Remove from Favorites": "Remove from Favorites",
+  "Selected {n}": "Selected {n}",
+  "Delete these captures permanently?": "Delete these captures permanently?"
 }

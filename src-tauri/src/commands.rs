@@ -195,6 +195,69 @@ pub fn empty_trash(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Parses a batch of asset ids (frontend sends a JSON array of uuids).
+fn parse_ids(ids: &[String]) -> Result<Vec<uuid::Uuid>, String> {
+    ids.iter()
+        .map(|id| uuid::Uuid::parse_str(id).map_err(|e| e.to_string()))
+        .collect()
+}
+
+#[tauri::command]
+pub fn batch_move_to_trash(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let parsed = parse_ids(&ids)?;
+    {
+        let state = app.state::<AppState>();
+        let mut library = state.library.lock().unwrap();
+        for id in &parsed {
+            library.move_to_trash(id).map_err(|e| e.to_string())?;
+        }
+    }
+    emit_library_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn batch_restore(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let parsed = parse_ids(&ids)?;
+    {
+        let state = app.state::<AppState>();
+        let mut library = state.library.lock().unwrap();
+        for id in &parsed {
+            library.restore(id).map_err(|e| e.to_string())?;
+        }
+    }
+    emit_library_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn batch_permanently_delete(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let parsed = parse_ids(&ids)?;
+    {
+        let state = app.state::<AppState>();
+        let mut library = state.library.lock().unwrap();
+        for id in &parsed {
+            library.permanently_delete(id).map_err(|e| e.to_string())?;
+        }
+    }
+    emit_library_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn batch_set_favorite(app: AppHandle, ids: Vec<String>, favorite: bool) -> Result<(), String> {
+    let parsed = parse_ids(&ids)?;
+    {
+        let state = app.state::<AppState>();
+        let mut library = state.library.lock().unwrap();
+        for id in &parsed {
+            library.set_favorite(favorite, id).map_err(|e| e.to_string())?;
+        }
+    }
+    emit_library_changed(&app);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn copy_asset(app: AppHandle, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
@@ -1458,8 +1521,9 @@ pub fn show_confirm_dialog(
     title: String,
     message: String,
     confirmLabel: String,
+    ids: Option<Vec<String>>,
 ) {
-    crate::state::show_confirm_dialog(&app, kind, title, message, confirmLabel);
+    crate::state::show_confirm_dialog(&app, kind, title, message, confirmLabel, ids.unwrap_or_default());
 }
 
 #[tauri::command]

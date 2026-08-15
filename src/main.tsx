@@ -101,6 +101,7 @@ function App() {
           title={params.get("title") ?? ""}
           message={params.get("message") ?? ""}
           confirmLabel={params.get("confirmLabel") ?? ""}
+          ids={params.get("ids")?.split(",").filter(Boolean)}
         />
       );
     default:

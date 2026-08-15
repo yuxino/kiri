@@ -14,6 +14,7 @@ interface ConfirmProps {
   title: string;
   message: string;
   confirmLabel: string;
+  ids?: string[];
 }
 
 export function ConfirmWindow(props: ConfirmProps) {
@@ -36,6 +37,8 @@ export function ConfirmWindow(props: ConfirmProps) {
   const confirm = () => {
     if (props.kind === "emptyTrash") {
       void api.emptyTrash().catch(() => {});
+    } else if (props.kind === "batchDelete") {
+      void api.batchPermanentlyDelete(props.ids ?? []).catch(() => {});
     } else if (props.kind.startsWith("delete:")) {
       const id = props.kind.slice("delete:".length);
       void api.permanentlyDelete(id).catch(() => {});

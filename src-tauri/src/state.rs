@@ -227,6 +227,7 @@ pub fn show_confirm_dialog(
     title: String,
     message: String,
     confirm_label: String,
+    ids: Vec<String>,
 ) {
     let label = "confirm";
     let window = match app.get_webview_window(label) {
@@ -240,12 +241,17 @@ pub fn show_confirm_dialog(
                 }
                 _ => (1440.0, 900.0),
             };
+            let ids_query = if ids.is_empty() {
+                String::new()
+            } else {
+                format!("&ids={}", urlencode(&ids.join(",")))
+            };
             let builder = WebviewWindowBuilder::new(
                 app,
                 label,
                 WebviewUrl::App(
                     format!(
-                        "index.html?window=confirm&kind={}&title={}&message={}&confirmLabel={}",
+                        "index.html?window=confirm&kind={}&title={}&message={}&confirmLabel={}{ids_query}",
                         urlencode(&kind),
                         urlencode(&title),
                         urlencode(&message),
@@ -272,8 +278,13 @@ pub fn show_confirm_dialog(
     };
     // If a confirm window already exists (e.g. re-triggered), reload it with
     // the new content rather than stacking dialogs.
+    let ids_query = if ids.is_empty() {
+        String::new()
+    } else {
+        format!("&ids={}", urlencode(&ids.join(",")))
+    };
     let url = format!(
-        "index.html?window=confirm&kind={}&title={}&message={}&confirmLabel={}",
+        "index.html?window=confirm&kind={}&title={}&message={}&confirmLabel={}{ids_query}",
         urlencode(&kind),
         urlencode(&title),
         urlencode(&message),

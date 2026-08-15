@@ -62,7 +62,53 @@ export function LibraryWindow() {
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video" | "gif">("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
+  // Batch selection (ids currently selected). A non-empty selection turns
+  // the grid into selection mode with a batch action bar.
+  const [selection, setSelection] = useState<Set<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
+
+  const toggleSelect = (id: string) => {
+    setSelection((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelection(new Set());
+
+  // Stable ordered list of selected ids (Set preserves insertion order).
+  const selectionIds = [...selection];
+
+  const localNoticeSeq = useRef(0);
+  const showLocalNotice = (title: string) => {
+    const id = `local-${++localNoticeSeq.current}`;
+    setNotice({ id, title, symbol: "checkmark" });
+    setTimeout(() => setNotice((current) => (current?.id === id ? null : current)), 2000);
+  };
+
+  // Esc exits selection mode.
+  useEffect(() => {
+    if (selection.size === 0) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        clearSelection();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selection.size]);
+
+  // Changing section/query clears the selection so the bar never points at
+  // assets that are no longer visible.
+  useEffect(() => {
+    clearSelection();
+  }, [section, query, kindFilter, favoritesOnly, tagFilter]);
 
   useEffect(() => {
     api.getShortcutLabel().then(setShortcutLabel).catch(() => {});
@@ -415,33 +461,120 @@ export function LibraryWindow() {
           background: "color-mix(in srgb, var(--kiri-canvas) 92%, transparent)",
         }}
       >
-        <FilterBar
-          kind={kindFilter}
-          favoritesOnly={favoritesOnly}
-          tagFilter={tagFilter}
-          allTags={allTags}
-          onChangeKind={setKindFilter}
-          onToggleFavorites={() => setFavoritesOnly((v) => !v)}
-          onToggleTag={(tag) => setTagFilter((current) => (current === tag ? null : tag))}
-        />
-        <div style={{ flex: 1 }} />
-        {showingTrash && assets.length > 0 && (
-          <button
-            className="kiri-button kiri-button--destructive"
-            title={t("Empty Trash")}
-            onClick={() =>
-              void api.showConfirmDialog(
-                "emptyTrash",
-                t("Empty Trash?"),
-                t("All captures in Trash will be permanently deleted. This cannot be undone."),
-                t("Empty Trash"),
-              )
-            }
-            style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
-          >
-            <KiriIcon name="trash.fill" size={12} />
-            {t("Empty Trash")}
-          </button>
+        {selection.size > 0 ? (
+          <>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--kiri-label)", whiteSpace: "nowrap" }}>
+              {t("Selected {n}").replace("{n}", String(selection.size))}
+            </span>
+            <div style={{ width: 1, height: 20, background: "var(--kiri-surface-border)" }} />
+            {showingTrash ? (
+              <>
+                <button
+                  className="kiri-button"
+                  onClick={() => {
+                    void api
+                      .batchRestore([...selection])
+                      .then(() => showLocalNotice(t("Restored to Library")))
+                      .catch(() => {});
+                    clearSelection();
+                  }}
+                  style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
+                >
+                  <KiriIcon name="arrow.uturn.backward" size={12} />
+                  {t("Restore (N)").replace("(N)", `(${selection.size})`)}
+                </button>
+                <button
+                  className="kiri-button kiri-button--destructive"
+                  onClick={() =>
+                    void api.showConfirmDialog(
+                      "batchDelete",
+                      t("Delete these captures permanently?"),
+                      t("This cannot be undone."),
+                      t("Delete Permanently (N)").replace("(N)", `(${selection.size})`),
+                      [...selection],
+                    )
+                  }
+                  style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
+                >
+                  <KiriIcon name="trash.fill" size={12} />
+                  {t("Delete Permanently (N)").replace("(N)", `(${selection.size})`)}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  className="kiri-button kiri-button--destructive"
+                  onClick={() => {
+                    void api
+                      .batchMoveToTrash([...selection])
+                      .then(() => showLocalNotice(t("Moved to Trash")))
+                      .catch(() => {});
+                    clearSelection();
+                  }}
+                  style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
+                >
+                  <KiriIcon name="trash" size={12} />
+                  {t("Delete (N)").replace("(N)", `(${selection.size})`)}
+                </button>
+                <button
+                  className="kiri-button"
+                  onClick={() => {
+                    const allFav = selectionIds.every((id) => assets.find((a) => a.id === id)?.isFavorite);
+                    void api
+                      .batchSetFavorite([...selection], !allFav)
+                      .then(() => showLocalNotice(allFav ? t("Remove from Favorites") : t("Add to Favorites")))
+                      .catch(() => {});
+                    clearSelection();
+                  }}
+                  style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
+                >
+                  <KiriIcon name="star" size={12} />
+                  {selectionIds.every((id) => assets.find((a) => a.id === id)?.isFavorite)
+                    ? t("Remove from Favorites")
+                    : t("Add to Favorites")}
+                </button>
+              </>
+            )}
+            <div style={{ flex: 1 }} />
+            <button
+              className="kiri-button"
+              onClick={clearSelection}
+              style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
+            >
+              {t("Cancel")}
+            </button>
+          </>
+        ) : (
+          <>
+            <FilterBar
+              kind={kindFilter}
+              favoritesOnly={favoritesOnly}
+              tagFilter={tagFilter}
+              allTags={allTags}
+              onChangeKind={setKindFilter}
+              onToggleFavorites={() => setFavoritesOnly((v) => !v)}
+              onToggleTag={(tag) => setTagFilter((current) => (current === tag ? null : tag))}
+            />
+            <div style={{ flex: 1 }} />
+            {showingTrash && assets.length > 0 && (
+              <button
+                className="kiri-button kiri-button--destructive"
+                title={t("Empty Trash")}
+                onClick={() =>
+                  void api.showConfirmDialog(
+                    "emptyTrash",
+                    t("Empty Trash?"),
+                    t("All captures in Trash will be permanently deleted. This cannot be undone."),
+                    t("Empty Trash"),
+                  )
+                }
+                style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
+              >
+                <KiriIcon name="trash.fill" size={12} />
+                {t("Empty Trash")}
+              </button>
+            )}
+          </>
         )}
       </div>
 
@@ -523,6 +656,8 @@ export function LibraryWindow() {
                     menuOpen={menuFor === asset.id}
                     onMenu={(x, y) => openMenu(asset.id, x, y)}
                     menu={itemMenu(asset)}
+                    selected={selection.has(asset.id)}
+                    onToggleSelect={() => toggleSelect(asset.id)}
                     onDoubleClick={() => void api.openAsset(asset.id).catch(() => {})}
                     onDragStart={(e) => {
                       // Only start a file drag from the thumbnail — dragging
@@ -672,8 +807,11 @@ function AssetCard(props: {
   menu: React.ReactNode;
   onDoubleClick(): void;
   onDragStart(e: React.DragEvent): void;
+  selected: boolean;
+  onToggleSelect(): void;
 }) {
-  const { asset, menuOpen, onMenu, menu, onDoubleClick, onDragStart } = props;
+  const { asset, menuOpen, onMenu, menu, onDoubleClick, onDragStart, selected, onToggleSelect } =
+    props;
   const [hovered, setHovered] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(asset.title ?? "");
@@ -711,15 +849,51 @@ function AssetCard(props: {
       style={{
         position: "relative",
         background: "var(--kiri-card)",
-        border: `1px solid ${hovered ? "#7D69F5" : "var(--kiri-surface-border)"}`,
+        border: `1px solid ${selected ? "#7D69F5" : hovered ? "rgba(125,105,245,0.55)" : "var(--kiri-surface-border)"}`,
         borderRadius: 18,
         padding: 12,
-        transform: hovered ? "translateY(-1px)" : "none",
-        boxShadow: hovered ? "0 8px 18px rgba(0,0,0,0.08)" : "0 3px 8px rgba(0,0,0,0.045)",
+        transform: hovered && !selected ? "translateY(-1px)" : "none",
+        boxShadow: selected
+          ? "0 0 0 2px rgba(125,105,245,0.35), 0 8px 18px rgba(0,0,0,0.08)"
+          : hovered
+            ? "0 8px 18px rgba(0,0,0,0.08)"
+            : "0 3px 8px rgba(0,0,0,0.045)",
         transition: "transform 0.14s ease-out, box-shadow 0.14s ease-out, border-color 0.14s ease-out",
         cursor: "default",
       }}
     >
+      {/* Selection check — visible on hover, pinned when selected. */}
+      <button
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleSelect();
+        }}
+        title={selected ? t("Cancel") : t("Select")}
+        style={{
+          position: "absolute",
+          top: 8,
+          left: 8,
+          width: 24,
+          height: 24,
+          borderRadius: "50%",
+          border: `1.5px solid ${selected ? "#7D69F5" : "rgba(255,255,255,0.9)"}`,
+          background: selected
+            ? "#7D69F5"
+            : "rgba(0,0,0,0.35)",
+          color: "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "default",
+          opacity: selected || hovered ? 1 : 0,
+          transition: "opacity 0.14s ease-out, background 0.14s ease-out",
+          zIndex: 2,
+          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+        }}
+      >
+        {selected ? <KiriIcon name="checkmark" size={13} /> : null}
+      </button>
       <div
         style={{
           height: 184,
