@@ -26,6 +26,7 @@ import {
   type Tool,
 } from "./model";
 import { renderAll, textFont, type RenderContext } from "./render";
+import { t } from "../i18n";
 
 export interface AnnotationCanvasHandle {
   undo(): void;
@@ -799,7 +800,7 @@ function TextEditor(props: {
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d")!;
     ctx.font = font;
-    const text = editing.text || "Type something…";
+    const text = editing.text || t("Type something…");
     // Width follows the longest line (measureText on the whole string with
     // newlines yields a wrong width).
     const lines = text.split("\n");
@@ -827,7 +828,7 @@ function TextEditor(props: {
     <textarea
       ref={ref}
       value={editing.text}
-      placeholder="Type something…"
+      placeholder={t("Type something…")}
       spellCheck={false}
       autoCorrect="off"
       autoCapitalize="off"
