@@ -84,7 +84,7 @@ export function ViewerWindow(props: { id: string }) {
           border: "1px solid rgba(255,255,255,0.16)",
           background: "rgba(0,0,0,0.55)",
           color: "#fff",
-          cursor: "default",
+          cursor: "pointer",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

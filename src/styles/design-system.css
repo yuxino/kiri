@@ -143,12 +143,17 @@ body,
   background: var(--kiri-brand-gradient);
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 4px 10px rgba(125, 105, 245, 0.24);
-  cursor: default;
+  cursor: pointer;
   transition:
     transform var(--kiri-motion-hover) ease-out,
     box-shadow var(--kiri-motion-hover) ease-out,
     filter var(--kiri-motion-hover) ease-out,
     opacity var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-primary-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 6px 14px rgba(125, 105, 245, 0.32);
 }
 
 .kiri-primary-button:active {
@@ -183,7 +188,7 @@ textarea {
   gap: 6px;
   font: 600 12px var(--kiri-font-ui);
   border-radius: var(--kiri-radius-control);
-  cursor: default;
+  cursor: pointer;
   transition:
     transform var(--kiri-motion-hover) ease-out,
     box-shadow var(--kiri-motion-hover) ease-out,
@@ -193,6 +198,10 @@ textarea {
     opacity var(--kiri-motion-hover) ease-out;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.kiri-button:hover:not(:disabled) {
+  filter: brightness(1.05);
 }
 
 .kiri-button:active {
@@ -259,7 +268,7 @@ textarea {
   border: 1px solid transparent;
   background: transparent;
   color: var(--kiri-secondary-label);
-  cursor: default;
+  cursor: pointer;
   transition:
     background var(--kiri-motion-hover) ease-out,
     color var(--kiri-motion-hover) ease-out,
@@ -318,7 +327,7 @@ textarea {
   background: transparent;
   color: rgba(255, 255, 255, 0.66);
   font: 600 12.5px var(--kiri-font-ui);
-  cursor: default;
+  cursor: pointer;
   transition:
     background 0.14s ease-out,
     border-color 0.14s ease-out,

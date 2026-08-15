@@ -49,7 +49,7 @@ export function PinWindow(props: { id: string }) {
           background: "rgba(0,0,0,0.58)",
           color: "#fff",
           fontSize: 12,
-          cursor: "default",
+          cursor: "pointer",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

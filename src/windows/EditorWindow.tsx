@@ -252,7 +252,7 @@ export function EditorWindow(props: { id: string }) {
             color: "#fff",
             fontSize: 12,
             fontWeight: 500,
-            cursor: "default",
+            cursor: "pointer",
           }}
           onClick={() => void complete(false)}
         >
@@ -312,7 +312,7 @@ function EditorToolButton(props: {
         color: "#fff",
         fontSize: 12,
         fontWeight: 600,
-        cursor: "default",
+        cursor: props.disabled ? "default" : "pointer",
         opacity: props.disabled ? 0.35 : 1,
         display: "flex",
         alignItems: "center",
@@ -337,7 +337,7 @@ function EditorSwatch(props: { color: string; selected: boolean; onClick(): void
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        cursor: "default",
+        cursor: "pointer",
         position: "relative",
       }}
     >
@@ -378,7 +378,7 @@ function EditorSegments(props: {
             background: props.value === index ? "#634FDB" : "transparent",
             color: "#fff",
             fontSize: 10,
-            cursor: "default",
+            cursor: "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",

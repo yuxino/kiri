@@ -995,7 +995,7 @@ const iconButtonStyle: React.CSSProperties = {
   background: "transparent",
   color: "#fff",
   fontSize: 11,
-  cursor: "default",
+  cursor: "pointer",
 };
 
 function RecordOptionsPanel(props: {
@@ -1117,7 +1117,7 @@ function ToggleRow(props: {
         alignItems: "center",
         padding: "5px 2px",
         opacity: props.disabled ? 0.4 : 1,
-        cursor: "default",
+        cursor: props.disabled ? "default" : "pointer",
       }}
     >
       <span style={{ font: "400 12.5px var(--kiri-font-ui)" }}>
@@ -1431,7 +1431,7 @@ function ToolButton(props: {
         color: props.active ? "#AB94FF" : "#fff",
         fontSize: 12,
         fontWeight: 600,
-        cursor: "default",
+        cursor: props.disabled ? "default" : "pointer",
         opacity: props.disabled ? 0.35 : 1,
         display: "flex",
         alignItems: "center",
@@ -1440,12 +1440,18 @@ function ToolButton(props: {
         transition: "transform 0.14s ease-out, background 0.14s ease-out",
       }}
       onMouseEnter={(e) => {
-        if (!props.primary && !props.active && !props.disabled) {
+        if (props.primary && !props.disabled) {
+          e.currentTarget.style.filter = "brightness(1.12)";
+          e.currentTarget.style.boxShadow = "0 5px 12px rgba(99, 79, 219, 0.38)";
+        } else if (!props.active && !props.disabled) {
           e.currentTarget.style.background = "rgba(125,105,245,0.10)";
         }
       }}
       onMouseLeave={(e) => {
-        if (!props.primary && !props.active) {
+        if (props.primary) {
+          e.currentTarget.style.filter = "none";
+          e.currentTarget.style.boxShadow = "0 3px 7px rgba(99, 79, 219, 0.25)";
+        } else if (!props.active) {
           e.currentTarget.style.background = "transparent";
         }
       }}
@@ -1481,7 +1487,7 @@ function ColorSwatch(props: { color: string; selected: boolean; onClick(): void 
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        cursor: "default",
+        cursor: "pointer",
         position: "relative",
       }}
     >
@@ -1540,7 +1546,7 @@ function SegmentedControl(props: {
             color: "#fff",
             fontSize: 10,
             fontWeight: 500,
-            cursor: "default",
+            cursor: "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -1570,7 +1576,7 @@ function MenuItem(props: { label: string; icon?: IconName; onClick(): void }) {
         padding: "6px 10px",
         borderRadius: 8,
         font: "400 12.5px var(--kiri-font-ui)",
-        cursor: "default",
+        cursor: "pointer",
         display: "flex",
         alignItems: "center",
         gap: 8,

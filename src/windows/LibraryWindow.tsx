@@ -425,7 +425,7 @@ export function LibraryWindow() {
                 border: "none",
                 background: "transparent",
                 color: "var(--kiri-secondary-label)",
-                cursor: "default",
+                cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -766,7 +766,7 @@ export function LibraryWindow() {
               border: "none",
               background: "transparent",
               color: "var(--kiri-secondary-label)",
-              cursor: "default",
+              cursor: "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -885,7 +885,7 @@ function AssetCard(props: {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          cursor: "default",
+          cursor: "pointer",
           opacity: selected || hovered ? 1 : 0,
           transition: "opacity 0.14s ease-out, background 0.14s ease-out",
           zIndex: 2,
@@ -1025,7 +1025,7 @@ function AssetCard(props: {
             height: 26,
             borderRadius: 8,
             fontSize: 13,
-            cursor: "default",
+            cursor: "pointer",
           }}
         >
           <KiriIcon name="eye" size={14} />
@@ -1054,7 +1054,7 @@ function AssetCard(props: {
             height: 26,
             borderRadius: 8,
             fontSize: 13,
-            cursor: "default",
+            cursor: "pointer",
           }}
         >
           <KiriIcon name="doc.on.doc" size={14} />
@@ -1080,7 +1080,7 @@ function AssetCard(props: {
             borderRadius: 8,
             color: asset.isFavorite ? "#FFD129" : "var(--kiri-disabled-label)",
             fontSize: 13,
-            cursor: "default",
+            cursor: "pointer",
           }}
           onMouseEnter={(e) => {
             if (!asset.isFavorite) e.currentTarget.style.color = "#FFD129";
@@ -1112,7 +1112,7 @@ function AssetCard(props: {
             height: 26,
             borderRadius: 8,
             fontSize: 13,
-            cursor: "default",
+            cursor: "pointer",
           }}
         >
           <KiriIcon name="ellipsis.circle" size={14} />
@@ -1165,7 +1165,7 @@ function AssetCard(props: {
                   border: "none",
                   background: "transparent",
                   color: "inherit",
-                  cursor: "default",
+                  cursor: "pointer",
                   padding: 0,
                   display: "flex",
                   fontSize: 9,
@@ -1225,7 +1225,7 @@ function MenuRow(props: { label: string; icon?: IconName; onClick(): void; destr
         borderRadius: 9,
         color: props.destructive ? "#FA476E" : "var(--kiri-label)",
         font: "400 12.5px var(--kiri-font-ui)",
-        cursor: "default",
+        cursor: "pointer",
         display: "flex",
         alignItems: "center",
         gap: 10,
@@ -1312,7 +1312,7 @@ function FilterBar(props: {
               border: "none",
               background: kind === entry.value ? "#634FDB" : "transparent",
               color: kind === entry.value ? "#fff" : "var(--kiri-secondary-label)",
-              cursor: "default",
+              cursor: "pointer",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -1351,7 +1351,7 @@ function FilterBar(props: {
             : "var(--kiri-surface-border)",
           background: favoritesOnly ? "rgba(255,209,41,0.12)" : "transparent",
           color: favoritesOnly ? "#FFD129" : "var(--kiri-secondary-label)",
-          cursor: "default",
+          cursor: "pointer",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -1415,7 +1415,7 @@ function FilterBar(props: {
                     : "var(--kiri-secondary-label)",
                   fontSize: 10.5,
                   fontWeight: 600,
-                  cursor: "default",
+                  cursor: "pointer",
                   whiteSpace: "nowrap",
                   display: "inline-flex",
                   alignItems: "center",
@@ -1461,7 +1461,7 @@ function SegmentedPicker(props: {
             background: props.value === index ? "#634FDB" : "transparent",
             color: props.value === index ? "#fff" : "var(--kiri-secondary-label)",
             font: "600 12px var(--kiri-font-ui)",
-            cursor: "default",
+            cursor: "pointer",
             transition: "background 0.14s ease-out, color 0.14s ease-out",
             boxShadow: props.value === index ? "0 1px 4px rgba(99,79,219,0.3)" : "none",
           }}
