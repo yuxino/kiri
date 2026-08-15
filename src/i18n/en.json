@@ -242,5 +242,11 @@
   "Add to Favorites": "Add to Favorites",
   "Remove from Favorites": "Remove from Favorites",
   "Selected {n}": "Selected {n}",
-  "Delete these captures permanently?": "Delete these captures permanently?"
+  "Delete these captures permanently?": "Delete these captures permanently?",
+  "The MP4 could not be finalized.": "The MP4 could not be finalized.",
+  "The paused recording could not be merged.": "The paused recording could not be merged.",
+  "could not locate the unpacked ffmpeg binary": "could not locate the unpacked ffmpeg binary",
+  "screenshot failed": "screenshot failed",
+  "shareable content failed": "shareable content failed",
+  "unknown action": "unknown action"
 }

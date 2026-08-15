@@ -737,11 +737,17 @@ fn confirm_capture_inner(
 #[tauri::command]
 pub fn save_file_dialog(app: AppHandle, default_name: String) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
+    // Localize the filter label from the persisted language preference.
+    let filter_label = match crate::state::load_language(&app).as_str() {
+        "zh-Hans" => "PNG 图片",
+        "ja" => "PNG 画像",
+        _ => "PNG image",
+    };
     let path = app
         .dialog()
         .file()
         .set_file_name(default_name)
-        .add_filter("PNG image", &["png"])
+        .add_filter(filter_label, &["png"])
         .blocking_save_file();
     Ok(path
         .and_then(|p| p.into_path().ok())

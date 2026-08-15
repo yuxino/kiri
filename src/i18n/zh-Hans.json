@@ -242,5 +242,11 @@
   "Add to Favorites": "加入收藏",
   "Remove from Favorites": "取消收藏",
   "Selected {n}": "已选 {n} 项",
-  "Delete these captures permanently?": "要永久删除这些内容吗？"
+  "Delete these captures permanently?": "要永久删除这些内容吗？",
+  "The MP4 could not be finalized.": "无法完成 MP4 文件。",
+  "The paused recording could not be merged.": "无法合并暂停后的录屏。",
+  "could not locate the unpacked ffmpeg binary": "找不到解压后的 ffmpeg 程序",
+  "screenshot failed": "截图失败",
+  "shareable content failed": "获取可捕获内容失败",
+  "unknown action": "未知操作"
 }

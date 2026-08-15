@@ -242,5 +242,11 @@
   "Add to Favorites": "お気に入りに追加",
   "Remove from Favorites": "お気に入りから削除",
   "Selected {n}": "{n} 件選択中",
-  "Delete these captures permanently?": "これらのキャプチャを完全に削除しますか？"
+  "Delete these captures permanently?": "これらのキャプチャを完全に削除しますか？",
+  "The MP4 could not be finalized.": "MP4 を完成できませんでした。",
+  "The paused recording could not be merged.": "一時停止した録画を結合できませんでした。",
+  "could not locate the unpacked ffmpeg binary": "解凍した ffmpeg バイナリが見つかりません",
+  "screenshot failed": "スクリーンショットに失敗しました",
+  "shareable content failed": "共有コンテンツの取得に失敗しました",
+  "unknown action": "不明な操作です"
 }
