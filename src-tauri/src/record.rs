@@ -318,11 +318,16 @@ impl SegmentEncoder {
 
         let spawn_writer = |rx: mpsc::Receiver<Vec<u8>>, mut writer: os_pipe::PipeWriter| {
             std::thread::spawn(move || {
+                let mut total = 0usize;
+                let mut chunks = 0usize;
                 for frame in rx {
                     if writer.write_all(&frame).is_err() {
                         break;
                     }
+                    total += frame.len();
+                    chunks += 1;
                 }
+                log::info!("record: pipe writer flushed {total} bytes in {chunks} chunks");
                 let _ = writer.flush();
                 // writer dropped → EOF for ffmpeg
             })

@@ -234,5 +234,8 @@
   "Pixel": "像素",
   "Blur": "模糊",
   "Pixel mosaic": "像素马赛克",
-  "Gaussian blur": "高斯模糊"
+  "Gaussian blur": "高斯模糊",
+  "View": "查看",
+  "Esc to close": "按 Esc 关闭",
+  "Close · Esc": "关闭 · Esc"
 }

@@ -92,6 +92,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_assets,
+            commands::get_asset,
             commands::set_favorite,
             commands::move_to_trash,
             commands::restore_asset,

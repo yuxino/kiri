@@ -234,5 +234,8 @@
   "Pixel": "Pixel",
   "Blur": "Blur",
   "Pixel mosaic": "Pixel mosaic",
-  "Gaussian blur": "Gaussian blur"
+  "Gaussian blur": "Gaussian blur",
+  "View": "View",
+  "Esc to close": "Esc to close",
+  "Close · Esc": "Close · Esc"
 }

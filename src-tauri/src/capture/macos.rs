@@ -836,6 +836,13 @@ objc2::define_class!(
                     })
                 });
                 if let Some(bytes) = copy_audio_buffer(buffer) {
+                    log::info!(
+                        "MacRecordingSession: audio {} bytes, format ch={} float={} non_interleaved={}",
+                        bytes.len(),
+                        format.channels,
+                        format.is_float,
+                        format.is_non_interleaved,
+                    );
                     let payload = if format.is_float && format.is_non_interleaved {
                         deinterleave_f32(&bytes, format.channels, *format)
                     } else {

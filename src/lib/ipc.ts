@@ -83,6 +83,7 @@ export interface ErrorDto {
 export const api = {
   listAssets: (query: string, showingTrash: boolean) =>
     invoke<AssetDto[]>("list_assets", { query, showingTrash }),
+  getAsset: (id: string) => invoke<AssetDto>("get_asset", { id }),
   setFavorite: (id: string, favorite: boolean) =>
     invoke<void>("set_favorite", { id, favorite }),
   renameAsset: (id: string, title: string) =>
@@ -159,4 +160,8 @@ export function frozenImageUrl(): string {
 
 export function pinImageUrl(id: string): string {
   return `kiri://pin/${id}.png`;
+}
+
+export function mediaUrl(id: string): string {
+  return `kiri://media/${id}`;
 }

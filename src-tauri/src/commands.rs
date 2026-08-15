@@ -7,7 +7,6 @@ use std::sync::mpsc;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_opener::OpenerExt;
 
 use crate::capture::current as capture_backend;
 use crate::core::asset::{CaptureAsset, CaptureKind};
@@ -224,11 +223,50 @@ pub fn open_asset(app: AppHandle, id: String) -> Result<(), String> {
         .asset_by_id(&parsed)
         .cloned()
         .ok_or_else(|| "The capture could not be found.".to_string())?;
-    let path = state.asset_file_url(&asset);
+    let (width, height) = (asset.pixel_width, asset.pixel_height);
     drop(library);
-    app.opener()
-        .open_path(path.display().to_string(), None::<&str>)
-        .map_err(|e| e.to_string())
+
+    // In-app viewer window (image preview / video player), Esc to close.
+    let label = format!("viewer-{}", asset.id.to_string().to_lowercase());
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    // Size the window to the asset's aspect ratio (clamped), so an image
+    // opens close to its natural shape without covering the screen.
+    let aspect = if width > 0 && height > 0 {
+        (width as f64 / height as f64).clamp(0.4, 2.6)
+    } else {
+        1.5
+    };
+    let win_h = 640.0f64;
+    let win_w = (win_h * aspect).clamp(360.0, 1200.0);
+    let builder = WebviewWindowBuilder::new(
+        &app,
+        label,
+        WebviewUrl::App(format!("index.html?window=viewer&id={}", asset.id).into()),
+    )
+    .title("kiri")
+    .inner_size(win_w, win_h)
+    .resizable(true)
+    .shadow(true)
+    .decorations(true);
+    let _ = builder.build();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_asset(app: AppHandle, id: String) -> Result<AssetDto, String> {
+    let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    let state = app.state::<AppState>();
+    let library = state.library.lock().unwrap();
+    let asset = library
+        .asset_by_id(&parsed)
+        .cloned()
+        .ok_or_else(|| "The capture could not be found.".to_string())?;
+    let root = state.library_root.clone();
+    Ok(asset_dto(&asset, &root))
 }
 
 #[tauri::command]

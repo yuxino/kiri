@@ -100,7 +100,88 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
         return not_found();
     }
 
+    // Full media files for the in-app viewer: kiri://media/<id>
+    // Serves the raw asset bytes with a media Content-Type so <img>/<video>
+    // can play it. HTTP Range is honored so video seeking works.
+    if host == "media" {
+        let rest = &path.trim_end_matches('/');
+        if let Ok(id) = uuid::Uuid::parse_str(rest) {
+            let file_path = {
+                let library = state.library.lock().unwrap();
+                match library.asset_by_id(&id).cloned() {
+                    Some(asset) => state.library_root.join("Assets").join(&asset.filename),
+                    None => return not_found(),
+                }
+            };
+            let bytes = match std::fs::read(&file_path) {
+                Ok(b) => b,
+                Err(_) => return not_found(),
+            };
+            let content_type = if file_path.extension().map(|e| e == "png").unwrap_or(false) {
+                "image/png"
+            } else if file_path.extension().map(|e| e == "gif").unwrap_or(false) {
+                "image/gif"
+            } else {
+                "video/mp4"
+            };
+            return respond_media(request, bytes, content_type);
+        }
+        return not_found();
+    }
+
     not_found()
+}
+
+/// Serves media bytes, honoring a single `Range: bytes=start-end` header
+/// (enough for <video> seeking). Returns 206 Partial Content when ranged.
+fn respond_media(request: &Request<Vec<u8>>, bytes: Vec<u8>, content_type: &str) -> Response<Vec<u8>> {
+    let total = bytes.len() as u64;
+    let range = request
+        .headers()
+        .get("range")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("bytes="))
+        .and_then(|v| {
+            let mut parts = v.split('-');
+            let start = parts.next()?.parse::<u64>().ok();
+            let end = parts.next().and_then(|e| e.parse::<u64>().ok());
+            match (start, end) {
+                (Some(s), e) => Some((s, e.unwrap_or(total.saturating_sub(1)))),
+                (None, Some(e)) => Some((total.saturating_sub(e), total.saturating_sub(1))),
+                _ => None,
+            }
+        });
+
+    if let Some((start, end)) = range {
+        if start >= total {
+            return Response::builder()
+                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                .header("Content-Range", format!("bytes */{total}"))
+                .body(Vec::new())
+                .unwrap();
+        }
+        let end = end.min(total - 1);
+        let slice = bytes[start as usize..=end as usize].to_vec();
+        return Response::builder()
+            .status(StatusCode::PARTIAL_CONTENT)
+            .header("Content-Type", content_type)
+            .header("Content-Length", slice.len().to_string())
+            .header("Content-Range", format!("bytes {start}-{end}/{total}"))
+            .header("Accept-Ranges", "bytes")
+            .header("Access-Control-Allow-Origin", "*")
+            .body(slice)
+            .unwrap();
+    }
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", content_type)
+        .header("Content-Length", total.to_string())
+        .header("Accept-Ranges", "bytes")
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Cache-Control", "no-store")
+        .body(bytes)
+        .unwrap()
 }
 
 fn respond(bytes: Vec<u8>, content_type: &str) -> Response<Vec<u8>> {

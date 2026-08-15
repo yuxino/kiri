@@ -9,6 +9,7 @@ import { ControlPanelWindow } from "./windows/ControlPanelWindow";
 import { RippleWindow } from "./windows/RippleWindow";
 import { PinWindow } from "./windows/PinWindow";
 import { EditorWindow } from "./windows/EditorWindow";
+import { ViewerWindow } from "./windows/ViewerWindow";
 
 // Resolve the UI language from the real system locale (the WebView's
 // navigator.language is fixed to en in Tauri, so it cannot be trusted).
@@ -82,6 +83,8 @@ function App() {
       return <PinWindow id={params.get("id") ?? ""} />;
     case "editor":
       return <EditorWindow id={params.get("id") ?? ""} />;
+    case "viewer":
+      return <ViewerWindow id={params.get("id") ?? ""} />;
     default:
       return <LibraryWindow />;
   }

@@ -5,6 +5,7 @@
 import React from "react";
 import {
   ArrowUpRight,
+  Eye,
   Camera,
   Check,
   Copy,
@@ -75,7 +76,8 @@ export type IconName =
   | "folder" // show in finder
   | "photo.on.rectangle" // open in library
   | "play.rectangle" // open video
-  | "tag"; // library: tag
+  | "tag" // library: tag
+  | "eye"; // library: view
 
 const ICONS: Record<IconName, React.ComponentType<Record<string, unknown>>> = {
   cursorarrow: MousePointer2,
@@ -114,6 +116,7 @@ const ICONS: Record<IconName, React.ComponentType<Record<string, unknown>>> = {
   "photo.on.rectangle": Image,
   "play.rectangle": PlaySquare,
   tag: Tag,
+  eye: Eye,
 };
 
 export function KiriIcon(props: {

@@ -874,6 +874,30 @@ function AssetCard(props: {
         )}
         <button
           className="kiri-icon-button"
+          title={t("View")}
+          draggable={false}
+          onDragStart={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            void api.openAsset(asset.id).catch(() => {});
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            void api.openAsset(asset.id).catch(() => {});
+          }}
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: 8,
+            fontSize: 13,
+            cursor: "default",
+          }}
+        >
+          <KiriIcon name="eye" size={14} />
+        </button>
+        <button
+          className="kiri-icon-button"
           title={t("Copy")}
           draggable={false}
           onDragStart={(e) => e.preventDefault()}
