@@ -291,3 +291,97 @@ textarea {
 .kiri-card-menu {
   transform-origin: top left;
 }
+
+/* --- Capture overlay: mode selector (Screenshot / Record / OCR) --- */
+.kiri-mode-select {
+  position: absolute;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  align-items: center;
+}
+
+.kiri-mode-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 88px;
+  height: 64px;
+  padding: 8px 10px;
+  border-radius: 11px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.66);
+  font: 600 12px var(--kiri-font-ui);
+  cursor: default;
+  transition:
+    background 0.14s ease-out,
+    border-color 0.14s ease-out,
+    color 0.14s ease-out,
+    transform 0.08s ease-out;
+}
+
+.kiri-mode-btn:hover:not([data-active]) {
+  background: rgba(125, 105, 245, 0.1);
+}
+
+.kiri-mode-btn:active {
+  transform: scale(0.97);
+}
+
+.kiri-mode-btn[data-active] {
+  border: 1px solid rgba(139, 123, 246, 0.55);
+  background: linear-gradient(180deg, rgba(125, 105, 245, 0.34), rgba(125, 105, 245, 0.16));
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(99, 79, 219, 0.28);
+}
+
+/* --- Custom range slider (annotation thickness/size) --- */
+.kiri-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 76px;
+  height: 18px;
+  background: transparent;
+  cursor: default;
+}
+
+.kiri-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.kiri-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  margin-top: -4.5px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 2px solid #7d69f5;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  transition: transform 0.1s ease-out;
+}
+
+.kiri-range::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+}
+
+.kiri-range::-webkit-slider-thumb:active {
+  transform: scale(0.95);
+}
+
+/* Toolbar value readout */
+.kiri-toolbar-value {
+  min-width: 26px;
+  text-align: right;
+  font: 500 9.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(255, 255, 255, 0.6);
+}

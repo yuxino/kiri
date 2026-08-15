@@ -225,6 +225,21 @@ export function OverlayWindow() {
         cancel();
         return;
       }
+      // Mode switching with 1/2/3 (spec §2.4: change capture mode anytime).
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && phaseRef.current !== "annotating") {
+        if (e.key === "1") {
+          switchModeRef.current("screenshot");
+          return;
+        }
+        if (e.key === "2") {
+          switchModeRef.current("record");
+          return;
+        }
+        if (e.key === "3") {
+          switchModeRef.current("ocr");
+          return;
+        }
+      }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -459,6 +474,8 @@ export function OverlayWindow() {
     },
     [],
   );
+  const switchModeRef = useRef(switchMode);
+  switchModeRef.current = switchMode;
 
   // --- toolbar placement (spec §7.6) ---
   // Defaults to 10pt below the selection, centered; flips above when the
@@ -669,35 +686,28 @@ export function OverlayWindow() {
       {phase !== "ocr-result" && (
         <>
           <div
-            className="kiri-hud"
+            className="kiri-hud kiri-mode-select"
             onPointerDown={(e) => e.stopPropagation()}
-            style={{
-              position: "absolute",
-              left: "50%",
-              bottom: 88,
-              transform: "translateX(-50%)",
-              display: "flex",
-              gap: 4,
-              padding: 6,
-              alignItems: "center",
-            }}
           >
             <ModeButton
               active={mode === "screenshot"}
               icon="camera.viewfinder"
               label={t("Screenshot")}
+              kbd="1"
               onClick={() => switchMode("screenshot")}
             />
             <ModeButton
               active={mode === "record"}
               icon="record.circle"
               label={t("Record")}
+              kbd="2"
               onClick={() => switchMode("record")}
             />
             <ModeButton
               active={mode === "ocr"}
               icon="text.viewfinder"
               label={t("OCR")}
+              kbd="3"
               onClick={() => switchMode("ocr")}
             />
           </div>
@@ -831,35 +841,33 @@ function ModeButton(props: {
   active: boolean;
   icon: IconName;
   label: string;
+  kbd?: string;
   onClick(): void;
 }) {
   return (
     <button
       onClick={props.onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        height: 32,
-        minWidth: 92,
-        padding: "0 14px",
-        borderRadius: 10,
-        border: props.active ? "1px solid rgba(255,255,255,0.22)" : "1px solid transparent",
-        background: props.active ? "#634FDB" : "transparent",
-        color: props.active ? "#fff" : "rgba(255,255,255,0.72)",
-        font: "600 12px " + "var(--kiri-font-ui)",
-        cursor: "default",
-        boxShadow: props.active ? "0 3px 7px rgba(99, 79, 219, 0.24)" : "none",
-      }}
-      onMouseEnter={(e) => {
-        if (!props.active) e.currentTarget.style.background = "rgba(125,105,245,0.10)";
-      }}
-      onMouseLeave={(e) => {
-        if (!props.active) e.currentTarget.style.background = "transparent";
-      }}
+      className="kiri-mode-btn"
+      data-active={props.active || undefined}
     >
-      <KiriIcon name={props.icon} size={13} />
-      {props.label}
+      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <KiriIcon name={props.icon} size={16} />
+        {props.label}
+      </span>
+      {props.kbd && (
+        <span
+          style={{
+            fontSize: 9.5,
+            fontWeight: 600,
+            color: props.active ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.30)",
+            background: "rgba(255,255,255,0.07)",
+            borderRadius: 5,
+            padding: "1px 6px",
+          }}
+        >
+          {props.kbd}
+        </span>
+      )}
     </button>
   );
 }
@@ -1044,15 +1052,8 @@ function RecordOptionsPanel(props: {
   };
   // Panel geometry: 336 wide; prefer below the selection, flip above when
   // the bottom would overflow, and as a last resort pin inside the screen so
-  // a huge selection can never push the panel off-screen (spec: the popover
-  // must stay reachable). x centered on the selection, clamped with an 8pt
-  // margin.
-  // Panel geometry (336 wide): the Swift popover anchors to the bottom
-  // mode selector (centered, 88pt from the bottom) and flips upward, so the
-  // panel lands in the lower-middle of the screen. We mirror that: center
-  // horizontally, pin vertically to the lower third (clear of the mode
-  // selector at bottom:88), and always stay fully on screen — a huge
-  // selection can never push it off-screen.
+  // a huge selection can never push the panel off-screen. x centered on the
+  // selection, clamped with an 8pt margin.
   const PANEL_W = 336;
   const PANEL_H = 400;
   const margin = 8;
@@ -1286,6 +1287,8 @@ function Toolbar(props: ToolbarProps) {
   );
   const top = Math.min(Math.max(8, anchor.y), Math.max(8, bounds.y + bounds.height - toolbarHeight - 8));
 
+  const sep = <div style={{ width: 1, height: 26, background: "rgba(255,255,255,0.14)", margin: "0 3px", flexShrink: 0 }} />;
+
   return (
     <>
       <div
@@ -1298,13 +1301,13 @@ function Toolbar(props: ToolbarProps) {
           top,
           display: "flex",
           alignItems: "center",
-          gap: 4,
-          padding: "6px 7px",
-          boxShadow: "0 5px 12px rgba(0,0,0,0.24)",
+          gap: 3,
+          padding: "6px 8px",
+          boxShadow: "0 5px 14px rgba(0,0,0,0.28)",
         }}
       >
         <ToolButton icon="xmark" title={t("Cancel capture · Esc")} onClick={onCancel} />
-        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.16)" }} />
+        {sep}
         {TOOLS.map(({ tool: t2, icon, title }) => (
           <ToolButton
             key={t2}
@@ -1314,7 +1317,7 @@ function Toolbar(props: ToolbarProps) {
             onClick={() => setTool(t2)}
           />
         ))}
-        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.16)" }} />
+        {sep}
         {/* Context row */}
         {tool === "text" ? (
           <SegmentedControl
@@ -1353,6 +1356,7 @@ function Toolbar(props: ToolbarProps) {
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <input
               type="range"
+              className="kiri-range"
               min={slider.min}
               max={slider.max}
               value={slider.value}
@@ -1371,20 +1375,11 @@ function Toolbar(props: ToolbarProps) {
               onPointerLeave={() => {
                 if (tool === "text") onTextFontEnd?.();
               }}
-              style={{ width: 76, accentColor: ACCENT }}
             />
-            <span
-              style={{
-                width: 28,
-                textAlign: "right",
-                font: "500 9px ui-monospace, SFMono-Regular, Menlo, monospace",
-              }}
-            >
-              {slider.value}
-            </span>
+            <span className="kiri-toolbar-value">{slider.value}</span>
           </div>
         )}
-        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.16)" }} />
+        {sep}
         {COLOR_PRESETS.map((preset) => (
           <ColorSwatch
             key={preset}
@@ -1393,7 +1388,7 @@ function Toolbar(props: ToolbarProps) {
             onClick={() => setAppearance({ ...appearance, colorPreset: preset })}
           />
         ))}
-        <div style={{ width: 1, height: 24, background: "rgba(255,255,255,0.16)" }} />
+        {sep}
         <ToolButton icon="arrow.uturn.backward" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={onUndo} />
         <ToolButton icon="arrow.uturn.forward" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={onRedo} />
         <ToolButton icon="checkmark" title={t("Done — Copy to clipboard · Return")} primary onClick={onDone} />
