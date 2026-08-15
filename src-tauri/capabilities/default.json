@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capabilities for the main windows",
-  "windows": ["library", "overlay", "overlay-*", "editor", "editor-*", "countdown", "control-panel", "ripple", "pin-*", "viewer-*"],
+  "windows": ["library", "overlay", "overlay-*", "editor", "editor-*", "countdown", "control-panel", "ripple", "pin-*", "viewer-*", "toast"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

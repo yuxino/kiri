@@ -583,6 +583,7 @@ export function LibraryWindow() {
             fontWeight: 500,
           }}
         >
+          {notice.symbol && <KiriIcon name={notice.symbol as never} size={13} />}
           {t(notice.title)}
         </div>
       )}
@@ -609,11 +610,21 @@ export function LibraryWindow() {
         >
           {/* Error message: pure i18n keys translate; dynamically-composed
               errors (key + suffix) fall back to the raw text via t(). */}
-          <span style={{ color: "var(--kiri-label)", fontSize: 12.5 }}>{t(error.message)}</span>
+          <span
+            style={{
+              color: "var(--kiri-label)",
+              fontSize: 12.5,
+              flex: "1 1 auto",
+              minWidth: 0,
+              lineHeight: 1.35,
+            }}
+          >
+            {t(error.message)}
+          </span>
           {error.recovery && (
             <button
               className="kiri-primary-button"
-              style={{ minHeight: 30 }}
+              style={{ minHeight: 30, flexShrink: 0, whiteSpace: "nowrap" }}
               onClick={() => {
                 if (error.recovery === "quitKiri") void api.quitApp().catch(() => {});
                 else void api.openSettings(error.recovery!).catch(() => {});
@@ -632,6 +643,7 @@ export function LibraryWindow() {
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              flexShrink: 0,
             }}
             onClick={() => setError(null)}
           >

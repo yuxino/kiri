@@ -50,15 +50,32 @@ pub enum PermissionState {
     SettingsRequired,
 }
 
-/// Mirrors `ScreenCapturePermissionGate` (preflight → request).
+// Caches the `CGRequestScreenCaptureAccess` outcome so the system prompt is
+// shown at most once per launch (mirrors `ScreenCapturePermissionGate`:
+// "已有缓存 → 直接返回缓存值,避免重复弹权限框"). Without this, every
+// `start_capture` re-invoked the request API and macOS re-prompts even
+// though the user already granted (or already declined) access.
+static PERMISSION_CACHE: std::sync::Mutex<Option<PermissionState>> = std::sync::Mutex::new(None);
+
+/// Mirrors `ScreenCapturePermissionGate` (preflight → request, cached).
 pub fn check_capture_permission() -> PermissionState {
+    // Authorized wins unconditionally: if the user just granted access in
+    // System Settings, preflight flips to true and the stale cache is
+    // cleared so later calls report Authorized instead of the old denial.
     if unsafe { CGPreflightScreenCaptureAccess() } {
+        *PERMISSION_CACHE.lock().unwrap() = None;
         return PermissionState::Authorized;
     }
-    if unsafe { CGRequestScreenCaptureAccess() } {
-        return PermissionState::RestartRequired;
+    if let Some(cached) = *PERMISSION_CACHE.lock().unwrap() {
+        return cached;
     }
-    PermissionState::SettingsRequired
+    let state = if unsafe { CGRequestScreenCaptureAccess() } {
+        PermissionState::RestartRequired
+    } else {
+        PermissionState::SettingsRequired
+    };
+    *PERMISSION_CACHE.lock().unwrap() = Some(state);
+    state
 }
 
 // ---------------------------------------------------------------------------

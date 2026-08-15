@@ -8,6 +8,10 @@ import {
   Eye,
   Camera,
   Check,
+  CircleCheck,
+  CircleDot,
+  CirclePause,
+  CirclePlay,
   Copy,
   Crop,
   Download,
@@ -51,6 +55,12 @@ export type IconName =
   | "arrow.uturn.backward" // Undo
   | "arrow.uturn.forward" // Redo
   | "checkmark" // Done
+  | "checkmark.circle.fill" // notice: copied/saved
+  | "record.circle.fill" // notice: recording started
+  | "video.fill" // notice: recording saved
+  | "trash.slash" // notice: trash emptied
+  | "pause.circle.fill" // notice: recording paused
+  | "play.circle.fill" // notice: recording resumed
   | "ellipsis.circle" // More
   | "xmark" // Cancel
   | "camera.viewfinder" // Screenshot mode
@@ -90,6 +100,12 @@ const ICONS: Record<IconName, React.ComponentType<Record<string, unknown>>> = {
   "arrow.uturn.backward": Undo2,
   "arrow.uturn.forward": Redo2,
   checkmark: Check,
+  "checkmark.circle.fill": CircleCheck,
+  "record.circle.fill": CircleDot,
+  "video.fill": Film,
+  "trash.slash": Trash2,
+  "pause.circle.fill": CirclePause,
+  "play.circle.fill": CirclePlay,
   "ellipsis.circle": MoreHorizontal,
   xmark: X,
   "camera.viewfinder": Camera,

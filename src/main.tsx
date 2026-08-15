@@ -10,6 +10,7 @@ import { RippleWindow } from "./windows/RippleWindow";
 import { PinWindow } from "./windows/PinWindow";
 import { EditorWindow } from "./windows/EditorWindow";
 import { ViewerWindow } from "./windows/ViewerWindow";
+import { ToastWindow } from "./windows/ToastWindow";
 
 // Resolve the UI language from the real system locale (the WebView's
 // navigator.language is fixed to en in Tauri, so it cannot be trusted).
@@ -85,6 +86,13 @@ function App() {
       return <EditorWindow id={params.get("id") ?? ""} />;
     case "viewer":
       return <ViewerWindow id={params.get("id") ?? ""} />;
+    case "toast":
+      return (
+        <ToastWindow
+          title={params.get("title") ?? undefined}
+          symbol={params.get("symbol") ?? undefined}
+        />
+      );
     default:
       return <LibraryWindow />;
   }

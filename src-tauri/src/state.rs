@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::capture::{CapturedDisplay, PlatformRecorder};
 use crate::core::asset::CaptureAsset;
@@ -198,7 +198,73 @@ pub fn emit_notice(app: &AppHandle, title: String, symbol: String) {
         title,
         symbol,
     };
-    let _ = app.emit("notice", notice);
+    let _ = app.emit("notice", notice.clone());
+    show_completion_toast(app, &notice);
+}
+
+/// Shows the notice as a borderless always-on-top toast in the bottom-right
+/// of the primary display. Screenshots and recordings return focus to the
+/// source application, so the library-window notice alone is easy to miss;
+/// the toast keeps completion feedback visible. It reuses one resident
+/// "toast" window and hides itself after 2s (see ToastWindow.tsx).
+fn show_completion_toast(app: &AppHandle, notice: &NoticeDto) {
+    let label = "toast";
+    let window = match app.get_webview_window(label) {
+        Some(window) => window,
+        None => {
+            let monitor: tauri::PhysicalSize<u32> = match app.primary_monitor() {
+                Ok(Some(monitor)) => *monitor.size(),
+                _ => tauri::PhysicalSize::new(1440, 900),
+            };
+            let builder = WebviewWindowBuilder::new(
+                app,
+                label,
+                WebviewUrl::App(
+                    format!(
+                        "index.html?window=toast&title={}&symbol={}",
+                        urlencode(&notice.title),
+                        urlencode(&notice.symbol),
+                    )
+                    .into(),
+                ),
+            )
+            .title("kiri")
+            .decorations(false)
+            .transparent(true)
+            .shadow(false)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .resizable(false)
+            .focused(false)
+            .visible(false)
+            .inner_size(360.0, 60.0)
+            .position(monitor.width as f64 - 372.0, monitor.height as f64 - 72.0);
+            let Ok(window) = builder.build() else {
+                return;
+            };
+            window
+        }
+    };
+    // Content is delivered via event so the resident window can update in
+    // place (initial render reads the URL params above).
+    let _ = window.emit("toast", notice.clone());
+    let _ = window.show();
+}
+
+/// Minimal percent-encoding for query values (notice titles/symbols are
+/// ASCII words and dots; spaces and a few characters need escaping).
+fn urlencode(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' => {
+                out.push(byte as char)
+            }
+            b' ' => out.push_str("%20"),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 pub fn emit_error(app: &AppHandle, message: String, recovery: Option<RecoveryAction>) {
@@ -264,5 +330,18 @@ pub fn save_recording_options(app: &AppHandle, options: &RecordingOptions) {
     let path = recording_options_path(app);
     if let Ok(data) = serde_json::to_vec_pretty(&options.normalized()) {
         let _ = std::fs::write(path, data);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::urlencode;
+
+    #[test]
+    fn urlencode_escapes_spaces_and_keeps_words() {
+        assert_eq!(urlencode("Copied to Clipboard"), "Copied%20to%20Clipboard");
+        assert_eq!(urlencode("checkmark.circle.fill"), "checkmark.circle.fill");
+        assert_eq!(urlencode("Recording Saved"), "Recording%20Saved");
+        assert_eq!(urlencode("a/b c"), "a%2Fb%20c");
     }
 }
