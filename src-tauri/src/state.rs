@@ -212,9 +212,17 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto) {
     let window = match app.get_webview_window(label) {
         Some(window) => window,
         None => {
-            let monitor: tauri::PhysicalSize<u32> = match app.primary_monitor() {
-                Ok(Some(monitor)) => *monitor.size(),
-                _ => tauri::PhysicalSize::new(1440, 900),
+            // Position in LOGICAL coordinates. monitor.size() returns
+            // physical pixels (e.g. 3024×1964 on a Retina display) but
+            // WebviewWindowBuilder::position takes logical points — feeding
+            // the physical value put the toast far off-screen (2652 > 1512
+            // logical width) so it was never visible.
+            let (win_x, win_y) = match app.primary_monitor() {
+                Ok(Some(monitor)) => {
+                    let size = *monitor.size();
+                    toast_corner_position(size, monitor.scale_factor())
+                }
+                _ => (1068.0, 828.0), // 1440×900 fallback, bottom-right
             };
             let builder = WebviewWindowBuilder::new(
                 app,
@@ -238,7 +246,7 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto) {
             .focused(false)
             .visible(false)
             .inner_size(360.0, 60.0)
-            .position(monitor.width as f64 - 372.0, monitor.height as f64 - 72.0);
+            .position(win_x, win_y);
             let Ok(window) = builder.build() else {
                 return;
             };
@@ -249,6 +257,16 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto) {
     // place (initial render reads the URL params above).
     let _ = window.emit("toast", notice.clone());
     let _ = window.show();
+}
+
+/// Bottom-right toast position in LOGICAL points for a monitor of the given
+/// PHYSICAL pixel size and scale factor. (WebviewWindowBuilder::position
+/// takes logical points; feeding physical pixels put the toast off-screen
+/// on Retina displays.)
+fn toast_corner_position(size: tauri::PhysicalSize<u32>, scale: f64) -> (f64, f64) {
+    let logical_w = size.width as f64 / scale;
+    let logical_h = size.height as f64 / scale;
+    (logical_w - 372.0, logical_h - 72.0)
 }
 
 /// Minimal percent-encoding for query values (notice titles/symbols are
@@ -414,7 +432,7 @@ pub fn save_recording_options(app: &AppHandle, options: &RecordingOptions) {
 
 #[cfg(test)]
 mod tests {
-    use super::{mark_error_seen, urlencode};
+    use super::{mark_error_seen, toast_corner_position, urlencode};
 
     #[test]
     fn urlencode_escapes_spaces_and_keeps_words() {
@@ -422,6 +440,22 @@ mod tests {
         assert_eq!(urlencode("checkmark.circle.fill"), "checkmark.circle.fill");
         assert_eq!(urlencode("Recording Saved"), "Recording%20Saved");
         assert_eq!(urlencode("a/b c"), "a%2Fb%20c");
+    }
+
+    #[test]
+    fn toast_position_uses_logical_points() {
+        // Retina 3024×1964 @2x: physical pixels must be divided by scale so
+        // the toast lands inside the 1512×982 logical screen (regression:
+        // using 3024−372 = 2652 put it far off-screen).
+        let (x, y) = toast_corner_position(tauri::PhysicalSize::new(3024, 1964), 2.0);
+        assert_eq!(x, 3024.0 / 2.0 - 372.0);
+        assert_eq!(y, 1964.0 / 2.0 - 72.0);
+        assert!(x < 1512.0 && x > 0.0, "x={x} must be on-screen");
+        assert!(y < 982.0 && y > 0.0, "y={y} must be on-screen");
+
+        // Non-retina 1920×1080 @1x stays on-screen too.
+        let (x, y) = toast_corner_position(tauri::PhysicalSize::new(1920, 1080), 1.0);
+        assert!(x < 1920.0 && x > 0.0 && y < 1080.0 && y > 0.0);
     }
 
     #[test]
