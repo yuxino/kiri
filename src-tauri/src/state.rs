@@ -202,11 +202,25 @@ pub fn emit_notice(app: &AppHandle, title: String, symbol: String) {
     show_completion_toast(app, &notice);
 }
 
-/// Shows the notice as a borderless always-on-top toast in the bottom-right
+/// Library-scoped notice: shown only inside the library window, never as a
+/// global toast. Used for in-library feedback (moved to trash, restored,
+/// deleted, emptied) where the user is already looking at the library and a
+/// floating toast at the screen corner would be noise.
+pub fn emit_notice_local(app: &AppHandle, title: String, symbol: String) {
+    let notice = NoticeDto {
+        id: uuid::Uuid::new_v4().to_string(),
+        title,
+        symbol,
+    };
+    let _ = app.emit("notice", notice);
+}
+
+/// Shows the notice as a borderless always-on-top toast near the TOP-CENTER
 /// of the primary display. Screenshots and recordings return focus to the
 /// source application, so the library-window notice alone is easy to miss;
-/// the toast keeps completion feedback visible. It reuses one resident
-/// "toast" window and hides itself after 2s (see ToastWindow.tsx).
+/// the toast keeps completion feedback visible without covering the Dock or
+/// the taskbar. It reuses one resident "toast" window and hides itself after
+/// 2s (see ToastWindow.tsx).
 fn show_completion_toast(app: &AppHandle, notice: &NoticeDto) {
     let label = "toast";
     let window = match app.get_webview_window(label) {
@@ -220,9 +234,9 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto) {
             let (win_x, win_y) = match app.primary_monitor() {
                 Ok(Some(monitor)) => {
                     let size = *monitor.size();
-                    toast_corner_position(size, monitor.scale_factor())
+                    toast_position(size, monitor.scale_factor())
                 }
-                _ => (1068.0, 828.0), // 1440×900 fallback, bottom-right
+                _ => (540.0, 24.0), // 1440×900 fallback, top-center
             };
             let builder = WebviewWindowBuilder::new(
                 app,
@@ -259,14 +273,14 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto) {
     let _ = window.show();
 }
 
-/// Bottom-right toast position in LOGICAL points for a monitor of the given
+/// Top-center toast position in LOGICAL points for a monitor of the given
 /// PHYSICAL pixel size and scale factor. (WebviewWindowBuilder::position
 /// takes logical points; feeding physical pixels put the toast off-screen
 /// on Retina displays.)
-fn toast_corner_position(size: tauri::PhysicalSize<u32>, scale: f64) -> (f64, f64) {
+fn toast_position(size: tauri::PhysicalSize<u32>, scale: f64) -> (f64, f64) {
     let logical_w = size.width as f64 / scale;
-    let logical_h = size.height as f64 / scale;
-    (logical_w - 372.0, logical_h - 72.0)
+    let x = ((logical_w - 360.0) / 2.0).max(0.0);
+    (x, 24.0)
 }
 
 /// Minimal percent-encoding for query values (notice titles/symbols are
@@ -432,7 +446,7 @@ pub fn save_recording_options(app: &AppHandle, options: &RecordingOptions) {
 
 #[cfg(test)]
 mod tests {
-    use super::{mark_error_seen, toast_corner_position, urlencode};
+    use super::{mark_error_seen, toast_position, urlencode};
 
     #[test]
     fn urlencode_escapes_spaces_and_keeps_words() {
@@ -443,19 +457,23 @@ mod tests {
     }
 
     #[test]
-    fn toast_position_uses_logical_points() {
+    fn toast_position_is_top_centered_on_screen() {
         // Retina 3024×1964 @2x: physical pixels must be divided by scale so
         // the toast lands inside the 1512×982 logical screen (regression:
         // using 3024−372 = 2652 put it far off-screen).
-        let (x, y) = toast_corner_position(tauri::PhysicalSize::new(3024, 1964), 2.0);
-        assert_eq!(x, 3024.0 / 2.0 - 372.0);
-        assert_eq!(y, 1964.0 / 2.0 - 72.0);
-        assert!(x < 1512.0 && x > 0.0, "x={x} must be on-screen");
-        assert!(y < 982.0 && y > 0.0, "y={y} must be on-screen");
+        let (x, y) = toast_position(tauri::PhysicalSize::new(3024, 1964), 2.0);
+        assert_eq!(x, (3024.0 / 2.0 - 360.0) / 2.0);
+        assert_eq!(y, 24.0);
+        assert!(x < 1512.0 && x >= 0.0, "x={x} must be on-screen");
+        assert!(y < 982.0 && y >= 0.0, "y={y} must be on-screen");
 
         // Non-retina 1920×1080 @1x stays on-screen too.
-        let (x, y) = toast_corner_position(tauri::PhysicalSize::new(1920, 1080), 1.0);
-        assert!(x < 1920.0 && x > 0.0 && y < 1080.0 && y > 0.0);
+        let (x, y) = toast_position(tauri::PhysicalSize::new(1920, 1080), 1.0);
+        assert!(x < 1920.0 && x >= 0.0 && y < 1080.0 && y >= 0.0);
+
+        // Small screens must not go negative.
+        let (x, _) = toast_position(tauri::PhysicalSize::new(320, 240), 1.0);
+        assert!(x >= 0.0);
     }
 
     #[test]

@@ -1,6 +1,6 @@
-// ToastWindow — a transient global completion toast shown in the bottom-right
-// corner of the primary display. Unlike the library-window notice, this
-// stays visible even when focus returns to the source application after a
+// ToastWindow — a transient global completion toast shown near the top-center
+// of the primary display. Unlike the library-window notice, this stays
+// visible even when focus returns to the source application after a
 // screenshot or recording, so "Recording Saved" / "Copied to Clipboard"
 // feedback is never missed. Borderless, always-on-top, ignores mouse input,
 // and hides itself after 2 seconds (AppNotice behavior).
@@ -50,25 +50,35 @@ export function ToastWindow(props: { title?: string; symbol?: string }) {
     <div
       style={{
         position: "fixed",
-        top: 0,
-        right: 0,
+        inset: 0,
         display: "flex",
         alignItems: "center",
-        gap: 8,
-        background: "var(--kiri-elevated)",
-        border: "1px solid var(--kiri-surface-border)",
-        borderRadius: 13,
-        padding: "10px 16px",
-        boxShadow: "0 8px 18px rgba(0,0,0,0.18)",
-        color: "var(--kiri-label)",
-        fontSize: 13,
-        fontWeight: 500,
-        maxWidth: 320,
-        boxSizing: "border-box",
+        justifyContent: "center",
+        background: "transparent",
+        pointerEvents: "none",
       }}
     >
-      {notice.symbol && <KiriIcon name={notice.symbol as never} size={14} />}
-      <span>{t(notice.title)}</span>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          background: "var(--kiri-elevated)",
+          border: "1px solid var(--kiri-surface-border)",
+          borderRadius: 13,
+          padding: "10px 16px",
+          boxShadow: "0 8px 18px rgba(0,0,0,0.18)",
+          color: "var(--kiri-label)",
+          fontSize: 13,
+          fontWeight: 500,
+          maxWidth: 320,
+          boxSizing: "border-box",
+          pointerEvents: "none",
+        }}
+      >
+        {notice.symbol && <KiriIcon name={notice.symbol as never} size={14} />}
+        <span>{t(notice.title)}</span>
+      </div>
     </div>
   );
 }

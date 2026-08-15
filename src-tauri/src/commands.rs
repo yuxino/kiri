@@ -15,7 +15,8 @@ use crate::core::policy::RecordingOptions;
 use crate::core::shortcut::KIRI_CAPTURE;
 use crate::platform;
 use crate::state::{
-    emit_error, emit_library_changed, emit_notice, emit_recording_state, ActiveRecording, AppState,
+    emit_error, emit_library_changed, emit_notice, emit_notice_local, emit_recording_state, ActiveRecording,
+    AppState,
     CaptureSession, RecordingConfiguration, RecordingFlow,
 };
 #[cfg(target_os = "macos")]
@@ -161,7 +162,7 @@ pub fn move_to_trash(app: AppHandle, id: String) -> Result<(), String> {
     with_asset_mutation(&app, &id, |library, parsed| {
         library.move_to_trash(parsed).map_err(|e| e.to_string())
     })?;
-    emit_notice(&app, "Moved to Trash".into(), "trash".into());
+    emit_notice_local(&app, "Moved to Trash".into(), "trash".into());
     Ok(())
 }
 
@@ -170,7 +171,7 @@ pub fn restore_asset(app: AppHandle, id: String) -> Result<(), String> {
     with_asset_mutation(&app, &id, |library, parsed| {
         library.restore(parsed).map_err(|e| e.to_string())
     })?;
-    emit_notice(&app, "Restored to Library".into(), "arrow.uturn.backward".into());
+    emit_notice_local(&app, "Restored to Library".into(), "arrow.uturn.backward".into());
     Ok(())
 }
 
@@ -179,7 +180,7 @@ pub fn permanently_delete(app: AppHandle, id: String) -> Result<(), String> {
     with_asset_mutation(&app, &id, |library, parsed| {
         library.permanently_delete(parsed).map_err(|e| e.to_string())
     })?;
-    emit_notice(&app, "Deleted Permanently".into(), "trash.fill".into());
+    emit_notice_local(&app, "Deleted Permanently".into(), "trash.fill".into());
     Ok(())
 }
 
@@ -190,7 +191,7 @@ pub fn empty_trash(app: AppHandle) -> Result<(), String> {
     library.empty_trash().map_err(|e| e.to_string())?;
     drop(library);
     emit_library_changed(&app);
-    emit_notice(&app, "Trash Emptied".into(), "trash.slash".into());
+    emit_notice_local(&app, "Trash Emptied".into(), "trash.slash".into());
     Ok(())
 }
 
@@ -210,7 +211,7 @@ pub fn copy_asset(app: AppHandle, id: String) -> Result<(), String> {
     drop(library);
     let data = std::fs::read(&path).map_err(|e| e.to_string())?;
     platform::write_image_to_clipboard(&data).map_err(|e| e.to_string())?;
-    emit_notice(&app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
+    emit_notice_local(&app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
     Ok(())
 }
 
