@@ -254,9 +254,8 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open_library, &capture, &quit])?;
 
-    // Menu-bar icon: the Lucide Camera glyph (matches the app's icon set),
-    // rendered as a black template image so macOS tints it automatically
-    // for light/dark menu bars.
+    // Menu-bar icon: the Lucide Zap glyph, rendered as a black template
+    // image so macOS tints it automatically for light/dark menu bars.
     let icon = {
         let bytes = include_bytes!("../icons/tray-viewfinder.png");
         tauri::image::Image::from_bytes(bytes).ok()
