@@ -66,6 +66,12 @@ export function LibraryWindow() {
   // the grid into selection mode with a batch action bar.
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const searchRef = useRef<HTMLInputElement>(null);
+  // Drag-to-select (rubber band): pointer origin + current corner in the
+  // scroll container's coordinates; null when not band-selecting.
+  const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const gridScrollRef = useRef<HTMLDivElement>(null);
+  // Card id → DOM element, registered while rendering, used for hit tests.
+  const cardElsRef = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const toggleSelect = (id: string) => {
     setSelection((prev) => {
@@ -90,6 +96,78 @@ export function LibraryWindow() {
     setNotice({ id, title, symbol: "checkmark" });
     setTimeout(() => setNotice((current) => (current?.id === id ? null : current)), 2000);
   };
+
+  // --- Rubber-band (drag) selection -------------------------------------
+  const bandStart = useRef<{ x: number; y: number } | null>(null);
+
+  const bandPointerDown = (e: React.PointerEvent) => {
+    // Only start a band from the empty grid area (not on a card/button).
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest("[data-card],button,input,a,[data-menu]")) return;
+    if (e.button !== 0) return;
+    const container = gridScrollRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    bandStart.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    setBand({ x0: bandStart.current.x, y0: bandStart.current.y, x1: bandStart.current.x, y1: bandStart.current.y });
+  };
+
+  const bandPointerMove = (e: React.PointerEvent) => {
+    if (!bandStart.current || !gridScrollRef.current) return;
+    const rect = gridScrollRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    setBand((prev) => (prev ? { ...prev, x1: x, y1: y } : prev));
+  };
+
+  const bandPointerUp = (e: React.PointerEvent) => {
+    if (!bandStart.current) return;
+    const container = gridScrollRef.current;
+    const start = bandStart.current;
+    bandStart.current = null;
+    if (!container) {
+      setBand(null);
+      return;
+    }
+    const rect = container.getBoundingClientRect();
+    const x1 = e.clientX - rect.left;
+    const y1 = e.clientY - rect.top;
+    const minX = Math.min(start.x, x1);
+    const maxX = Math.max(start.x, x1);
+    const minY = Math.min(start.y, y1);
+    const maxY = Math.max(start.y, y1);
+    // Tiny drags (e.g. an accidental click) don't select anything.
+    const dragged = Math.hypot(x1 - start.x, y1 - start.y) >= 5;
+    if (dragged) {
+      const next = new Set<string>();
+      cardElsRef.current.forEach((el, id) => {
+        const r = el.getBoundingClientRect();
+        const cr = container.getBoundingClientRect();
+        const cardLeft = r.left - cr.left;
+        const cardTop = r.top - cr.top;
+        const cardRight = cardLeft + r.width;
+        const cardBottom = cardTop + r.height;
+        const intersects =
+          cardLeft <= maxX && cardRight >= minX && cardTop <= maxY && cardBottom >= minY;
+        if (intersects) next.add(id);
+      });
+      setSelection((prev) => {
+        const merged = new Set(prev);
+        next.forEach((id) => merged.add(id));
+        return merged;
+      });
+    }
+    setBand(null);
+  };
+
+  const bandRect = useMemo(() => {
+    if (!band) return null;
+    const x = Math.min(band.x0, band.x1);
+    const y = Math.min(band.y0, band.y1);
+    const w = Math.abs(band.x1 - band.x0);
+    const h = Math.abs(band.y1 - band.y0);
+    return { x, y, w, h };
+  }, [band]);
 
   // Esc exits selection mode.
   useEffect(() => {
@@ -463,124 +541,76 @@ export function LibraryWindow() {
           background: "color-mix(in srgb, var(--kiri-canvas) 92%, transparent)",
         }}
       >
-        {selection.size > 0 ? (
-          <>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--kiri-label)", whiteSpace: "nowrap" }}>
-              {t("Selected {n}").replace("{n}", String(selection.size))}
-            </span>
-            <div style={{ width: 1, height: 20, background: "var(--kiri-surface-border)" }} />
-            {showingTrash ? (
-              <>
-                <button
-                  className="kiri-button"
-                  onClick={() => {
-                    void api
-                      .batchRestore([...selection])
-                      .then(() => showLocalNotice(t("Restored to Library")))
-                      .catch(() => {});
-                    clearSelection();
-                  }}
-                  style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
-                >
-                  <KiriIcon name="arrow.uturn.backward" size={12} />
-                  {t("Restore (N)").replace("(N)", `(${selection.size})`)}
-                </button>
-                <button
-                  className="kiri-button kiri-button--destructive"
-                  onClick={() =>
-                    void api.showConfirmDialog(
-                      "batchDelete",
-                      t("Delete these captures permanently?"),
-                      t("This cannot be undone."),
-                      t("Delete Permanently (N)").replace("(N)", `(${selection.size})`),
-                      [...selection],
-                    )
-                  }
-                  style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
-                >
-                  <KiriIcon name="trash.fill" size={12} />
-                  {t("Delete Permanently (N)").replace("(N)", `(${selection.size})`)}
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className="kiri-button kiri-button--destructive"
-                  onClick={() => {
-                    void api
-                      .batchMoveToTrash([...selection])
-                      .then(() => showLocalNotice(t("Moved to Trash")))
-                      .catch(() => {});
-                    clearSelection();
-                  }}
-                  style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
-                >
-                  <KiriIcon name="trash" size={12} />
-                  {t("Delete (N)").replace("(N)", `(${selection.size})`)}
-                </button>
-                <button
-                  className="kiri-button"
-                  onClick={() => {
-                    const allFav = selectionIds.every((id) => assets.find((a) => a.id === id)?.isFavorite);
-                    void api
-                      .batchSetFavorite([...selection], !allFav)
-                      .then(() => showLocalNotice(allFav ? t("Remove from Favorites") : t("Add to Favorites")))
-                      .catch(() => {});
-                    clearSelection();
-                  }}
-                  style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
-                >
-                  <KiriIcon name="star" size={12} />
-                  {selectionIds.every((id) => assets.find((a) => a.id === id)?.isFavorite)
-                    ? t("Remove from Favorites")
-                    : t("Add to Favorites")}
-                </button>
-              </>
-            )}
-            <div style={{ flex: 1 }} />
-            <button
-              className="kiri-button"
-              onClick={clearSelection}
-              style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
-            >
-              {t("Cancel")}
-            </button>
-          </>
-        ) : (
-          <>
-            <FilterBar
-              kind={kindFilter}
-              favoritesOnly={favoritesOnly}
-              tagFilter={tagFilter}
-              allTags={allTags}
-              onChangeKind={setKindFilter}
-              onToggleFavorites={() => setFavoritesOnly((v) => !v)}
-              onToggleTag={(tag) => setTagFilter((current) => (current === tag ? null : tag))}
-            />
-            <div style={{ flex: 1 }} />
-            {showingTrash && assets.length > 0 && (
-              <button
-                className="kiri-button kiri-button--destructive"
-                title={t("Empty Trash")}
-                onClick={() =>
-                  void api.showConfirmDialog(
-                    "emptyTrash",
-                    t("Empty Trash?"),
-                    t("All captures in Trash will be permanently deleted. This cannot be undone."),
-                    t("Empty Trash"),
-                  )
-                }
-                style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
-              >
-                <KiriIcon name="trash.fill" size={12} />
-                {t("Empty Trash")}
-              </button>
-            )}
-          </>
+        <FilterBar
+          kind={kindFilter}
+          favoritesOnly={favoritesOnly}
+          tagFilter={tagFilter}
+          allTags={allTags}
+          onChangeKind={setKindFilter}
+          onToggleFavorites={() => setFavoritesOnly((v) => !v)}
+          onToggleTag={(tag) => setTagFilter((current) => (current === tag ? null : tag))}
+        />
+        <div style={{ flex: 1 }} />
+        {showingTrash && assets.length > 0 && (
+          <button
+            className="kiri-button kiri-button--destructive"
+            title={t("Empty Trash")}
+            onClick={() =>
+              void api.showConfirmDialog(
+                "emptyTrash",
+                t("Empty Trash?"),
+                t("All captures in Trash will be permanently deleted. This cannot be undone."),
+                t("Empty Trash"),
+              )
+            }
+            style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
+          >
+            <KiriIcon name="trash.fill" size={12} />
+            {t("Empty Trash")}
+          </button>
         )}
       </div>
 
       {/* Grid */}
+      {selection.size > 0 && (
+        <BatchActionBar
+          count={selection.size}
+          showingTrash={showingTrash}
+          allFavorites={selectionIds.length > 0 && selectionIds.every((id) => assets.find((a) => a.id === id)?.isFavorite)}
+          onRestore={() => {
+            void api
+              .batchRestore([...selection])
+              .then(() => showLocalNotice(t("Restored to Library")))
+              .catch(() => {});
+            clearSelection();
+          }}
+          onDelete={() =>
+            void api.showConfirmDialog(
+              "batchDelete",
+              t("Delete these captures permanently?"),
+              t("This cannot be undone."),
+              t("Delete Permanently (N)").replace("(N)", `(${selection.size})`),
+              [...selection],
+            )
+          }
+          onMoveToTrash={() => {
+            void api
+              .batchMoveToTrash([...selection])
+              .then(() => showLocalNotice(t("Moved to Trash")))
+              .catch(() => {});
+            clearSelection();
+          }}
+          onToggleFavorite={() => {
+            const allFav = selectionIds.every((id) => assets.find((a) => a.id === id)?.isFavorite);
+            void api
+              .batchSetFavorite([...selection], !allFav)
+              .then(() => showLocalNotice(allFav ? t("Remove from Favorites") : t("Add to Favorites")))
+              .catch(() => {});
+            clearSelection();
+          }}
+          onClear={clearSelection}
+        />
+      )}
       {!loaded ? (
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--kiri-secondary-label)" }}>
           {t("Loading Library…")}
@@ -607,7 +637,38 @@ export function LibraryWindow() {
           {t("No captures match this filter")}
         </div>
       ) : (
-        <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px" }}>
+        <div
+          ref={gridScrollRef}
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "0 24px 24px",
+            position: "relative",
+            touchAction: "none",
+            cursor: band ? "crosshair" : undefined,
+          }}
+          onPointerDown={bandPointerDown}
+          onPointerMove={bandPointerMove}
+          onPointerUp={bandPointerUp}
+          onPointerCancel={bandPointerUp}
+        >
+          {/* Rubber-band selection rectangle */}
+          {bandRect && (
+            <div
+              style={{
+                position: "absolute",
+                left: bandRect.x,
+                top: bandRect.y,
+                width: bandRect.w,
+                height: bandRect.h,
+                background: "rgba(125,105,245,0.14)",
+                border: "1px solid rgba(125,105,245,0.65)",
+                borderRadius: 6,
+                pointerEvents: "none",
+                zIndex: 5,
+              }}
+            />
+          )}
           {groupByDay(filteredAssets).map((group) => (
             <div key={group.label} style={{ marginBottom: 24 }}>
               <div
@@ -660,6 +721,10 @@ export function LibraryWindow() {
                     menu={itemMenu(asset)}
                     selected={selection.has(asset.id)}
                     onToggleSelect={() => toggleSelect(asset.id)}
+                    registerRef={(el) => {
+                      if (el) cardElsRef.current.set(asset.id, el);
+                      else cardElsRef.current.delete(asset.id);
+                    }}
                     onDoubleClick={() => void api.openAsset(asset.id).catch(() => {})}
                     onDragStart={(e) => {
                       // Only start a file drag from the thumbnail — dragging
@@ -811,9 +876,19 @@ function AssetCard(props: {
   onDragStart(e: React.DragEvent): void;
   selected: boolean;
   onToggleSelect(): void;
+  registerRef(el: HTMLDivElement | null): void;
 }) {
-  const { asset, menuOpen, onMenu, menu, onDoubleClick, onDragStart, selected, onToggleSelect } =
-    props;
+  const {
+    asset,
+    menuOpen,
+    onMenu,
+    menu,
+    onDoubleClick,
+    onDragStart,
+    selected,
+    onToggleSelect,
+    registerRef,
+  } = props;
   const [hovered, setHovered] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(asset.title ?? "");
@@ -837,7 +912,9 @@ function AssetCard(props: {
   }, [asset.id]);
   return (
     <div
+      ref={registerRef}
       draggable
+      data-card={asset.id}
       onDragStart={onDragStart}
       onDoubleClick={onDoubleClick}
       onContextMenu={(e) => {
@@ -1435,6 +1512,135 @@ function FilterBar(props: {
     </div>
   );
 }
+/** Floating batch-action bar — a frosted pill anchored at the bottom-center
+ * of the grid. Appears while items are selected; actions adapt to the
+ * current section (Trash → restore / delete; Library → trash / favorite). */
+function BatchActionBar(props: {
+  count: number;
+  showingTrash: boolean;
+  allFavorites: boolean;
+  onRestore(): void;
+  onDelete(): void;
+  onMoveToTrash(): void;
+  onToggleFavorite(): void;
+  onClear(): void;
+}) {
+  const { count, showingTrash, allFavorites, onRestore, onDelete, onMoveToTrash, onToggleFavorite, onClear } = props;
+  const countLabel = t("Selected {n}").replace("{n}", String(count));
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left: "50%",
+        bottom: 28,
+        transform: "translateX(-50%)",
+        zIndex: 20,
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
+        padding: "6px 8px",
+        borderRadius: 16,
+        background: "color-mix(in srgb, var(--kiri-elevated) 82%, transparent)",
+        backdropFilter: "blur(20px) saturate(1.4)",
+        WebkitBackdropFilter: "blur(20px) saturate(1.4)",
+        border: "1px solid var(--kiri-surface-border)",
+        boxShadow: "0 12px 32px rgba(0,0,0,0.22)",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 700,
+          color: "var(--kiri-label)",
+          padding: "0 10px",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {countLabel}
+      </span>
+      <div style={{ width: 1, height: 22, background: "var(--kiri-surface-border)" }} />
+      {showingTrash ? (
+        <>
+          <BatchBarButton icon="arrow.uturn.backward" label={t("Restore (N)").replace("(N)", `(${count})`)} onClick={onRestore} />
+          <BatchBarButton icon="trash.fill" label={t("Delete Permanently (N)").replace("(N)", `(${count})`)} destructive onClick={onDelete} />
+        </>
+      ) : (
+        <>
+          <BatchBarButton icon="trash" label={t("Delete (N)").replace("(N)", `(${count})`)} destructive onClick={onMoveToTrash} />
+          <BatchBarButton
+            icon={allFavorites ? "star.fill" : "star"}
+            label={allFavorites ? t("Remove from Favorites") : t("Add to Favorites")}
+            accent
+            onClick={onToggleFavorite}
+          />
+        </>
+      )}
+      <div style={{ width: 1, height: 22, background: "var(--kiri-surface-border)" }} />
+      <BatchBarButton icon="xmark" label={t("Cancel")} onClick={onClear} />
+    </div>
+  );
+}
+
+function BatchBarButton(props: {
+  icon: IconName;
+  label: string;
+  onClick(): void;
+  destructive?: boolean;
+  accent?: boolean;
+}) {
+  const { icon, label, onClick, destructive, accent } = props;
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 6,
+        height: 32,
+        padding: "0 12px",
+        borderRadius: 10,
+        border: "1px solid transparent",
+        background: destructive
+          ? "rgba(250,71,110,0.14)"
+          : accent
+            ? "rgba(255,209,41,0.14)"
+            : "transparent",
+        color: destructive ? "#FA476E" : accent ? "#E8B41E" : "var(--kiri-label)",
+        font: "600 12px var(--kiri-font-ui)",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+        transition: "background 0.14s ease-out, transform 0.14s ease-out",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = destructive
+          ? "rgba(250,71,110,0.24)"
+          : accent
+            ? "rgba(255,209,41,0.24)"
+            : "color-mix(in srgb, var(--kiri-group-fill) 70%, transparent)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = destructive
+          ? "rgba(250,71,110,0.14)"
+          : accent
+            ? "rgba(255,209,41,0.14)"
+            : "transparent";
+      }}
+      onMouseDown={(e) => {
+        e.currentTarget.style.transform = "scale(0.95)";
+      }}
+      onMouseUp={(e) => {
+        e.currentTarget.style.transform = "scale(1)";
+      }}
+      onPointerLeave={(e) => {
+        e.currentTarget.style.transform = "scale(1)";
+      }}
+    >
+      <KiriIcon name={icon} size={13} />
+      {label}
+    </button>
+  );
+}
+
 
 /** Compact EN / 中文 language toggle in the library header. The choice is
  * persisted via setLanguage (localStorage) and re-applies on next launch. */
