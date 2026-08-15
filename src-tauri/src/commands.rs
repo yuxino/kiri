@@ -1532,6 +1532,16 @@ pub fn mic_supported() -> bool {
 }
 
 #[tauri::command]
+pub fn get_language(app: AppHandle) -> String {
+    crate::state::load_language(&app)
+}
+
+#[tauri::command]
+pub fn set_language(app: AppHandle, language: String) {
+    crate::state::save_language(&app, &language);
+}
+
+#[tauri::command]
 pub fn get_locale() -> String {
     let locale = sys_locale::get_locale().unwrap_or_else(|| "en".into());
     let lower = locale.to_lowercase();

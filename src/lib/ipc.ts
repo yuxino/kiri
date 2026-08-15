@@ -106,6 +106,7 @@ export const api = {
     confirmLabel: string,
     ids?: string[],
   ) => invoke<void>("show_confirm_dialog", { kind, title, message, confirmLabel, ids }),
+  setLanguage: (language: string) => invoke<void>("set_language", { language }),
   copyAsset: (id: string) => invoke<void>("copy_asset", { id }),
   openAsset: (id: string) => invoke<void>("open_asset", { id }),
   revealAsset: (id: string) => invoke<void>("reveal_asset", { id }),

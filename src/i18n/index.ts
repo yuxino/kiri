@@ -2,7 +2,8 @@
  * Kiri i18n — mirrors the Swift L10n behavior:
  *  - keys are the English strings themselves (English fallback)
  *  - follows the OS preferred language, only en + zh-Hans exist
- *  - the user's manual choice is persisted and wins over the system locale
+ *  - the user's manual choice is persisted by the backend (language.json)
+ *    and wins over the system locale
  *  - `%@` / `%d` placeholders like String(format:)
  */
 import en from "./en.json";
@@ -15,8 +16,6 @@ const DICTIONARIES: Record<KiriLanguage, Record<string, string>> = {
   "zh-Hans": zhHans,
 };
 
-const STORAGE_KEY = "kiri-language";
-
 function detectLanguage(): KiriLanguage {
   const locale = (navigator.language || "en").toLowerCase();
   // Match macOS zh-Hans preference and Windows zh-CN/zh-SG locales.
@@ -26,28 +25,15 @@ function detectLanguage(): KiriLanguage {
   return "en";
 }
 
-function loadLanguage(): KiriLanguage {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "en" || stored === "zh-Hans") return stored;
-  } catch {
-    // localStorage unavailable — fall through to system detection.
-  }
-  return detectLanguage();
-}
-
-let language: KiriLanguage = loadLanguage();
+let language: KiriLanguage = detectLanguage();
 const listeners = new Set<() => void>();
 
 export function setLanguage(next: KiriLanguage) {
   if (language === next) return;
   language = next;
-  // Persist the user's choice so every window and future launches honor it.
-  try {
-    localStorage.setItem(STORAGE_KEY, next);
-  } catch {
-    // Non-persistent context (e.g. a sandboxed webview) — still apply in-memory.
-  }
+  // Persistence is handled by the backend (language.json) so the choice is
+  // shared across windows and survives relaunches; this just updates the
+  // in-memory state for the current window.
   listeners.forEach((listener) => listener());
 }
 

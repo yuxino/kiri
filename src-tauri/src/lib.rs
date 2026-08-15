@@ -125,6 +125,8 @@ pub fn run() {
             commands::log_frontend_error,
             commands::frontend_log,
             commands::get_locale,
+            commands::get_language,
+            commands::set_language,
             commands::get_shortcut_label,
             commands::open_settings,
             commands::quit_app,

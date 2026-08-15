@@ -524,6 +524,39 @@ pub fn save_recording_options(app: &AppHandle, options: &RecordingOptions) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Language preference (persisted in the app config dir so the choice
+// survives relaunches and is shared across all windows/webviews — the
+// WebView's localStorage is per-window and unreliable in Tauri).
+// ---------------------------------------------------------------------------
+
+fn language_path(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_config_dir()
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("language.json")
+}
+
+/// Returns the persisted language ("en" | "zh-Hans") or empty string when
+/// the user has never picked one (then the system locale applies).
+pub fn load_language(app: &AppHandle) -> String {
+    let path = language_path(app);
+    std::fs::read(&path)
+        .ok()
+        .and_then(|data| serde_json::from_slice::<String>(&data).ok())
+        .filter(|lang| lang == "en" || lang == "zh-Hans")
+        .unwrap_or_default()
+}
+
+pub fn save_language(app: &AppHandle, language: &str) {
+    let path = language_path(app);
+    if language == "en" || language == "zh-Hans" {
+        if let Ok(data) = serde_json::to_vec_pretty(language) {
+            let _ = std::fs::write(path, data);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{mark_error_seen, toast_position, urlencode};

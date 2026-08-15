@@ -1440,6 +1440,11 @@ function FilterBar(props: {
  * persisted via setLanguage (localStorage) and re-applies on next launch. */
 function LanguageSwitcher() {
   const current = getLanguage();
+  const switchTo = (lang: "en" | "zh-Hans") => {
+    setLanguage(lang);
+    // Persist via the backend (survives relaunch, shared across windows).
+    void api.setLanguage(lang).catch(() => {});
+  };
   return (
     <div
       style={{
@@ -1454,7 +1459,7 @@ function LanguageSwitcher() {
       {(["en", "zh-Hans"] as const).map((lang) => (
         <button
           key={lang}
-          onClick={() => setLanguage(lang)}
+          onClick={() => switchTo(lang)}
           style={{
             height: 28,
             minWidth: 34,
