@@ -13,13 +13,23 @@ import { ViewerWindow } from "./windows/ViewerWindow";
 import { ToastWindow } from "./windows/ToastWindow";
 import { ConfirmWindow } from "./windows/ConfirmWindow";
 
-// Resolve the UI language from the real system locale (the WebView's
-// navigator.language is fixed to en in Tauri, so it cannot be trusted).
-// The backend reads the OS locale via sys_locale and maps it to
-// en / zh-Hans. All windows share the same module-level language, so
-// setting it here before first render is enough; this also handles the
-// overlay/editor windows which mount later.
+// Resolve the UI language: a user's manual choice (persisted in
+// localStorage) wins; otherwise fall back to the real system locale via
+// the backend (the WebView's navigator.language is fixed to en in Tauri,
+// so it cannot be trusted). All windows share the same module-level
+// language, so setting it here before first render is enough; this also
+// handles the overlay/editor windows which mount later.
 void import("@tauri-apps/api/core").then(({ invoke }) => {
+  // Apply the system locale only when the user has not manually chosen a
+  // language (persisted choice wins).
+  const stored = (() => {
+    try {
+      return localStorage.getItem("kiri-language");
+    } catch {
+      return null;
+    }
+  })();
+  if (stored) return;
   invoke<string>("get_locale")
     .then((locale) => {
       if (locale === "zh-Hans") setLanguage("zh-Hans");

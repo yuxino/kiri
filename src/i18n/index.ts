@@ -2,6 +2,7 @@
  * Kiri i18n — mirrors the Swift L10n behavior:
  *  - keys are the English strings themselves (English fallback)
  *  - follows the OS preferred language, only en + zh-Hans exist
+ *  - the user's manual choice is persisted and wins over the system locale
  *  - `%@` / `%d` placeholders like String(format:)
  */
 import en from "./en.json";
@@ -14,6 +15,8 @@ const DICTIONARIES: Record<KiriLanguage, Record<string, string>> = {
   "zh-Hans": zhHans,
 };
 
+const STORAGE_KEY = "kiri-language";
+
 function detectLanguage(): KiriLanguage {
   const locale = (navigator.language || "en").toLowerCase();
   // Match macOS zh-Hans preference and Windows zh-CN/zh-SG locales.
@@ -23,12 +26,28 @@ function detectLanguage(): KiriLanguage {
   return "en";
 }
 
-let language: KiriLanguage = detectLanguage();
+function loadLanguage(): KiriLanguage {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === "en" || stored === "zh-Hans") return stored;
+  } catch {
+    // localStorage unavailable — fall through to system detection.
+  }
+  return detectLanguage();
+}
+
+let language: KiriLanguage = loadLanguage();
 const listeners = new Set<() => void>();
 
 export function setLanguage(next: KiriLanguage) {
   if (language === next) return;
   language = next;
+  // Persist the user's choice so every window and future launches honor it.
+  try {
+    localStorage.setItem(STORAGE_KEY, next);
+  } catch {
+    // Non-persistent context (e.g. a sandboxed webview) — still apply in-memory.
+  }
   listeners.forEach((listener) => listener());
 }
 
@@ -36,6 +55,11 @@ export function setLanguage(next: KiriLanguage) {
 export function onLanguageChange(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
+}
+
+/** Current language, for UI to render a switcher. */
+export function getLanguage(): KiriLanguage {
+  return language;
 }
 
 /** Look up a key; missing translations fall back to the key itself. */

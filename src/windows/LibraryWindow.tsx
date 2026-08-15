@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, onError, onLibraryChanged, onNotice, type AssetDto, type ErrorDto, type NoticeDto } from "../lib/ipc";
-import { t, fmt } from "../i18n";
+import { t, fmt, getLanguage, setLanguage } from "../i18n";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import brandIcon from "../assets/kiri-icon.png";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
@@ -446,6 +446,8 @@ export function LibraryWindow() {
             setTagFilter(null);
           }}
         />
+        {/* Language switcher — EN / 中文, persisted across launches. */}
+        <LanguageSwitcher />
       </div>
 
       {/* Slim filter bar above the content — identical in Library and
@@ -1430,6 +1432,46 @@ function FilterBar(props: {
           })
         )}
       </div>
+    </div>
+  );
+}
+
+/** Compact EN / 中文 language toggle in the library header. The choice is
+ * persisted via setLanguage (localStorage) and re-applies on next launch. */
+function LanguageSwitcher() {
+  const current = getLanguage();
+  return (
+    <div
+      style={{
+        display: "flex",
+        background: "var(--kiri-group-fill)",
+        borderRadius: 11,
+        padding: 3,
+        gap: 2,
+        flexShrink: 0,
+      }}
+    >
+      {(["en", "zh-Hans"] as const).map((lang) => (
+        <button
+          key={lang}
+          onClick={() => setLanguage(lang)}
+          style={{
+            height: 28,
+            minWidth: 34,
+            padding: "0 9px",
+            borderRadius: 8,
+            border: "none",
+            background: current === lang ? "var(--kiri-accent)" : "transparent",
+            color: current === lang ? "#fff" : "var(--kiri-secondary-label)",
+            font: "600 11px var(--kiri-font-ui)",
+            cursor: "pointer",
+            transition: "background 0.14s ease-out, color 0.14s ease-out",
+          }}
+          title={lang === "en" ? "English" : "简体中文"}
+        >
+          {lang === "en" ? "EN" : "中文"}
+        </button>
+      ))}
     </div>
   );
 }
