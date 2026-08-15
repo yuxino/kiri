@@ -130,6 +130,10 @@ pub struct ErrorDto {
     pub recovery: Option<String>,
 }
 
+// The three *Settings variants are never constructed yet (only OpenSettings /
+// QuitKiri are emitted), but they are part of the serialized contract the
+// frontend already handles (recoveryLabel / openSettings dispatch).
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RecoveryAction {

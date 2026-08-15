@@ -2,6 +2,9 @@
 //! The capture shortcut is exclusively Shift-Command-A on macOS and its
 //! equivalent Shift-Control-A on Windows.
 
+// `Control`/`Option` are never constructed today (only Shift/Command are
+// used), but they mirror the Swift allCases order used by `glyph()`.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortcutModifier {
     Control,

@@ -37,9 +37,6 @@ export function CountdownWindow() {
   }, []);
 
   const size = Math.min(96, Math.max(68, Math.min(window.innerWidth, window.innerHeight) - 16));
-  if (window.innerWidth < 2000) {
-    console.log(`[countdown] window=${window.innerWidth}x${window.innerHeight} badgeSize=${size}`);
-  }
   // Spec §5.4: font min(46, size*0.48); digit lifted 6pt; hide Esc hint
   // when the badge is small.
   const fontSize = Math.min(46, size * 0.48);

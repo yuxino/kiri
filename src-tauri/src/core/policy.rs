@@ -40,7 +40,6 @@ pub struct RecordingPolicy;
 
 impl RecordingPolicy {
     pub const FRAMES_PER_SECOND: u32 = 30;
-    pub const COUNTDOWN_SECONDS: u32 = 3;
     pub const MAXIMUM_GIF_DURATION: f64 = 15.0;
     pub const GIF_FRAMES_PER_SECOND: u32 = 12;
     pub const MAXIMUM_GIF_LONG_EDGE: u32 = 720;
@@ -72,14 +71,6 @@ impl RecordingPolicy {
             Some(d) => d > 0.0 && d <= Self::MAXIMUM_GIF_DURATION,
             None => false,
         }
-    }
-
-    /// Mirrors `RecordingPolicy.gifFrameCount(duration:)`.
-    pub fn gif_frame_count(duration: f64) -> u64 {
-        if duration <= 0.0 {
-            return 0;
-        }
-        (duration * Self::GIF_FRAMES_PER_SECOND as f64).ceil().max(1.0) as u64
     }
 
     /// Mirrors `RecordingPolicy.elapsedLabel(_:)`.
@@ -129,13 +120,6 @@ mod tests {
         assert!(!RecordingPolicy::is_gif_eligible(Some(15.001)));
         assert!(!RecordingPolicy::is_gif_eligible(Some(0.0)));
         assert!(!RecordingPolicy::is_gif_eligible(None));
-    }
-
-    #[test]
-    fn gif_frame_count_rounds_up() {
-        assert_eq!(RecordingPolicy::gif_frame_count(1.0), 12);
-        assert_eq!(RecordingPolicy::gif_frame_count(0.1), 2);
-        assert_eq!(RecordingPolicy::gif_frame_count(0.0), 0);
     }
 
     #[test]

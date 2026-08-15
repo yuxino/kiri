@@ -34,9 +34,6 @@ export interface AnnotationCanvasHandle {
   deleteSelection(): void;
   commitTextEditing(): void;
   exportPng(): Promise<Uint8Array | null>;
-  hasAnnotations(): boolean;
-  canUndo(): boolean;
-  canRedo(): boolean;
   /**
    * Live text font-size adjustment (spec §6.6): begin records the selected
    * text mark, set applies a preview (no history), end commits one history
@@ -62,7 +59,6 @@ interface Props {
   appearance: AppearanceSettings;
   onHistoryChange(canUndo: boolean, canRedo: boolean): void;
   onCancel(): void;
-  onToolChange(tool: Tool): void;
   /**
    * Called after a text annotation is committed via Return (spec §6.6:
    * "Return commits the text and completes the capture"). The parent
@@ -714,9 +710,6 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           if (!blob) return null;
           return new Uint8Array(await blob.arrayBuffer());
         },
-        hasAnnotations: () => historyRef.current.elements.length > 0,
-        canUndo: () => historyRef.current.canUndo,
-        canRedo: () => historyRef.current.canRedo,
         beginTextFontSizeAdjustment: () => beginFontAdjustRef.current(),
         setTextFontSizeLive: (value: number) => setFontLiveRef.current(value),
         endTextFontSizeAdjustment: () => endFontAdjustRef.current(),

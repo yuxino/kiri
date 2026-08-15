@@ -38,10 +38,6 @@ export function onLanguageChange(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export function getLanguage(): KiriLanguage {
-  return language;
-}
-
 /** Look up a key; missing translations fall back to the key itself. */
 export function t(key: string): string {
   return DICTIONARIES[language][key] ?? key;
@@ -59,10 +55,4 @@ export function fmt(key: string, ...args: (string | number)[]): string {
     if (value === undefined) return token;
     return token === "%d" ? String(Math.trunc(Number(value))) : String(value);
   });
-}
-
-/** SwiftUI-style plural selection used by "%d capture" / "%d captures". */
-export function plural(count: number, oneKey: string, manyKey: string): string {
-  const template = count === 1 ? t(oneKey) : t(manyKey);
-  return template.replace("%d", String(count));
 }

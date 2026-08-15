@@ -430,9 +430,7 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
 
 #[derive(Debug, Clone, Copy)]
 pub struct AudioFormat {
-    pub sample_rate: f64,
     pub channels: u32,
-    pub bits_per_channel: u32,
     pub is_float: bool,
     pub is_non_interleaved: bool,
 }
@@ -441,7 +439,6 @@ struct DelegateState {
     video_tx: mpsc::Sender<Vec<u8>>,
     audio_tx: Option<mpsc::Sender<Vec<u8>>>,
     mic_tx: Option<mpsc::Sender<Vec<u8>>>,
-    video_size: OnceLock<(usize, usize)>,
     audio_format: OnceLock<AudioFormat>,
     mic_format: OnceLock<AudioFormat>,
     /// Set before the stream stops so late frame callbacks (already queued
@@ -457,7 +454,6 @@ struct DelegateState {
 /// leaves the thread that created it; control flows through channels.
 pub struct MacRecordingSession {
     stop_tx: mpsc::Sender<()>,
-    result_rx: mpsc::Receiver<Result<()>>,
     /// Receives the stream-thread's completion notification after a stop.
     stop_done_rx: mpsc::Receiver<()>,
     _thread: std::thread::JoinHandle<()>,
@@ -551,7 +547,6 @@ impl MacRecordingSession {
                 video_tx,
                 audio_tx,
                 mic_tx,
-                video_size: OnceLock::new(),
                 audio_format: OnceLock::new(),
                 mic_format: OnceLock::new(),
                 stopped: std::sync::atomic::AtomicBool::new(false),
@@ -661,7 +656,6 @@ impl MacRecordingSession {
         log::info!("MacRecordingSession: stream thread ready");
         Ok(MacRecordingSession {
             stop_tx,
-            result_rx,
             stop_done_rx,
             _thread: thread,
         })
@@ -720,9 +714,7 @@ fn audio_format_from(buffer: &CMSampleBuffer) -> Option<AudioFormat> {
     const IS_FLOAT: u32 = 1 << 0;
     const IS_NON_INTERLEAVED: u32 = 1 << 5;
     Some(AudioFormat {
-        sample_rate: asbd.mSampleRate,
         channels: asbd.mChannelsPerFrame,
-        bits_per_channel: asbd.mBitsPerChannel,
         is_float: asbd.mFormatFlags & IS_FLOAT != 0,
         is_non_interleaved: asbd.mFormatFlags & IS_NON_INTERLEAVED != 0,
     })
@@ -821,9 +813,7 @@ objc2::define_class!(
                 if let Some(tx) = &state.mic_tx {
                     let format = state.mic_format.get_or_init(|| {
                         audio_format_from(buffer).unwrap_or(AudioFormat {
-                            sample_rate: 48_000.0,
                             channels: 2,
-                            bits_per_channel: 32,
                             is_float: true,
                             is_non_interleaved: false,
                         })
@@ -840,9 +830,7 @@ objc2::define_class!(
             } else if let Some(tx) = &state.audio_tx {
                 let format = state.audio_format.get_or_init(|| {
                     audio_format_from(buffer).unwrap_or(AudioFormat {
-                        sample_rate: 48_000.0,
                         channels: 2,
-                        bits_per_channel: 32,
                         is_float: true,
                         is_non_interleaved: false,
                     })

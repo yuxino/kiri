@@ -5,7 +5,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 // Shared DTO types (mirror src-tauri/src/commands.rs)
 // ---------------------------------------------------------------------------
 
-export interface RectDto {
+interface RectDto {
   x: number;
   y: number;
   width: number;

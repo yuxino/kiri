@@ -271,7 +271,6 @@ export function EditorWindow(props: { id: string }) {
                 setCanRedo(r);
               }}
               onCancel={closeWindow}
-              onToolChange={setTool}
             />
           </div>
         )}

@@ -212,7 +212,6 @@ export function OverlayWindow() {
         setOcrFailed(true);
         setOcrText("");
         setPhase("ocr-result");
-      } finally {
       }
     },
     [bounds],
@@ -657,7 +656,6 @@ export function OverlayWindow() {
               setCanRedo(r);
             }}
             onCancel={cancel}
-            onToolChange={setTool}
             onFinishAfterTextCommit={() => void complete("copy")}
           />
         </div>
@@ -771,7 +769,6 @@ export function OverlayWindow() {
         <Toolbar
           anchor={toolbarAnchor}
           bounds={bounds}
-          selection={selection!}
           tool={tool}
           setTool={(next) => {
             // Spec §6.6: switching tools commits any in-flight text edit
@@ -1160,7 +1157,6 @@ function ToggleRow(props: {
 interface ToolbarProps {
   anchor: { x: number; y: number };
   bounds: Rect;
-  selection: Rect;
   tool: Tool;
   setTool(tool: Tool): void;
   appearance: AppearanceSettings;

@@ -24,7 +24,6 @@ pub enum AssetLibraryError {
 pub type Result<T> = std::result::Result<T, AssetLibraryError>;
 
 pub struct AssetLibrary {
-    root_url: PathBuf,
     assets_url: PathBuf,
     thumbnails_url: PathBuf,
     index_url: PathBuf,
@@ -49,7 +48,6 @@ impl AssetLibrary {
         };
 
         Ok(Self {
-            root_url,
             assets_url,
             thumbnails_url,
             index_url,

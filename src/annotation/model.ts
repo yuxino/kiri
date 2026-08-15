@@ -192,7 +192,7 @@ export class AnnotationHistory {
 // Hit testing (spec §6.1)
 // ---------------------------------------------------------------------------
 
-export function hitTestMark(mark: AnnotationMark, p: Point): boolean {
+function hitTestMark(mark: AnnotationMark, p: Point): boolean {
   switch (mark.kind) {
     case "pen":
       return polylineDistance(p, mark.points) <= Math.max(7, mark.width / 2 + 4);
