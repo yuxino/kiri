@@ -244,5 +244,8 @@
   "could not locate the unpacked ffmpeg binary": "找不到解压后的 ffmpeg 程序",
   "screenshot failed": "截图失败",
   "shareable content failed": "获取可捕获内容失败",
-  "unknown action": "未知操作"
+  "unknown action": "未知操作",
+  "Width (px)": "宽度（像素）",
+  "Height (px)": "高度（像素）",
+  "Apply size": "应用尺寸"
 }

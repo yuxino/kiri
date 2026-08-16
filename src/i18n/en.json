@@ -244,5 +244,8 @@
   "could not locate the unpacked ffmpeg binary": "could not locate the unpacked ffmpeg binary",
   "screenshot failed": "screenshot failed",
   "shareable content failed": "shareable content failed",
-  "unknown action": "unknown action"
+  "unknown action": "unknown action",
+  "Width (px)": "Width (px)",
+  "Height (px)": "Height (px)",
+  "Apply size": "Apply size"
 }

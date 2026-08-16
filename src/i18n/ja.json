@@ -244,5 +244,8 @@
   "could not locate the unpacked ffmpeg binary": "解凍した ffmpeg バイナリが見つかりません",
   "screenshot failed": "スクリーンショットに失敗しました",
   "shareable content failed": "共有コンテンツの取得に失敗しました",
-  "unknown action": "不明な操作です"
+  "unknown action": "不明な操作です",
+  "Width (px)": "幅（px）",
+  "Height (px)": "高さ（px）",
+  "Apply size": "サイズを適用"
 }

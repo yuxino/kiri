@@ -831,6 +831,22 @@ export function OverlayWindow() {
           onTextFontBegin={() => canvasRef.current?.beginTextFontSizeAdjustment()}
           onTextFontLive={(value) => canvasRef.current?.setTextFontSizeLive(value)}
           onTextFontEnd={() => canvasRef.current?.endTextFontSizeAdjustment()}
+          onSetSize={(wPx, hPx) => {
+            if (!selectionRef.current) return;
+            const sc = context?.scale ?? 1;
+            const w = Math.min(wPx / sc, bounds.width);
+            const h = Math.min(hPx / sc, bounds.height);
+            const cur = selectionRef.current;
+            const x = Math.min(
+              Math.max(0, cur.x + (cur.width - w) / 2),
+              Math.max(0, bounds.width - w),
+            );
+            const y = Math.min(
+              Math.max(0, cur.y + (cur.height - h) / 2),
+              Math.max(0, bounds.height - h),
+            );
+            setSelection({ x, y, width: w, height: h });
+          }}
         />
       )}
 
@@ -1072,6 +1088,19 @@ function OcrPanel(props: {
   );
 }
 
+const sizeInputStyle: React.CSSProperties = {
+  width: 34,
+  height: 26,
+  borderRadius: 8,
+  border: "1px solid rgba(255,255,255,0.18)",
+  background: "rgba(255,255,255,0.08)",
+  color: "#fff",
+  fontSize: 11,
+  textAlign: "center",
+  outline: "none",
+  fontFamily: "var(--kiri-font-ui)",
+};
+
 const iconButtonStyle: React.CSSProperties = {
   width: 24,
   height: 24,
@@ -1263,6 +1292,8 @@ interface ToolbarProps {
   onTextFontBegin?(): void;
   onTextFontLive?(value: number): void;
   onTextFontEnd?(): void;
+  /** Apply an exact pixel size to the selection (keeps its center). */
+  onSetSize(widthPx: number, heightPx: number): void;
 }
 
 const TOOLS: { tool: Tool; icon: IconName; title: string }[] = [
@@ -1299,7 +1330,19 @@ function Toolbar(props: ToolbarProps) {
     onTextFontBegin,
     onTextFontLive,
     onTextFontEnd,
+    onSetSize,
   } = props;
+
+  // Quick pixel-size entry: two number fields + Enter applies. Values are
+  // in output pixels; the selection is points, so divide by scale.
+  const [sizeW, setSizeW] = useState("");
+  const [sizeH, setSizeH] = useState("");
+  const applySize = () => {
+    const w = Math.round(Number(sizeW));
+    const h = Math.round(Number(sizeH));
+    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
+    onSetSize(w, h);
+  };
 
   const slider =
     tool === "pen"
@@ -1457,6 +1500,45 @@ function Toolbar(props: ToolbarProps) {
         {sep}
         <ToolButton icon="arrow.uturn.backward" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={onUndo} />
         <ToolButton icon="arrow.uturn.forward" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={onRedo} />
+        {sep}
+        {/* Quick pixel-size entry — set the selection to an exact size. */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 3,
+            padding: "2px 4px",
+          }}
+        >
+          <input
+            type="number"
+            min={1}
+            value={sizeW}
+            onChange={(e) => setSizeW(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applySize();
+              e.stopPropagation();
+            }}
+            placeholder={t("Width (px)").charAt(0)}
+            title={t("Width (px)")}
+            style={sizeInputStyle}
+          />
+          <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 11 }}>×</span>
+          <input
+            type="number"
+            min={1}
+            value={sizeH}
+            onChange={(e) => setSizeH(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") applySize();
+              e.stopPropagation();
+            }}
+            placeholder={t("Height (px)").charAt(0)}
+            title={t("Height (px)")}
+            style={sizeInputStyle}
+          />
+          <ToolButton icon="checkmark" title={t("Apply size")} onClick={applySize} />
+        </div>
         <ToolButton icon="checkmark" title={t("Done — Copy to clipboard · Return")} primary onClick={onDone} />
         <div style={{ position: "relative" }}>
           <ToolButton icon="ellipsis.circle" title={t("More — Save, pin, edit, or clear")} onClick={() => setMoreMenuOpen(!moreMenuOpen)} />
