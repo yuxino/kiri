@@ -715,14 +715,14 @@ export function OverlayWindow() {
                     ? t("Drag to choose a recording area   ·   Click a window   ·   Esc to cancel")
                     : t("Drag to choose text to recognize   ·   Esc to cancel")
               }
-              top={70}
+              top={96}
             />
           )}
         </>
       )}
 
       {/* OCR states */}
-      {phase === "ocr-drag" && <HintLabel text={t("Recognizing Text…")} top={70} />}
+      {phase === "ocr-drag" && <HintLabel text={t("Recognizing Text…")} top={96} />}
 
       {/* Drag hint while creating a region (spec §3.2.5: shown when no
           toolbar exists yet and the user is dragging). */}
@@ -735,7 +735,7 @@ export function OverlayWindow() {
                 ? t("Release for recording settings")
                 : t("Release to recognize text")
           }
-          top={70}
+          top={96}
         />
       )}
       {phase === "selecting" && selection && !drag && (
@@ -747,7 +747,7 @@ export function OverlayWindow() {
                 ? t("Adjust the region · Recording settings below")
                 : t("Release to recognize text")
           }
-          top={70}
+          top={96}
         />
       )}
       {phase === "ocr-result" && (
@@ -1319,8 +1319,8 @@ function Toolbar(props: ToolbarProps) {
   // toolbar BELOW that zone so the two HUDs never overlap: minimum top is
   // 70 (mode selector zone), maximum keeps the bar inside the screen.
   const top = Math.min(
-    Math.max(70, anchor.y),
-    Math.max(70, bounds.y + bounds.height - toolbarHeight - 8),
+    Math.max(96, anchor.y),
+    Math.max(96, bounds.y + bounds.height - toolbarHeight - 8),
   );
 
   const sep = <div style={{ width: 1, height: 26, background: "rgba(255,255,255,0.14)", margin: "0 3px", flexShrink: 0 }} />;

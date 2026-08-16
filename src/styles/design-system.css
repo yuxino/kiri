@@ -305,7 +305,7 @@ textarea {
 .kiri-mode-select {
   position: absolute;
   left: 50%;
-  top: 16px;
+  top: 44px; /* below the macOS menu bar + notch safe area */
   transform: translateX(-50%);
   display: flex;
   gap: 4px;
