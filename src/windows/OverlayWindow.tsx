@@ -319,6 +319,16 @@ export function OverlayWindow() {
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      // OCR results: allow drawing a fresh region directly (no button) —
+      // clicking/dragging in blank space starts a new selection which
+      // re-runs recognition on release.
+      if (phaseRef.current === "ocr-result") {
+        setOcrText("");
+        setOcrFailed(false);
+        setPhase("selecting");
+        setSelection(null);
+        selectionRef.current = null;
+      }
       if (phaseRef.current !== "mode-select" && phaseRef.current !== "selecting") return;
       const p = clampPoint(toPoint(e), bounds);
       dbg(`pointerDown at ${p.x.toFixed(0)},${p.y.toFixed(0)} phase=${phaseRef.current}`);
@@ -343,7 +353,10 @@ export function OverlayWindow() {
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
       const p = clampPoint(toPoint(e), bounds);
-      const interactive = phaseRef.current === "mode-select" || phaseRef.current === "selecting";
+      const interactive =
+        phaseRef.current === "mode-select" ||
+        phaseRef.current === "selecting" ||
+        (phaseRef.current === "ocr-result" && !!drag);
       if (!interactive) return;
       // Hover outline while not dragging. OCR mode never hovers windows
       // (spec §2.1: hoveredWindowSelection is always nil for .ocr).
@@ -761,11 +774,6 @@ export function OverlayWindow() {
           onCopy={() => {
             void api.copyText(ocrText).catch(() => {});
           }}
-          onReselect={() => {
-            setOcrText("");
-            setOcrFailed(false);
-            setPhase("selecting");
-          }}
           onClose={cancel}
         />
       )}
@@ -983,10 +991,9 @@ function OcrPanel(props: {
   anchor: Rect;
   bounds: Rect;
   onCopy(): void;
-  onReselect(): void;
   onClose(): void;
 }) {
-  const { text, failed, anchor, bounds, onCopy, onReselect, onClose } = props;
+  const { text, failed, anchor, bounds, onCopy, onClose } = props;
   // Bubble hugs the recognized region: below it, flipping above when the
   // bottom overflows, then pinned inside the screen. The little tail points
   // at the region (top-right when below, bottom-right when above).
@@ -1067,23 +1074,14 @@ function OcrPanel(props: {
       >
         {text || (failed ? t("Adjust the region and try again") : t("No Text Found"))}
       </div>
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button
-          className="kiri-secondary-button"
-          onClick={onReselect}
-          style={{ minHeight: 32, borderRadius: 10, padding: "0 14px" }}
-        >
-          {t("Reselect Region")}
-        </button>
-        <button
-          className="kiri-primary-button"
-          onClick={onCopy}
-          disabled={!text}
-          style={{ minHeight: 32, borderRadius: 10, padding: "0 16px" }}
-        >
-          {t("Copy")}
-        </button>
-      </div>
+      <button
+        className="kiri-primary-button"
+        onClick={onCopy}
+        disabled={!text}
+        style={{ minHeight: 32, borderRadius: 10, alignSelf: "flex-end", padding: "0 16px" }}
+      >
+        {t("Copy")}
+      </button>
     </div>
   );
 }
