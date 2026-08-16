@@ -321,11 +321,14 @@ export function OverlayWindow() {
     (e: React.PointerEvent) => {
       // OCR results: allow drawing a fresh region directly (no button) —
       // clicking/dragging in blank space starts a new selection which
-      // re-runs recognition on release.
+      // re-runs recognition on release. phaseRef must be updated
+      // synchronously so the same pointer-down proceeds into the drag
+      // start below (setPhase alone is async and would return early).
       if (phaseRef.current === "ocr-result") {
         setOcrText("");
         setOcrFailed(false);
         setPhase("selecting");
+        phaseRef.current = "selecting";
         setSelection(null);
         selectionRef.current = null;
       }
