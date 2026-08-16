@@ -715,14 +715,14 @@ export function OverlayWindow() {
                     ? t("Drag to choose a recording area   ·   Click a window   ·   Esc to cancel")
                     : t("Drag to choose text to recognize   ·   Esc to cancel")
               }
-              bottom={88 + 44 + 10}
+              top={70}
             />
           )}
         </>
       )}
 
       {/* OCR states */}
-      {phase === "ocr-drag" && <HintLabel text={t("Recognizing Text…")} bottom={88 + 44 + 10} />}
+      {phase === "ocr-drag" && <HintLabel text={t("Recognizing Text…")} top={70} />}
 
       {/* Drag hint while creating a region (spec §3.2.5: shown when no
           toolbar exists yet and the user is dragging). */}
@@ -735,7 +735,7 @@ export function OverlayWindow() {
                 ? t("Release for recording settings")
                 : t("Release to recognize text")
           }
-          bottom={88 + 44 + 10}
+          top={70}
         />
       )}
       {phase === "selecting" && selection && !drag && (
@@ -747,7 +747,7 @@ export function OverlayWindow() {
                 ? t("Adjust the region · Recording settings below")
                 : t("Release to recognize text")
           }
-          bottom={88 + 44 + 10}
+          top={70}
         />
       )}
       {phase === "ocr-result" && (
@@ -853,13 +853,13 @@ function ModeButton(props: {
   );
 }
 
-function HintLabel(props: { text: string; bottom: number }) {
+function HintLabel(props: { text: string; top: number }) {
   return (
     <div
       style={{
         position: "absolute",
         left: "50%",
-        bottom: props.bottom,
+        top: props.top,
         transform: "translateX(-50%)",
         background: "rgba(0,0,0,0.72)",
         border: "1px solid rgba(255,255,255,0.16)",
@@ -1088,8 +1088,7 @@ function RecordOptionsPanel(props: {
   const PANEL_W = 336;
   const PANEL_H = 400;
   const margin = 8;
-  // Keep the panel above the always-visible mode selector (bottom ~140pt).
-  const maxTop = Math.max(margin, bounds.height - PANEL_H - 140);
+  const maxTop = Math.max(margin, bounds.height - PANEL_H - margin);
   const centeredTop = Math.max(margin, Math.min(maxTop, bounds.height / 2 - PANEL_H / 2 + 30));
   // Keep a small preference for hugging the selection when it's small, so
   // the panel feels attached; fall back to the centered position for big
@@ -1316,13 +1315,12 @@ function Toolbar(props: ToolbarProps) {
     Math.max(8, anchor.x - barWidth / 2),
     Math.max(8, bounds.x + bounds.width - barWidth - 8),
   );
-  // Mode selector sits at the bottom-center (88 + ~44pt tall). When the
-  // selection reaches the bottom, keep the toolbar ABOVE that zone so the
-  // two HUDs never overlap: clamp top to bounds.height - 140.
+  // Mode selector sits at the top-center (16 + ~44pt tall). Keep the
+  // toolbar BELOW that zone so the two HUDs never overlap: minimum top is
+  // 70 (mode selector zone), maximum keeps the bar inside the screen.
   const top = Math.min(
-    Math.max(8, anchor.y),
-    Math.max(8, bounds.height - 140),
-    Math.max(8, bounds.y + bounds.height - toolbarHeight - 8),
+    Math.max(70, anchor.y),
+    Math.max(70, bounds.y + bounds.height - toolbarHeight - 8),
   );
 
   const sep = <div style={{ width: 1, height: 26, background: "rgba(255,255,255,0.14)", margin: "0 3px", flexShrink: 0 }} />;

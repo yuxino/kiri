@@ -305,7 +305,7 @@ textarea {
 .kiri-mode-select {
   position: absolute;
   left: 50%;
-  bottom: 88px;
+  top: 16px;
   transform: translateX(-50%);
   display: flex;
   gap: 4px;
