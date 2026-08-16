@@ -963,24 +963,25 @@ function OcrPanel(props: {
   onClose(): void;
 }) {
   const { text, failed, anchor, bounds, onCopy, onClose } = props;
-  // Panel hugs the recognized region: below it, flipping above when the
-  // bottom overflows, and finally pinned inside the screen (mirrors the
-  // recording-options panel so the popup never sits oddly centered).
+  // Bubble hugs the recognized region: below it, flipping above when the
+  // bottom overflows, then pinned inside the screen. The little tail points
+  // at the region (top-right when below, bottom-right when above).
   const PANEL_W = 336;
   const PANEL_H = 200;
   const margin = 8;
   const maxTop = Math.max(margin, bounds.height - PANEL_H - margin);
   const below = anchor.y + anchor.height + 10;
   const above = anchor.y - PANEL_H - 10;
-  const top = Math.min(
-    Math.max(margin, below + PANEL_H + margin > bounds.height ? above : below),
-    maxTop,
-  );
+  const belowFits = below + PANEL_H + margin <= bounds.height;
+  const top = Math.min(Math.max(margin, belowFits ? below : above), maxTop);
   const centerX = anchor.x + anchor.width / 2 - PANEL_W / 2;
   const left = Math.min(
     Math.max(margin, centerX),
     Math.max(margin, bounds.width - PANEL_W - margin),
   );
+  const tailAbove = !belowFits;
+  // Tail tip x: near the region's center (clamped to the bubble width).
+  const tipX = Math.min(Math.max(24, PANEL_W / 2), PANEL_W - 24);
   return (
     <div
       className="kiri-hud"
@@ -990,12 +991,30 @@ function OcrPanel(props: {
         left,
         top,
         width: PANEL_W,
-        padding: 14,
+        padding: 16,
+        paddingBottom: 14,
+        borderRadius: 20,
         display: "flex",
         flexDirection: "column",
         gap: 10,
+        boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
       }}
     >
+      {/* Tail pointing at the recognized region. */}
+      <div
+        style={{
+          position: "absolute",
+          [tailAbove ? "bottom" : "top"]: -6,
+          left: tipX,
+          width: 14,
+          height: 14,
+          background: "rgba(30, 27, 40, 0.9)",
+          transform: "rotate(45deg)",
+          borderRadius: 3,
+          zIndex: 0,
+          boxShadow: tailAbove ? "3px 3px 6px rgba(0,0,0,0.18)" : "-3px -3px 6px rgba(0,0,0,0.18)",
+        }}
+      />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span style={{ font: "600 12.5px var(--kiri-font-ui)" }}>
           {failed ? t("Text Recognition Failed") : t("Recognized Text")}
@@ -1011,18 +1030,25 @@ function OcrPanel(props: {
         style={{
           background: "#fff",
           color: "#1c1a24",
-          borderRadius: 8,
-          padding: "8px 10px",
-          height: Math.min(160, Math.max(56, text.split("\n").length * 22 + 16)),
+          borderRadius: 12,
+          padding: "10px 12px",
+          minHeight: 56,
+          maxHeight: 140,
           overflow: "auto",
           font: "400 13px var(--kiri-font-ui)",
           userSelect: "text",
           whiteSpace: "pre-wrap",
+          boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)",
         }}
       >
         {text || (failed ? t("Adjust the region and try again") : t("No Text Found"))}
       </div>
-      <button className="kiri-primary-button" onClick={onCopy} disabled={!text}>
+      <button
+        className="kiri-primary-button"
+        onClick={onCopy}
+        disabled={!text}
+        style={{ minHeight: 32, borderRadius: 10, alignSelf: "flex-end", padding: "0 16px" }}
+      >
         {t("Copy")}
       </button>
     </div>
@@ -1062,7 +1088,8 @@ function RecordOptionsPanel(props: {
   const PANEL_W = 336;
   const PANEL_H = 400;
   const margin = 8;
-  const maxTop = Math.max(margin, bounds.height - PANEL_H - margin);
+  // Keep the panel above the always-visible mode selector (bottom ~140pt).
+  const maxTop = Math.max(margin, bounds.height - PANEL_H - 140);
   const centeredTop = Math.max(margin, Math.min(maxTop, bounds.height / 2 - PANEL_H / 2 + 30));
   // Keep a small preference for hugging the selection when it's small, so
   // the panel feels attached; fall back to the centered position for big
@@ -1289,7 +1316,14 @@ function Toolbar(props: ToolbarProps) {
     Math.max(8, anchor.x - barWidth / 2),
     Math.max(8, bounds.x + bounds.width - barWidth - 8),
   );
-  const top = Math.min(Math.max(8, anchor.y), Math.max(8, bounds.y + bounds.height - toolbarHeight - 8));
+  // Mode selector sits at the bottom-center (88 + ~44pt tall). When the
+  // selection reaches the bottom, keep the toolbar ABOVE that zone so the
+  // two HUDs never overlap: clamp top to bounds.height - 140.
+  const top = Math.min(
+    Math.max(8, anchor.y),
+    Math.max(8, bounds.height - 140),
+    Math.max(8, bounds.y + bounds.height - toolbarHeight - 8),
+  );
 
   const sep = <div style={{ width: 1, height: 26, background: "rgba(255,255,255,0.14)", margin: "0 3px", flexShrink: 0 }} />;
 
