@@ -407,7 +407,9 @@ export function OverlayWindow() {
             setSelection(candidate);
             afterSelection(candidate);
           }
-        } else if (selectionRef.current && isValidSelection(selectionRef.current, 3)) {
+        } else if (moved && selectionRef.current && isValidSelection(selectionRef.current, 3)) {
+          // OCR (and screenshot/record) recognize only after an actual drag
+          // release — a plain click must not trigger recognition.
           afterSelection(selectionRef.current);
         }
         setDrag(null);
@@ -759,6 +761,11 @@ export function OverlayWindow() {
           onCopy={() => {
             void api.copyText(ocrText).catch(() => {});
           }}
+          onReselect={() => {
+            setOcrText("");
+            setOcrFailed(false);
+            setPhase("selecting");
+          }}
           onClose={cancel}
         />
       )}
@@ -960,9 +967,10 @@ function OcrPanel(props: {
   anchor: Rect;
   bounds: Rect;
   onCopy(): void;
+  onReselect(): void;
   onClose(): void;
 }) {
-  const { text, failed, anchor, bounds, onCopy, onClose } = props;
+  const { text, failed, anchor, bounds, onCopy, onReselect, onClose } = props;
   // Bubble hugs the recognized region: below it, flipping above when the
   // bottom overflows, then pinned inside the screen. The little tail points
   // at the region (top-right when below, bottom-right when above).
@@ -1043,14 +1051,23 @@ function OcrPanel(props: {
       >
         {text || (failed ? t("Adjust the region and try again") : t("No Text Found"))}
       </div>
-      <button
-        className="kiri-primary-button"
-        onClick={onCopy}
-        disabled={!text}
-        style={{ minHeight: 32, borderRadius: 10, alignSelf: "flex-end", padding: "0 16px" }}
-      >
-        {t("Copy")}
-      </button>
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <button
+          className="kiri-secondary-button"
+          onClick={onReselect}
+          style={{ minHeight: 32, borderRadius: 10, padding: "0 14px" }}
+        >
+          {t("Reselect Region")}
+        </button>
+        <button
+          className="kiri-primary-button"
+          onClick={onCopy}
+          disabled={!text}
+          style={{ minHeight: 32, borderRadius: 10, padding: "0 16px" }}
+        >
+          {t("Copy")}
+        </button>
+      </div>
     </div>
   );
 }
