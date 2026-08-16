@@ -69,18 +69,8 @@
   --kiri-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
 
-  /* Gradients */
-  --kiri-brand-gradient: linear-gradient(
-    135deg,
-    var(--kiri-accent-strong) 0%,
-    var(--kiri-accent) 55%,
-    var(--kiri-cyan) 100%
-  );
-  --kiri-warm-gradient: linear-gradient(
-    135deg,
-    var(--kiri-coral) 0%,
-    var(--kiri-accent) 100%
-  );
+  /* Solid brand color (flat, no gradients) */
+  --kiri-brand-solid: var(--kiri-accent-strong);
 
   /* Annotation color presets */
   --kiri-annotation-violet: #7d69f5;
@@ -140,7 +130,7 @@ body,
   min-height: 36px;
   padding: 0 14px;
   border-radius: var(--kiri-radius-control);
-  background: var(--kiri-brand-gradient);
+  background: var(--kiri-brand-solid);
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 4px 10px rgba(125, 105, 245, 0.24);
   cursor: pointer;
@@ -219,7 +209,7 @@ textarea {
   min-height: 34px;
   padding: 0 14px;
   color: #fff;
-  background: var(--kiri-brand-gradient);
+  background: var(--kiri-brand-solid);
   border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow: 0 3px 8px rgba(125, 105, 245, 0.24);
 }
@@ -345,7 +335,7 @@ textarea {
 
 .kiri-mode-btn[data-active] {
   border: 1px solid rgba(139, 123, 246, 0.55);
-  background: linear-gradient(180deg, rgba(125, 105, 245, 0.34), rgba(125, 105, 245, 0.16));
+  background: rgba(125, 105, 245, 0.26);
   color: #fff;
   box-shadow: 0 3px 10px rgba(99, 79, 219, 0.28);
 }

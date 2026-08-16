@@ -919,10 +919,7 @@ function AssetCard(props: {
           height: 184,
           borderRadius: 14,
           overflow: "hidden",
-          // Spec: thumbnail sits on an accent→cyan gradient (Swift
-          // CaptureThumbnail), not a flat black background.
-          background:
-            "linear-gradient(135deg, rgba(125,105,245,0.075), rgba(79,191,240,0.04))",
+          background: "var(--kiri-card)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
