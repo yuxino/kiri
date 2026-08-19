@@ -247,5 +247,8 @@
   "unknown action": "unknown action",
   "Width (px)": "Width (px)",
   "Height (px)": "Height (px)",
-  "Apply size": "Apply size"
+  "Apply size": "Apply size",
+  "Select All": "Select All",
+  "Deselect All": "Deselect All",
+  "Exit selection": "Exit selection"
 }

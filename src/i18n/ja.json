@@ -247,5 +247,8 @@
   "unknown action": "不明な操作です",
   "Width (px)": "幅（px）",
   "Height (px)": "高さ（px）",
-  "Apply size": "サイズを適用"
+  "Apply size": "サイズを適用",
+  "Select All": "すべて選択",
+  "Deselect All": "すべて解除",
+  "Exit selection": "選択を終了"
 }

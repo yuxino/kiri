@@ -61,8 +61,9 @@ export function LibraryWindow() {
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video" | "gif">("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
-  // Batch selection (ids currently selected). A non-empty selection turns
-  // the grid into selection mode with a batch action bar.
+  // Selection mode: explicit toggle before cards can be picked. A
+  // non-empty selection shows the floating batch action bar.
+  const [selectMode, setSelectMode] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   // Drag-to-select (rubber band): pointer origin + current corner in the
   // scroll container's coordinates; null when not band-selecting.
@@ -88,6 +89,21 @@ export function LibraryWindow() {
   // Stable ordered list of selected ids (Set preserves insertion order).
   const selectionIds = [...selection];
 
+  const toggleSelectMode = () => {
+    if (selectMode) {
+      setSelectMode(false);
+      setSelection(new Set());
+    } else {
+      setSelectMode(true);
+    }
+  };
+
+  const selectAll = () => {
+    setSelection(new Set(assets.map((a) => a.id)));
+  };
+
+  const clearAllSelection = () => setSelection(new Set());
+
   const localNoticeSeq = useRef(0);
   const showLocalNotice = (title: string) => {
     const id = `local-${++localNoticeSeq.current}`;
@@ -99,6 +115,8 @@ export function LibraryWindow() {
   const bandStart = useRef<{ x: number; y: number } | null>(null);
 
   const bandPointerDown = (e: React.PointerEvent) => {
+    // Band-select only in selection mode.
+    if (!selectMode) return;
     // Only start a band from the empty grid area (not on a card/button).
     const target = e.target as HTMLElement | null;
     if (target && target.closest("[data-card],button,input,a,[data-menu]")) return;
@@ -167,18 +185,19 @@ export function LibraryWindow() {
     return { x, y, w, h };
   }, [band]);
 
-  // Esc exits selection mode.
+  // Esc exits selection mode (clears selection and turns the mode off).
   useEffect(() => {
-    if (selection.size === 0) return;
+    if (!selectMode) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        setSelectMode(false);
         clearSelection();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selection.size]);
+  }, [selectMode]);
 
   // Changing section/query clears the selection so the bar never points at
   // assets that are no longer visible.
@@ -452,6 +471,47 @@ export function LibraryWindow() {
             setTagFilter(null);
           }}
         />
+        {/* Selection mode toggle + select-all, then language switcher. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+          <button
+            className="kiri-button"
+            data-active={selectMode || undefined}
+            onClick={toggleSelectMode}
+            title={selectMode ? t("Exit selection") : t("Select Items")}
+            style={{
+              minHeight: 32,
+              padding: "0 12px",
+              fontSize: 12,
+              border: selectMode
+                ? "1px solid rgba(125,105,245,0.6)"
+                : "1px solid var(--kiri-surface-border)",
+              background: selectMode ? "rgba(125,105,245,0.18)" : "transparent",
+              color: selectMode ? "#8f7bff" : "var(--kiri-label)",
+              borderRadius: 10,
+            }}
+          >
+            <KiriIcon name="checkmark" size={13} />
+            {t("Select")}
+          </button>
+          {selectMode && assets.length > 0 && (
+            <button
+              className="kiri-button"
+              onClick={() => (selection.size === assets.length ? clearAllSelection() : selectAll())}
+              style={{
+                minHeight: 32,
+                padding: "0 10px",
+                fontSize: 12,
+                border: "1px solid var(--kiri-surface-border)",
+                background: "transparent",
+                color: "var(--kiri-label)",
+                borderRadius: 10,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {selection.size === assets.length ? t("Deselect All") : t("Select All")}
+            </button>
+          )}
+        </div>
         {/* Language switcher — EN / 中文, persisted across launches. */}
         <LanguageSwitcher />
       </div>
@@ -517,7 +577,7 @@ export function LibraryWindow() {
               "batchDelete",
               t("Delete these captures permanently?"),
               t("This cannot be undone."),
-              t("Delete Permanently (N)").replace("(N)", `(${selection.size})`),
+              t("Delete Permanently (N)").replace("{n}", String(selection.size)),
               [...selection],
             )
           }
@@ -647,6 +707,7 @@ export function LibraryWindow() {
                     onMenu={(x, y) => openMenu(asset.id, x, y)}
                     menu={itemMenu(asset)}
                     selected={selection.has(asset.id)}
+                    selectMode={selectMode}
                     onToggleSelect={() => toggleSelect(asset.id)}
                     registerRef={(el) => {
                       if (el) cardElsRef.current.set(asset.id, el);
@@ -802,6 +863,7 @@ function AssetCard(props: {
   onDoubleClick(): void;
   onDragStart(e: React.DragEvent): void;
   selected: boolean;
+  selectMode: boolean;
   onToggleSelect(): void;
   registerRef(el: HTMLDivElement | null): void;
 }) {
@@ -813,6 +875,7 @@ function AssetCard(props: {
     onDoubleClick,
     onDragStart,
     selected,
+    selectMode,
     onToggleSelect,
     registerRef,
   } = props;
@@ -822,6 +885,7 @@ function AssetCard(props: {
   // toggle ~220ms and cancel it when a second click arrives (dblclick).
   const clickTimer = useRef<number | null>(null);
   const handleClick = (e: React.MouseEvent) => {
+    if (!selectMode) return; // selection requires an explicit mode
     if (e.defaultPrevented || editingTitle) return;
     if (clickTimer.current) {
       window.clearTimeout(clickTimer.current);
@@ -1511,12 +1575,12 @@ function BatchActionBar(props: {
       <div style={{ width: 1, height: 22, background: "var(--kiri-surface-border)" }} />
       {showingTrash ? (
         <>
-          <BatchBarButton icon="arrow.uturn.backward" label={t("Restore (N)").replace("(N)", `(${count})`)} onClick={onRestore} />
-          <BatchBarButton icon="trash.fill" label={t("Delete Permanently (N)").replace("(N)", `(${count})`)} destructive onClick={onDelete} />
+          <BatchBarButton icon="arrow.uturn.backward" label={t("Restore (N)").replace("{n}", String(count))} onClick={onRestore} />
+          <BatchBarButton icon="trash.fill" label={t("Delete Permanently (N)").replace("{n}", String(count))} destructive onClick={onDelete} />
         </>
       ) : (
         <>
-          <BatchBarButton icon="trash" label={t("Delete (N)").replace("(N)", `(${count})`)} destructive onClick={onMoveToTrash} />
+          <BatchBarButton icon="trash" label={t("Delete (N)").replace("{n}", String(count))} destructive onClick={onMoveToTrash} />
           <BatchBarButton
             icon={allFavorites ? "star.fill" : "star"}
             label={allFavorites ? t("Remove from Favorites") : t("Add to Favorites")}

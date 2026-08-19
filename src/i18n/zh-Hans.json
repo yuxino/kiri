@@ -247,5 +247,8 @@
   "unknown action": "未知操作",
   "Width (px)": "宽度（像素）",
   "Height (px)": "高度（像素）",
-  "Apply size": "应用尺寸"
+  "Apply size": "应用尺寸",
+  "Select All": "全选",
+  "Deselect All": "取消全选",
+  "Exit selection": "退出选择"
 }
