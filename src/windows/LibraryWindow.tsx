@@ -99,6 +99,22 @@ export function LibraryWindow() {
   // --- Rubber-band (drag) selection -------------------------------------
   const bandStart = useRef<{ x: number; y: number } | null>(null);
 
+  // Content-space pointer coords: absolute-positioned children (band) and
+  // offsetLeft/offsetTop (cards) are both relative to the container's
+  // PADDING box. Convert viewport client coords → padding-box coords by
+  // subtracting the border-box origin, adding the padding back, then adding
+  // the scroll offsets (so it stays correct after scrolling).
+  const contentPoint = (e: { clientX: number; clientY: number }, container: HTMLDivElement) => {
+    const rect = container.getBoundingClientRect();
+    const cs = getComputedStyle(container);
+    const padLeft = parseFloat(cs.paddingLeft) || 0;
+    const padTop = parseFloat(cs.paddingTop) || 0;
+    return {
+      x: e.clientX - rect.left + padLeft + container.scrollLeft,
+      y: e.clientY - rect.top + padTop + container.scrollTop,
+    };
+  };
+
   const bandPointerDown = (e: React.PointerEvent) => {
     // Only start a band from the empty grid area (not on a card/button).
     const target = e.target as HTMLElement | null;
@@ -106,17 +122,15 @@ export function LibraryWindow() {
     if (e.button !== 0) return;
     const container = gridScrollRef.current;
     if (!container) return;
-    const rect = container.getBoundingClientRect();
-    bandStart.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    setBand({ x0: bandStart.current.x, y0: bandStart.current.y, x1: bandStart.current.x, y1: bandStart.current.y });
+    const p = contentPoint(e, container);
+    bandStart.current = p;
+    setBand({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
   };
 
   const bandPointerMove = (e: React.PointerEvent) => {
     if (!bandStart.current || !gridScrollRef.current) return;
-    const rect = gridScrollRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setBand((prev) => (prev ? { ...prev, x1: x, y1: y } : prev));
+    const p = contentPoint(e, gridScrollRef.current);
+    setBand((prev) => (prev ? { ...prev, x1: p.x, y1: p.y } : prev));
   };
 
   const bandPointerUp = (e: React.PointerEvent) => {
@@ -128,9 +142,9 @@ export function LibraryWindow() {
       setBand(null);
       return;
     }
-    const rect = container.getBoundingClientRect();
-    const x1 = e.clientX - rect.left;
-    const y1 = e.clientY - rect.top;
+    const p = contentPoint(e, container);
+    const x1 = p.x;
+    const y1 = p.y;
     const minX = Math.min(start.x, x1);
     const maxX = Math.max(start.x, x1);
     const minY = Math.min(start.y, y1);
@@ -139,13 +153,13 @@ export function LibraryWindow() {
     const dragged = Math.hypot(x1 - start.x, y1 - start.y) >= 5;
     if (dragged) {
       const next = new Set<string>();
+      // Card positions in content space (offsetLeft/Top are relative to the
+      // container's padding box — same coordinate space as the band).
       cardElsRef.current.forEach((el, id) => {
-        const r = el.getBoundingClientRect();
-        const cr = container.getBoundingClientRect();
-        const cardLeft = r.left - cr.left;
-        const cardTop = r.top - cr.top;
-        const cardRight = cardLeft + r.width;
-        const cardBottom = cardTop + r.height;
+        const cardLeft = el.offsetLeft;
+        const cardTop = el.offsetTop;
+        const cardRight = cardLeft + el.offsetWidth;
+        const cardBottom = cardTop + el.offsetHeight;
         const intersects =
           cardLeft <= maxX && cardRight >= minX && cardTop <= maxY && cardBottom >= minY;
         if (intersects) next.add(id);
