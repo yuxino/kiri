@@ -61,9 +61,8 @@ export function LibraryWindow() {
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video" | "gif">("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
-  // Selection mode: explicit toggle before cards can be picked. A
-  // non-empty selection shows the floating batch action bar.
-  const [selectMode, setSelectMode] = useState(false);
+  // Selection works like macOS Photos: click selects (single), ⌘-click
+  // adds/removes, ⌘A selects all, Esc clears. No separate "mode" toggle.
   const [selection, setSelection] = useState<Set<string>>(new Set());
   // Drag-to-select (rubber band): pointer origin + current corner in the
   // scroll container's coordinates; null when not band-selecting.
@@ -72,37 +71,23 @@ export function LibraryWindow() {
   // Card id → DOM element, registered while rendering, used for hit tests.
   const cardElsRef = useRef<Map<string, HTMLDivElement>>(new Map());
 
+  // Select a single card (clears others) — the default click behavior.
+  const selectSingle = (id: string) => setSelection(new Set([id]));
+  // Toggle one card in/out — used for ⌘-click.
   const toggleSelect = (id: string) => {
     setSelection((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
 
   const clearSelection = () => setSelection(new Set());
+  const selectAll = () => setSelection(new Set(assets.map((a) => a.id)));
 
   // Stable ordered list of selected ids (Set preserves insertion order).
   const selectionIds = [...selection];
-
-  const toggleSelectMode = () => {
-    if (selectMode) {
-      setSelectMode(false);
-      setSelection(new Set());
-    } else {
-      setSelectMode(true);
-    }
-  };
-
-  const selectAll = () => {
-    setSelection(new Set(assets.map((a) => a.id)));
-  };
-
-  const clearAllSelection = () => setSelection(new Set());
 
   const localNoticeSeq = useRef(0);
   const showLocalNotice = (title: string) => {
@@ -115,8 +100,6 @@ export function LibraryWindow() {
   const bandStart = useRef<{ x: number; y: number } | null>(null);
 
   const bandPointerDown = (e: React.PointerEvent) => {
-    // Band-select only in selection mode.
-    if (!selectMode) return;
     // Only start a band from the empty grid area (not on a card/button).
     const target = e.target as HTMLElement | null;
     if (target && target.closest("[data-card],button,input,a,[data-menu]")) return;
@@ -185,19 +168,18 @@ export function LibraryWindow() {
     return { x, y, w, h };
   }, [band]);
 
-  // Esc exits selection mode (clears selection and turns the mode off).
+  // Esc clears the selection.
   useEffect(() => {
-    if (!selectMode) return;
+    if (selection.size === 0) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        setSelectMode(false);
         clearSelection();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectMode]);
+  }, [selection.size]);
 
   // Changing section/query clears the selection so the bar never points at
   // assets that are no longer visible.
@@ -238,10 +220,14 @@ export function LibraryWindow() {
     };
   }, [refresh]);
 
-  // ⌘F focuses search; ⌘⌥I toggles the developer tools.
+  // ⌘A selects all; ⌘⌥I toggles the developer tools.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.altKey && e.key.toLowerCase() === "i") {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && !e.altKey && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        selectAll();
+      } else if (mod && e.altKey && e.key.toLowerCase() === "i") {
         e.preventDefault();
         void import("@tauri-apps/api/core").then(({ invoke }) => {
           invoke("open_devtools").catch(() => {});
@@ -250,7 +236,7 @@ export function LibraryWindow() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [assets]);
 
   const gridStyle: React.CSSProperties = {
     display: "grid",
@@ -471,47 +457,6 @@ export function LibraryWindow() {
             setTagFilter(null);
           }}
         />
-        {/* Selection mode toggle + select-all, then language switcher. */}
-        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
-          <button
-            className="kiri-button"
-            data-active={selectMode || undefined}
-            onClick={toggleSelectMode}
-            title={selectMode ? t("Exit selection") : t("Select Items")}
-            style={{
-              minHeight: 32,
-              padding: "0 12px",
-              fontSize: 12,
-              border: selectMode
-                ? "1px solid rgba(125,105,245,0.6)"
-                : "1px solid var(--kiri-surface-border)",
-              background: selectMode ? "rgba(125,105,245,0.18)" : "transparent",
-              color: selectMode ? "#8f7bff" : "var(--kiri-label)",
-              borderRadius: 10,
-            }}
-          >
-            <KiriIcon name="checkmark" size={13} />
-            {t("Select")}
-          </button>
-          {selectMode && assets.length > 0 && (
-            <button
-              className="kiri-button"
-              onClick={() => (selection.size === assets.length ? clearAllSelection() : selectAll())}
-              style={{
-                minHeight: 32,
-                padding: "0 10px",
-                fontSize: 12,
-                border: "1px solid var(--kiri-surface-border)",
-                background: "transparent",
-                color: "var(--kiri-label)",
-                borderRadius: 10,
-                whiteSpace: "nowrap",
-              }}
-            >
-              {selection.size === assets.length ? t("Deselect All") : t("Select All")}
-            </button>
-          )}
-        </div>
         {/* Language switcher — EN / 中文, persisted across launches. */}
         <LanguageSwitcher />
       </div>
@@ -707,7 +652,7 @@ export function LibraryWindow() {
                     onMenu={(x, y) => openMenu(asset.id, x, y)}
                     menu={itemMenu(asset)}
                     selected={selection.has(asset.id)}
-                    selectMode={selectMode}
+                    onSelect={() => selectSingle(asset.id)}
                     onToggleSelect={() => toggleSelect(asset.id)}
                     registerRef={(el) => {
                       if (el) cardElsRef.current.set(asset.id, el);
@@ -863,7 +808,7 @@ function AssetCard(props: {
   onDoubleClick(): void;
   onDragStart(e: React.DragEvent): void;
   selected: boolean;
-  selectMode: boolean;
+  onSelect(): void;
   onToggleSelect(): void;
   registerRef(el: HTMLDivElement | null): void;
 }) {
@@ -875,7 +820,7 @@ function AssetCard(props: {
     onDoubleClick,
     onDragStart,
     selected,
-    selectMode,
+    onSelect,
     onToggleSelect,
     registerRef,
   } = props;
@@ -885,16 +830,23 @@ function AssetCard(props: {
   // toggle ~220ms and cancel it when a second click arrives (dblclick).
   const clickTimer = useRef<number | null>(null);
   const handleClick = (e: React.MouseEvent) => {
-    if (!selectMode) return; // selection requires an explicit mode
     if (e.defaultPrevented || editingTitle) return;
     if (clickTimer.current) {
       window.clearTimeout(clickTimer.current);
       clickTimer.current = null;
       return; // second click of a double — the open (dblclick) takes over
     }
+    const additive = e.metaKey || e.ctrlKey;
     clickTimer.current = window.setTimeout(() => {
       clickTimer.current = null;
-      onToggleSelect();
+      if (additive) {
+        onToggleSelect();
+      } else if (selected) {
+        // Clicking an already-selected card deselects it (single-select).
+        onToggleSelect();
+      } else {
+        onSelect();
+      }
     }, 220);
   };
   const handleDoubleClick = () => {
@@ -942,12 +894,12 @@ function AssetCard(props: {
       style={{
         position: "relative",
         background: "var(--kiri-card)",
-        border: `1px solid ${selected ? "#7D69F5" : hovered ? "rgba(125,105,245,0.55)" : "var(--kiri-surface-border)"}`,
+        border: `2px solid ${selected ? "#7D69F5" : hovered ? "rgba(125,105,245,0.45)" : "var(--kiri-surface-border)"}`,
         borderRadius: 18,
-        padding: 12,
+        padding: selected ? 11 : 12,
         transform: hovered && !selected ? "translateY(-1px)" : "none",
         boxShadow: selected
-          ? "0 0 0 2px rgba(125,105,245,0.35), 0 8px 18px rgba(0,0,0,0.08)"
+          ? "0 0 0 3px rgba(125,105,245,0.28), 0 8px 18px rgba(0,0,0,0.10)"
           : hovered
             ? "0 8px 18px rgba(0,0,0,0.08)"
             : "0 3px 8px rgba(0,0,0,0.045)",
