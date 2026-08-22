@@ -1,10 +1,10 @@
 /**
- * Kiri i18n — mirrors the Swift L10n behavior:
+ * Kiri i18n:
  *  - keys are the English strings themselves (English fallback)
  *  - follows the OS preferred language; en, zh-Hans, and ja are supported
  *  - the user's manual choice is persisted by the backend (language.json)
  *    and wins over the system locale
- *  - `%@` / `%d` placeholders like String(format:)
+ *  - `%@` and `%d` placeholders for compact shared formatting
  */
 import en from "./en.json";
 import zhHans from "./zh-Hans.json";
@@ -60,7 +60,7 @@ export function t(key: string): string {
 }
 
 /**
- * Swift-style formatting. `%@` consumes the next argument as a string,
+ * Kiri formatting: `%@` consumes the next argument as a string,
  * `%d` formats the next argument as an integer.
  */
 export function fmt(key: string, ...args: (string | number)[]): string {

@@ -1,5 +1,5 @@
-//! RecordingPolicy — port of Sources/KiriCore/RecordingPolicy.swift.
-//! Values must stay identical to the Swift original.
+//! Platform-independent recording policy and option validation.
+//! Values define the stable recording/export contract across platforms.
 
 use serde::{Deserialize, Serialize};
 

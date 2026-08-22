@@ -1,7 +1,5 @@
-// RippleWindow — the violet click ripple drawn over the recording region
-// (RecordingClickHighlighterController.swift). This window is NOT excluded
-// from capture, so ripples appear in the exported video. Three-layer visual
-// per recording.md §6.3.
+// Violet click ripple drawn over the recording region. This window is not
+// excluded from capture, so enabled ripples appear in the exported video.
 
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";

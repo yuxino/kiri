@@ -17,9 +17,6 @@ use crate::record::SegmentEncoder;
 
 pub struct AppState {
     pub library: std::sync::Mutex<AssetLibrary>,
-    // Keeps the generated fixture library alive for exactly this process.
-    // Production libraries do not need a lifetime guard.
-    _temporary_library: Option<tempfile::TempDir>,
     pub capture: std::sync::Mutex<CaptureFlow>,
     pub recording: std::sync::Mutex<RecordingFlow>,
     pub ffmpeg_path: std::sync::OnceLock<PathBuf>,
@@ -227,22 +224,18 @@ pub struct ErrorDto {
     pub recovery: Option<String>,
 }
 
-// Accessibility recovery is retained as part of the serialized frontend
-// contract even when a given platform build does not construct it.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RecoveryAction {
     OpenSettings,
     QuitKiri,
-    OpenAccessibilitySettings,
     OpenInputMonitoringSettings,
     OpenMicrophoneSettings,
 }
 
 impl AppState {
     pub fn new(app: &AppHandle) -> anyhow::Result<Self> {
-        let (library, root, temporary_library) = open_library()?;
+        let (library, root) = open_library()?;
         let ocr_providers = app
             .path()
             .app_config_dir()
@@ -250,7 +243,6 @@ impl AppState {
             .unwrap_or_else(|_| Arc::new(crate::ocr_controller::OcrProviderManager::unavailable()));
         Ok(Self {
             library: std::sync::Mutex::new(library),
-            _temporary_library: temporary_library,
             capture: Default::default(),
             recording: Default::default(),
             ffmpeg_path: std::sync::OnceLock::new(),
@@ -278,22 +270,12 @@ impl AppState {
     }
 }
 
-fn open_library() -> anyhow::Result<(AssetLibrary, PathBuf, Option<tempfile::TempDir>)> {
-    open_library_for_mode(std::env::var("KIRI_CAPTURE_FIXTURE").as_deref() == Ok("1"))
-}
-
-fn open_library_for_mode(
-    use_temporary_fixture: bool,
-) -> anyhow::Result<(AssetLibrary, PathBuf, Option<tempfile::TempDir>)> {
-    let temporary_library = use_temporary_fixture.then(tempfile::tempdir).transpose()?;
-    let root = temporary_library
-        .as_ref()
-        .map(|directory| directory.path().to_path_buf())
-        .or_else(AssetLibrary::default_root_url)
+fn open_library() -> anyhow::Result<(AssetLibrary, PathBuf)> {
+    let root = AssetLibrary::default_root_url()
         .or_else(|| dirs::data_local_dir().map(|dir| dir.join("kiri")))
         .unwrap_or_else(|| std::env::temp_dir().join("kiri-library"));
     let library = AssetLibrary::open(root.clone())?;
-    Ok((library, root, temporary_library))
+    Ok((library, root))
 }
 
 // ---------------------------------------------------------------------------
@@ -502,7 +484,6 @@ pub fn emit_error(app: &AppHandle, message: String, recovery: Option<RecoveryAct
     let recovery = recovery.map(|action| match action {
         RecoveryAction::OpenSettings => "openSettings",
         RecoveryAction::QuitKiri => "quitKiri",
-        RecoveryAction::OpenAccessibilitySettings => "openAccessibilitySettings",
         RecoveryAction::OpenInputMonitoringSettings => "openInputMonitoringSettings",
         RecoveryAction::OpenMicrophoneSettings => "openMicrophoneSettings",
     });
@@ -543,7 +524,6 @@ fn append_error_log(message: &str, recovery: Option<RecoveryAction>) {
     let recovery = match recovery {
         Some(RecoveryAction::OpenSettings) => " [openSettings]",
         Some(RecoveryAction::QuitKiri) => " [quitKiri]",
-        Some(RecoveryAction::OpenAccessibilitySettings) => " [openAccessibilitySettings]",
         Some(RecoveryAction::OpenInputMonitoringSettings) => " [openInputMonitoringSettings]",
         Some(RecoveryAction::OpenMicrophoneSettings) => " [openMicrophoneSettings]",
         None => "",
@@ -666,8 +646,8 @@ pub fn save_language(app: &AppHandle, language: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        mark_error_seen, open_library_for_mode, toast_position, urlencode, ActiveRecording,
-        CaptureFlow, CaptureSession, RecordingConfiguration, RecordingFlow,
+        mark_error_seen, toast_position, urlencode, ActiveRecording, CaptureFlow, CaptureSession,
+        RecordingConfiguration, RecordingFlow,
     };
     use crate::capture::CapturedDisplay;
     use crate::core::geometry::Rect;
@@ -699,19 +679,6 @@ mod tests {
         // Small screens must not go negative.
         let (x, _) = toast_position(tauri::PhysicalSize::new(320, 240), 1.0);
         assert!(x >= 0.0);
-    }
-
-    #[test]
-    fn capture_fixture_uses_an_ephemeral_library() {
-        let (_library, root, temporary_library) = open_library_for_mode(true).unwrap();
-        let temporary_library = temporary_library.expect("fixture library must have a guard");
-
-        assert_eq!(root, temporary_library.path());
-        assert!(root.join("Assets").is_dir());
-        assert!(root.join("Thumbnails").is_dir());
-
-        drop(temporary_library);
-        assert!(!root.exists());
     }
 
     #[test]

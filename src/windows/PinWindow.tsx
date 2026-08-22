@@ -1,6 +1,4 @@
-// PinWindow — a floating pinned image (PinnedImageController.swift):
-// floating panel, always on top, drag to move, no opacity control.
-// Visual details per app-orchestration.md §5.3.
+// Floating pinned image: always on top, drag to move, no opacity control.
 
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { pinImageUrl } from "../lib/ipc";

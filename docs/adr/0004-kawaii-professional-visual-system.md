@@ -16,7 +16,8 @@ Kiri uses one restrained kawaii-professional system across its native UI:
 
 - a clean white canvas with white elevated surfaces in light mode and plum-charcoal surfaces in dark mode;
 - lavender as the primary action color, sky blue for freshness, and peach pink only for warm emphasis or destructive states;
-- rounded geometry, fine borders, and soft shadows while retaining native macOS materials and controls;
+- rounded geometry, fine borders, and soft shadows expressed consistently by
+  the React/Tauri interface on macOS and Windows;
 - a colorful chibi-girl app icon with violet-blue hair and a capture-frame motif;
 - the same chibi-girl artwork as the in-app brand mark instead of a generic capture glyph;
 - compact dark materials for capture and OCR overlays so they remain legible over arbitrary screen content;
@@ -27,7 +28,10 @@ Cute details remain concentrated in the app icon, brand mark, gradients, and emp
 
 ## Consequences
 
-- Shared spacing, radius, palette, gradient, surface, and primary-button definitions live in `KiriDesignSystem.swift` and `CaptureUIStyle.swift`.
+- Shared spacing, radius, palette, surface, and primary-button definitions live
+  in `src/styles/design-system.css` and the feature-specific styles that consume
+  those tokens.
 - New UI should reuse these definitions rather than introduce isolated purple, blue, or gray values.
-- Light, dark, compact, empty, loading, error, search, and Trash states remain part of visual regression coverage.
+- Light, dark, compact, empty, loading, error, search, and Trash states remain
+  part of UI acceptance coverage.
 - Destructive actions are intentionally not bound to Return to reduce accidental confirmation.

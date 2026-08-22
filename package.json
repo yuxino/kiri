@@ -11,12 +11,10 @@
     "icons:generate": "node scripts/app-icons.mjs generate",
     "icons:verify": "node scripts/app-icons.mjs verify",
     "test:dev-signing": "node --test scripts/tauri-cli.test.mjs",
-    "test:release-tools": "node --test scripts/tauri-cli.test.mjs scripts/release-version.test.mjs"
+    "test:release-tools": "node --test scripts/tauri-cli.test.mjs scripts/release-version.test.mjs scripts/capture-runtime-boundary.test.mjs scripts/repository-hygiene.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",
-    "@tauri-apps/plugin-dialog": "^2.4.0",
-    "@tauri-apps/plugin-opener": "^2.5.0",
     "lucide-react": "^1.31.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

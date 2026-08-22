@@ -88,7 +88,7 @@ if [ -z "$identity" ]; then
     identity="-"
     echo "kiri dev signing: using explicitly requested ad-hoc signing; macOS may ask for permissions again after rebuilds" >&2
   else
-    fail "no stable code-signing identity found. Install an Apple Development certificate or set KIRI_DEV_SIGNING_IDENTITY. For UI-only fixture work, explicitly set both KIRI_CAPTURE_FIXTURE=1 and KIRI_ALLOW_ADHOC_SIGNING=1."
+    fail "no stable code-signing identity found. Install an Apple Development certificate or set KIRI_DEV_SIGNING_IDENTITY. Disposable local QA may explicitly allow ad-hoc signing with KIRI_ALLOW_ADHOC_SIGNING=1."
   fi
 fi
 

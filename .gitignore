@@ -11,12 +11,14 @@ dist/
 .pnpm-store/
 
 # Rust
+target/
 src-tauri/target/
 src-tauri/gen/schemas/
 .cargo/
 
 # IDE
 .idea/
+.rustup/
 *.swp
 # downloaded binaries (never committed)
 src-tauri/binaries/ffmpeg-*/

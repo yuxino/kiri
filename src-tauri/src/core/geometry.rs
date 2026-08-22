@@ -1,8 +1,7 @@
-//! Geometry — the rectangle type shared across capture, library, and
-//! recording. Coordinates follow the Swift original's conventions: top-left
-//! origin for canvas/view coordinates, bottom-left origin for Quartz screen
-//! coordinates. Selection/annotation geometry itself lives in the frontend
-//! (src/annotation/geom.ts); this crate only needs the plain data type.
+//! Rectangle geometry shared across capture, library, and recording. Canvas
+//! coordinates use a top-left origin while Quartz screen coordinates use a
+//! bottom-left origin. Selection and annotation operations live in the
+//! frontend; this module provides the portable data type.
 
 /// A rectangle in the same conventions as CGRect: (x, y) is the top-left
 /// (or bottom-left, depending on the coordinate system in use) corner.

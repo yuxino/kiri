@@ -1,5 +1,5 @@
-//! Recording encoder — pipes raw video/audio frames into ffmpeg, mirroring
-//! the Swift legacy backend's H.264 + AAC + MP4 output.
+//! Recording encoder — pipes raw video/audio frames into FFmpeg and produces
+//! the application's H.264/HEVC + AAC MP4 output.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};

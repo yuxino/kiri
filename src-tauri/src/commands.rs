@@ -1,6 +1,6 @@
-//! Tauri command surface — the AppModel orchestration in Rust.
-//! Synchronous commands run on the main thread (mirroring the Swift @MainActor
-//! design); heavy work is spawned onto background threads.
+//! Tauri command surface and application orchestration.
+//! Synchronous commands run on the main thread; heavy work is spawned onto
+//! background threads.
 
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -115,27 +115,6 @@ pub fn list_assets(
     let assets = library.search(&query, showing_trash);
     let root = state.library_root.clone();
     Ok(assets.iter().map(|asset| asset_dto(asset, &root)).collect())
-}
-
-/// Average brightness (0-255) of a PNG buffer; None if undecodable.
-fn png_average(png: &[u8]) -> Option<(u32, u32, f64)> {
-    let image = image::load_from_memory(png).ok()?;
-    let rgba = image.to_rgba8();
-    let (w, h) = rgba.dimensions();
-    if w == 0 || h == 0 {
-        return None;
-    }
-    let mut sum = 0.0f64;
-    let mut count = 0.0f64;
-    let step = ((w * h) / 4000).max(1);
-    for (i, pixel) in rgba.pixels().enumerate() {
-        if i % step as usize != 0 {
-            continue;
-        }
-        sum += (pixel[0] as f64 + pixel[1] as f64 + pixel[2] as f64) / 3.0;
-        count += 1.0;
-    }
-    Some((w, h, sum / count.max(1.0)))
 }
 
 fn with_asset_mutation(
@@ -475,7 +454,7 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
     // StrictMode in development), and that re-entry must never touch the
     // system permission request path.
     #[cfg(target_os = "macos")]
-    if std::env::var("KIRI_CAPTURE_FIXTURE").as_deref() != Ok("1") {
+    {
         use crate::capture::current::PermissionState;
         match crate::capture::current::check_capture_permission() {
             PermissionState::Authorized => {}
@@ -751,9 +730,6 @@ fn confirm_capture_inner(
         }
     }
 
-    if let Some((w, h, avg)) = png_average(&request.png) {
-        log::info!("confirm_capture: exported png {w}x{h} avg-brightness={avg:.1}");
-    }
     let image = image::load_from_memory(&request.png).map_err(|e| e.to_string())?;
     let (pixel_width, pixel_height) = (image.width() as i64, image.height() as i64);
     let mut library = state.library.lock().unwrap();
@@ -1991,9 +1967,6 @@ pub fn open_settings(action: String) -> Result<(), String> {
             "openSettings" => {
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
             }
-            "openAccessibilitySettings" => {
-                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
-            }
             "openInputMonitoringSettings" => {
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
             }
@@ -2025,25 +1998,6 @@ pub fn open_settings(action: String) -> Result<(), String> {
 #[tauri::command]
 pub fn quit_app(app: AppHandle) -> Result<(), String> {
     app.exit(0);
-    Ok(())
-}
-
-/// Toggles the web inspector on the frontmost Kiri window (⌘⌥I). Works in
-/// release builds thanks to the "devtools" cargo feature.
-#[tauri::command]
-pub fn open_devtools(app: AppHandle) -> Result<(), String> {
-    use tauri::Manager;
-    for label in ["library", "overlay", "editor"] {
-        if let Some(window) = app.get_webview_window(label) {
-            if window.is_focused().unwrap_or(false) {
-                window.open_devtools();
-                return Ok(());
-            }
-        }
-    }
-    if let Some(window) = app.get_webview_window("library") {
-        window.open_devtools();
-    }
     Ok(())
 }
 

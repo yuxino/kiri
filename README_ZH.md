@@ -66,12 +66,6 @@ macOS 下,`pnpm tauri dev` 会用稳定证书和独立开发 identifier
 `KIRI_DEV_SIGNING_IDENTITY` 明确指定。找不到稳定证书时会直接给出错误,不会
 悄悄使用导致反复弹窗的 ad-hoc 临时签名。
 
-如果没有签名证书、只做界面开发,可以明确使用生成的截屏夹具。夹具模式会使用仅属于当前进程的临时素材库,进程正常退出后自动删除,不会读写用户的真实素材库。
-
-```bash
-KIRI_CAPTURE_FIXTURE=1 KIRI_ALLOW_ADHOC_SIGNING=1 pnpm tauri dev
-```
-
 > 注意:直接 `cargo build` 出的二进制打开会是空白窗口——`pnpm tauri
 > build` 会嵌入前端资源,`pnpm tauri dev` 则由 Vite 在开发时提供资源。
 
@@ -89,6 +83,6 @@ macOS 打包还需要 Xcode 命令行工具。
 - **⌘F**(macOS)/ **Ctrl+F**(Windows)— 搜索素材库
 - **⌘Z / ⇧⌘Z**(macOS)/ **Ctrl+Z / Shift+Ctrl+Z**(Windows)— 撤销 / 重做
 
-另见 [PRIVACY_ZH.md](PRIVACY_ZH.md)、[ROADMAP.md](ROADMAP.md)、[CONTRIBUTING.md](CONTRIBUTING.md) 与 [SECURITY.md](SECURITY.md)。
+另见 [PRIVACY_ZH.md](PRIVACY_ZH.md)、[ROADMAP.md](ROADMAP.md)、[CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) 与[文档索引](docs/README.md)。
 
 [MIT](LICENSE) © 2026 yuxino

@@ -37,20 +37,11 @@ void invoke<string>("get_language")
   })
   .catch(() => applySystemLanguage());
 
-// Surface runtime errors as a compact bottom banner (never blocks the UI),
-// and forward the message to the Rust log for diagnosis.
-function installErrorDiagnostics() {
+// Forward renderer failures to the bounded Rust error log. Production windows
+// must not mutate their title or inject a debug overlay.
+function installErrorReporting() {
   const report = (message: string) => {
     void invoke("log_frontend_error", { message: message.slice(0, 2000) }).catch(() => {});
-    document.title = `kiri [error] ${message.slice(0, 80)}`;
-    const box = document.createElement("pre");
-    box.style.cssText =
-      "position:fixed;left:12px;right:12px;bottom:12px;margin:0;padding:10px 14px;" +
-      "background:rgba(30,27,40,0.95);color:#fa476e;border:1px solid rgba(250,71,110,0.5);" +
-      "border-radius:10px;font:11px ui-monospace,Menlo,monospace;white-space:pre-wrap;" +
-      "z-index:99999;max-height:160px;overflow:auto";
-    box.textContent = message;
-    document.body.appendChild(box);
   };
   window.addEventListener("error", (event) => {
     report(`window.onerror: ${event.message}\n${event.filename ?? ""}:${event.lineno ?? 0}`);
@@ -62,7 +53,7 @@ function installErrorDiagnostics() {
     report(`unhandledrejection: ${message}`);
   });
 }
-installErrorDiagnostics();
+installErrorReporting();
 
 function resolveWindow(): { kind: string; params: URLSearchParams } {
   const params = new URLSearchParams(window.location.search);
@@ -71,7 +62,6 @@ function resolveWindow(): { kind: string; params: URLSearchParams } {
 
 function App() {
   const { kind, params } = resolveWindow();
-  document.title = `${kind}-alive`;
   // Re-render when the UI language resolves/changes (system locale arrives
   // asynchronously from the backend).
   const [, force] = React.useReducer((x: number) => x + 1, 0);

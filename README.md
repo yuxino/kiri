@@ -69,15 +69,6 @@ The command fails clearly when no stable identity is available instead of
 silently using an ad-hoc signature that would trigger repeated permission
 prompts.
 
-For UI-only work on a Mac without a signing certificate, use the generated capture
-fixture explicitly. Fixture mode uses a process-scoped temporary capture library
-and removes it after a normal process exit; it never reads or writes the user's
-capture library.
-
-```bash
-KIRI_CAPTURE_FIXTURE=1 KIRI_ALLOW_ADHOC_SIGNING=1 pnpm tauri dev
-```
-
 > Running the binary produced by a plain `cargo build` shows a blank window:
 > frontend assets are embedded by `pnpm tauri build` and served by Vite during
 > `pnpm tauri dev`.
@@ -96,6 +87,6 @@ macOS packaging also requires Xcode Command Line Tools.
 - **⌘F** (macOS) / **Ctrl+F** (Windows) — search the library
 - **⌘Z / ⇧⌘Z** (macOS) / **Ctrl+Z / Shift+Ctrl+Z** (Windows) — undo / redo
 
-See [PRIVACY.md](PRIVACY.md), [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [SECURITY.md](SECURITY.md).
+See [PRIVACY.md](PRIVACY.md), [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [documentation index](docs/README.md).
 
 [MIT](LICENSE) © 2026 yuxino

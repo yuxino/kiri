@@ -25,8 +25,8 @@ Screenshot and recording selection use restrained window recognition:
 - Dragging creates the region.
 - Dragging inside an existing region moves it.
 - Dragging any of the eight handles resizes it.
-- `CaptureCoordinator` collects visible-window rectangles for hover and click
-  hit testing.
+- The platform capture backend collects visible-window rectangles for hover and
+  click hit testing.
 
 ## Consequences
 

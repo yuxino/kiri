@@ -1,5 +1,5 @@
-// Canvas rendering — port of AnnotationCanvasView.draw / drawForExport.
-// View coordinates are top-left (y down); export flips y and scales.
+// Shared canvas rendering for the live annotation view and exported bitmap.
+// View coordinates are top-left (y down); export scales into pixel space.
 
 import type { AnnotationMark, ColorPreset, TextBackgroundStyle } from "./model";
 import { COLOR_HEX, MOSAIC_VIEW_BLOCK_SIZE, arrowHeadPoints, selectionBounds } from "./model";
@@ -43,11 +43,8 @@ export interface RenderContext {
 
 function exportPoint(p: Point, r: RenderContext): Point {
   if (!r.exporting) return p;
-  // Canvas 2D is y-down, same as the view space, so no vertical flip is
-  // needed. The Swift spec's `outputSize.height - (regionSize.height - p.y)
-  // * scaleY` algebraically equals `p.y * scaleY` (outputSize.height ==
-  // regionSize.height * scaleY), which for sub-region captures is exactly
-  // what keeps annotations aligned with the unflipped background image.
+  // Canvas 2D and the view are both y-down, so scaling without a vertical flip
+  // keeps sub-region annotations aligned with the background image.
   return {
     x: p.x * r.scaleX,
     y: p.y * r.scaleY,
@@ -89,9 +86,7 @@ function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRenderingCo
       ctx.strokeStyle = colorValue(mark.color);
       ctx.lineWidth = exportSize(mark.width, r);
       if (w < 1 && h < 1) {
-        // Zero-size rectangle from a click: Swift draws a small rounded
-        // stroke dot (the rect corner radius keeps it visible). Mirror that
-        // with a filled dot of the stroke width.
+        // Keep a click-only rectangle visible as a small dot.
         const dot = Math.max(exportSize(mark.width, r) * 0.7, 2);
         ctx.fillStyle = colorValue(mark.color);
         ctx.beginPath();
@@ -256,7 +251,7 @@ function clipToMosaicStroke(ctx: CanvasRenderingContext2D, points: Point[], diam
   // would clip to ~nothing. Build the stroke band as the union of one disk
   // per sample point: sampling distance (≥0.5pt) is far smaller than the
   // brush diameter (≥12pt), so the disks overlap into a continuous band,
-  // equivalent to the Swift `replacePathWithStrokedPath()` approach.
+  // equivalent to clipping against the brush's stroked outline.
   const radius = diameter / 2;
   if (points.length === 1) {
     ctx.arc(points[0].x, points[0].y, radius, 0, Math.PI * 2);

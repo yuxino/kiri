@@ -5,8 +5,9 @@ workspace. Dates are intentionally omitted until each milestone is stable.
 
 ## v1.3 — Tauri multi-platform rewrite
 
-The macOS + Windows rewrite in Tauri 2 (1:1 migration from the Swift
-original; behavior specs live in `docs/spec/swift/`).
+The macOS + Windows rewrite in Tauri 2. The current runtime structure lives in
+`docs/architecture.md`; completed migration plans remain available in Git
+history.
 
 - [x] Tauri 2 + Rust + React project skeleton
 - [x] Platform-independent core (geometry, recording policy, shortcut, library)
@@ -47,7 +48,7 @@ Release validation still open:
 - [ ] Pause/resume and exported-control exclusion acceptance on both platforms
 - [ ] Mixed-scale multi-display acceptance testing
 - [ ] Signed and notarized release builds (macOS) + Authenticode (Windows)
-- [ ] Verify the final arm64, x64, and Windows v1.4.0 installers
+- [ ] Verify each release's final arm64, x64, and Windows installers
 
 ## Later
 

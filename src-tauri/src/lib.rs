@@ -26,7 +26,6 @@ pub fn run() {
     env_logger::init();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("library") {
                 let _ = window.show();
@@ -165,7 +164,6 @@ pub fn run() {
             commands::get_shortcut_label,
             commands::open_settings,
             commands::quit_app,
-            commands::open_devtools,
             commands::get_recording_options,
             commands::set_recording_options,
         ])
@@ -286,10 +284,8 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Menu-bar (macOS) / tray (Windows) icon with Capture, Open Library, and
-/// Quit — mirrors the Swift original's MenuBarExtra (app-orchestration.md
-/// §1). The tray icon is optional sugar; the library window and the global
-/// shortcut remain the primary entry points.
+/// Menu-bar (macOS) / tray (Windows) icon with Capture, Open Library, and Quit.
+/// The library window and global shortcut remain the primary entry points.
 fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::TrayIconBuilder;

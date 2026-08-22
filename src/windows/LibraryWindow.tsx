@@ -3,7 +3,6 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
 import { api, onError, onLibraryChanged, onNotice, type AssetDto, type ErrorDto, type NoticeDto } from "../lib/ipc";
 import { t, fmt } from "../i18n";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -261,8 +260,7 @@ export function LibraryWindow() {
     };
   }, [refresh]);
 
-  // ⌘/Ctrl+F focuses search, ⌘/Ctrl+A selects the visible filtered cards,
-  // and ⌘/Ctrl+Alt+I toggles the developer tools.
+  // ⌘/Ctrl+F focuses search; ⌘/Ctrl+A selects the visible filtered cards.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -286,9 +284,6 @@ export function LibraryWindow() {
       ) {
         e.preventDefault();
         selectAll();
-      } else if (mod && e.altKey && e.key.toLowerCase() === "i") {
-        e.preventDefault();
-        void invoke("open_devtools").catch(() => {});
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -455,7 +450,7 @@ export function LibraryWindow() {
       className="library-root kiri-canvas-surface"
       style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}
     >
-      {/* Header — single compact row (mirrors Swift wideHeader): title,
+      {/* Header — single compact row: title,
           search, section picker, then a slim filter bar under the content
           area instead of crowding the header. */}
       <div
@@ -893,8 +888,6 @@ function recoveryLabel(recovery: string): string {
       return t("Open Settings");
     case "quitKiri":
       return t("Quit Kiri");
-    case "openAccessibilitySettings":
-      return t("Open Accessibility Settings");
     case "openInputMonitoringSettings":
       return t("Open Input Monitoring Settings");
     case "openMicrophoneSettings":

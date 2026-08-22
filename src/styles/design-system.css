@@ -1,17 +1,13 @@
 /*
- * Kiri design system — port of KiriDesignSystem.swift / CaptureUIStyle.swift
- * (docs/adr/0004-kawaii-professional-visual-system.md).
- * Values are pt-accurate; HEX approximations from the migration spec.
+ * Shared Kiri visual tokens for the React/Tauri interface.
+ * Durable visual decisions live in ADR 0004.
  */
 
 :root {
   /* Core palette (CaptureUIColors) */
   --kiri-accent: #7d69f5;
   --kiri-accent-strong: #634fdb;
-  --kiri-accent-soft: #ab94ff;
-  --kiri-blossom: #ff80a8;
   --kiri-coral: #ff80a8;
-  --kiri-cyan: #4fbff0;
 
   /* Light scheme */
   --kiri-canvas: #ffffff;
@@ -37,33 +33,19 @@
   --kiri-accent-soft-alpha-10: rgba(125, 105, 245, 0.1);
   --kiri-accent-alpha-18: rgba(125, 105, 245, 0.18);
   --kiri-accent-alpha-32: rgba(125, 105, 245, 0.32);
-  --kiri-accent-alpha-92: rgba(125, 105, 245, 0.92);
   --kiri-white-alpha-14: rgba(255, 255, 255, 0.14);
-  --kiri-white-alpha-16: rgba(255, 255, 255, 0.16);
-  --kiri-white-alpha-22: rgba(255, 255, 255, 0.22);
-  --kiri-white-alpha-24: rgba(255, 255, 255, 0.24);
-  --kiri-white-alpha-92: rgba(255, 255, 255, 0.92);
-  --kiri-white-alpha-96: rgba(255, 255, 255, 0.96);
-  --kiri-black-alpha-76: rgba(0, 0, 0, 0.76);
-  --kiri-black-alpha-18: rgba(0, 0, 0, 0.18);
 
   /* Spacing */
-  --kiri-space-tight: 6px;
-  --kiri-space-compact: 10px;
   --kiri-space-standard: 14px;
-  --kiri-space-roomy: 20px;
   --kiri-space-page: 24px;
 
   /* Radii */
   --kiri-radius-control: 11px;
   --kiri-radius-badge: 9px;
-  --kiri-radius-preview: 14px;
   --kiri-radius-card: 18px;
-  --kiri-radius-surface: 24px;
 
   /* Motion */
   --kiri-motion-hover: 0.14s;
-  --kiri-motion-feedback: 0.2s;
 
   /* Typography */
   --kiri-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
@@ -72,15 +54,6 @@
   /* Solid brand color (flat, no gradients) */
   --kiri-brand-solid: var(--kiri-accent-strong);
 
-  /* Annotation color presets */
-  --kiri-annotation-violet: #7d69f5;
-  --kiri-annotation-cherry: #fa476e;
-  --kiri-annotation-orange: #ff7d2e;
-  --kiri-annotation-yellow: #ffd129;
-  --kiri-annotation-mint: #29c78f;
-  --kiri-annotation-blue: #2994ff;
-  --kiri-annotation-white: #ffffff;
-  --kiri-annotation-black: #141414;
 }
 
 /* Editor/capture surfaces are always dark (darkAqua forced in the original). */

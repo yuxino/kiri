@@ -1,4 +1,4 @@
-//! CaptureAsset — port of Sources/KiriCore/CaptureAsset.swift.
+//! Persistent capture metadata shared by the library and IPC layers.
 //! The JSON representation stays byte-compatible with the Swift app so an
 //! existing user library keeps working after migration.
 

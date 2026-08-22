@@ -1,4 +1,4 @@
-//! AssetLibrary — port of Sources/KiriCore/AssetLibrary.swift.
+//! Local asset-library persistence and recoverable Trash operations.
 //! Storage layout and JSON schema stay compatible with the Swift app, so an
 //! existing library at ~/Library/Application Support/kiri keeps working.
 

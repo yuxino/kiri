@@ -1,20 +1,19 @@
 # Kiri repository guide for agents
 
 This file is the first source of truth for agents working in this repository.
-Read it before editing, then read `docs/plans/2026-08-13-kiri-tauri-migration-design.md`.
+Read it before editing, then read `docs/architecture.md`.
 
 ## Start here
 
 1. Run `git status -sb` before making changes.
-2. Read `README.md`, `ROADMAP.md`, and the migration design doc.
+2. Read `README.md`, `ROADMAP.md`, and `docs/architecture.md`.
 3. For capture-selection behavior, also read
    `docs/adr/0003-manual-region-selection.md`.
 4. Treat every pre-existing modification and untracked file as user-owned.
    Never reset, discard, overwrite, or reformat unrelated work.
-5. `docs/spec/swift/` contains the authoritative 1:1 behavior specs extracted
-   from the original Swift implementation. Historical plans under
-   `docs/plans/` describe how earlier versions were built; when they conflict
-   with current source, this file, a newer ADR, or the migration design wins.
+5. Completed implementation plans and the former Swift migration specs live in
+   Git history, not the working tree. Do not reconstruct an old parallel
+   project from them; current source, tests, this file, and accepted ADRs win.
 
 ## Product contract
 
@@ -66,7 +65,8 @@ decisions:
 - `src-tauri/src/{ocr,gif,thumbnail,protocol,state}.rs` — OCR, GIF export,
   thumbnails, `kiri://` protocol, shared state.
 - `scripts/` — packaging, stable development signing, and app-icon validation.
-- `docs/spec/swift/` — 1:1 behavior specs (the migration source of truth).
+- `docs/architecture.md` — current runtime structure and platform boundaries.
+- `docs/README.md` — index of current documentation and accepted decisions.
 - `docs/adr/` — accepted architecture/product decisions.
 
 ## Architecture boundaries
@@ -100,9 +100,9 @@ pnpm build
 git diff --check
 ```
 
-Debugging without Screen Recording permission: launch with
-`KIRI_CAPTURE_FIXTURE=1` to use a synthetic frozen screen (mirrors the Swift
-original's fixture).
+Do not add a runtime synthetic-capture mode to the user-facing application.
+Capture QA must use unit-level injected data or an isolated test harness, never
+replace the visible desktop with a mock screen inside normal dev or prod Kiri.
 
 For changes to capture, recording, permissions, focus, keyboard handling, or
 overlay windows, also package and test the fixed-path app:

@@ -1,6 +1,4 @@
-// CountdownWindow — the 3-2-1 recording countdown badge (RecordingCountdown
-// Controller.swift). The region is never dimmed; only the badge is drawn.
-// Visual details per recording.md §5.4.
+// Compact 3-2-1 recording badge. The selected region is never dimmed.
 
 import { useEffect, useState } from "react";
 import { api } from "../lib/ipc";
