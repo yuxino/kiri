@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { invoke } from "@tauri-apps/api/core";
 import "./styles/design-system.css";
 import { onLanguageChange, setLanguage } from "./i18n";
 import { OverlayWindow } from "./windows/OverlayWindow";
@@ -18,35 +19,27 @@ import { ConfirmWindow } from "./windows/ConfirmWindow";
 // back to the real system locale via get_locale (the WebView's
 // navigator.language is fixed to en in Tauri, so it cannot be trusted).
 // The choice is shared across all windows and survives relaunches.
-void import("@tauri-apps/api/core").then(({ invoke }) => {
-  invoke<string>("get_language")
-    .then((saved) => {
-      if (saved) {
-        setLanguage(saved as "en" | "zh-Hans" | "ja");
-        return;
-      }
-      invoke<string>("get_locale").then((locale) => {
-        if (locale === "zh-Hans") setLanguage("zh-Hans");
-      }).catch(() => {});
-    })
-    .catch(() => {
-      invoke<string>("get_locale").then((locale) => {
-        if (locale === "zh-Hans") setLanguage("zh-Hans");
-      }).catch(() => {});
-    });
-});
+void invoke<string>("get_language")
+  .then((saved) => {
+    if (saved) {
+      setLanguage(saved as "en" | "zh-Hans" | "ja");
+      return;
+    }
+    invoke<string>("get_locale").then((locale) => {
+      if (locale === "zh-Hans" || locale === "ja") setLanguage(locale);
+    }).catch(() => {});
+  })
+  .catch(() => {
+    invoke<string>("get_locale").then((locale) => {
+      if (locale === "zh-Hans" || locale === "ja") setLanguage(locale);
+    }).catch(() => {});
+  });
 
 // Surface runtime errors as a compact bottom banner (never blocks the UI),
 // and forward the message to the Rust log for diagnosis.
 function installErrorDiagnostics() {
   const report = (message: string) => {
-    try {
-      void import("@tauri-apps/api/core").then(({ invoke }) => {
-        invoke("log_frontend_error", { message: message.slice(0, 2000) });
-      });
-    } catch {
-      // not in a Tauri context
-    }
+    void invoke("log_frontend_error", { message: message.slice(0, 2000) }).catch(() => {});
     document.title = `kiri [error] ${message.slice(0, 80)}`;
     const box = document.createElement("pre");
     box.style.cssText =

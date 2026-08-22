@@ -4,6 +4,7 @@
 // non-activating panel that never steals focus.
 
 import { useEffect, useRef, useState } from "react";
+import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
 import { api, onRecordingState, type RecordingState } from "../lib/ipc";
 import { t } from "../i18n";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
@@ -20,18 +21,16 @@ export function ControlPanelWindow() {
 
   // Apply the user's saved panel position on mount (default: bottom-right).
   useEffect(() => {
-    void import("@tauri-apps/api/window").then(({ getCurrentWindow, LogicalPosition }) => {
-      const win = getCurrentWindow();
-      const saved = localStorage.getItem("kiri-panel-pos");
-      if (saved) {
-        try {
-          const { x, y } = JSON.parse(saved);
-          void win.setPosition(new LogicalPosition(x, y)).catch(() => {});
-        } catch {
-          /* ignore malformed */
-        }
+    const win = getCurrentWindow();
+    const saved = localStorage.getItem("kiri-panel-pos");
+    if (saved) {
+      try {
+        const { x, y } = JSON.parse(saved);
+        void win.setPosition(new LogicalPosition(x, y)).catch(() => {});
+      } catch {
+        /* ignore malformed */
       }
-    });
+    }
   }, []);
 
   // Dragging the panel (anywhere on the material surface) moves the window;
@@ -39,9 +38,7 @@ export function ControlPanelWindow() {
   const onPanelPointerDown = (e: React.PointerEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest("button")) return; // don't drag from controls
-    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      void getCurrentWindow().startDragging().catch(() => {});
-    });
+    void getCurrentWindow().startDragging().catch(() => {});
   };
 
   // Recording hotkey: Esc stops. (Pause/resume was removed — not needed
@@ -61,19 +58,17 @@ export function ControlPanelWindow() {
   // Remember the panel position after it moves (drag or otherwise).
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      const win = getCurrentWindow();
-      void win.onMoved(() => {
-        void Promise.all([win.outerPosition(), win.scaleFactor()]).then(([pos, scale]) => {
-          const logical = pos.toLogical(scale);
-          localStorage.setItem(
-            "kiri-panel-pos",
-            JSON.stringify({ x: logical.x, y: logical.y }),
-          );
-        });
-      }).then((fn) => {
-        unlisten = fn;
+    const win = getCurrentWindow();
+    void win.onMoved(() => {
+      void Promise.all([win.outerPosition(), win.scaleFactor()]).then(([pos, scale]) => {
+        const logical = pos.toLogical(scale);
+        localStorage.setItem(
+          "kiri-panel-pos",
+          JSON.stringify({ x: logical.x, y: logical.y }),
+        );
       });
+    }).then((fn) => {
+      unlisten = fn;
     });
     return () => unlisten?.();
   }, []);

@@ -3,13 +3,16 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { invoke } from "@tauri-apps/api/core";
 import { api, onError, onLibraryChanged, onNotice, type AssetDto, type ErrorDto, type NoticeDto } from "../lib/ipc";
-import { t, fmt, getLanguage, setLanguage } from "../i18n";
+import { t, fmt } from "../i18n";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import brandIcon from "../assets/kiri-icon.png";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
+import { SettingsView } from "../settings/SettingsView";
 
 type Section = "library" | "trash";
+type Destination = "captures" | "settings";
 
 function assetUrl(id: string): string {
   return `kiri://asset/${id}`;
@@ -50,6 +53,7 @@ function groupByDay(assets: AssetDto[]): { label: string; assets: AssetDto[] }[]
 export function LibraryWindow() {
   const [assets, setAssets] = useState<AssetDto[]>([]);
   const [section, setSection] = useState<Section>("library");
+  const [destination, setDestination] = useState<Destination>("captures");
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState<NoticeDto | null>(null);
   const [error, setError] = useState<ErrorDto | null>(null);
@@ -238,19 +242,25 @@ export function LibraryWindow() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      if (mod && !e.altKey && e.key.toLowerCase() === "a") {
+      if (
+        destination === "captures" &&
+        mod &&
+        !e.altKey &&
+        e.key.toLowerCase() === "a" &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement) &&
+        !(e.target instanceof HTMLSelectElement)
+      ) {
         e.preventDefault();
         selectAll();
       } else if (mod && e.altKey && e.key.toLowerCase() === "i") {
         e.preventDefault();
-        void import("@tauri-apps/api/core").then(({ invoke }) => {
-          invoke("open_devtools").catch(() => {});
-        });
+        void invoke("open_devtools").catch(() => {});
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [assets]);
+  }, [assets, destination]);
 
   const gridStyle: React.CSSProperties = {
     display: "grid",
@@ -454,27 +464,49 @@ export function LibraryWindow() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0 }}>
           <span style={{ fontSize: 15, fontWeight: 700, color: "var(--kiri-label)", lineHeight: 1.2 }}>
-            {showingTrash ? t("Trash") : t("Library")}
+            {destination === "settings"
+              ? t("Settings")
+              : showingTrash
+                ? t("Trash")
+                : t("Library")}
           </span>
           <span style={{ fontSize: 10.5, color: "var(--kiri-secondary-label)" }}>
-            {fmt("%d captures", assets.length)}
+            {destination === "settings"
+              ? t("Language and text recognition")
+              : fmt("%d captures", assets.length)}
           </span>
         </div>
         <div style={{ flex: 1 }} />
         <SegmentedPicker
           options={[t("Library"), t("Trash")]}
-          value={section === "library" ? 0 : 1}
+          value={destination === "settings" ? -1 : section === "library" ? 0 : 1}
           onChange={(index) => {
+            setDestination("captures");
             setSection(index === 0 ? "library" : "trash");
             setKindFilter("all");
             setFavoritesOnly(false);
             setTagFilter(null);
           }}
         />
-        {/* Language switcher — EN / 中文, persisted across launches. */}
-        <LanguageSwitcher />
+        <button
+          type="button"
+          className="kiri-icon-button library-settings-button"
+          data-active={destination === "settings" || undefined}
+          aria-pressed={destination === "settings"}
+          aria-label={t("Settings")}
+          title={t("Settings")}
+          onClick={() => {
+            clearSelection();
+            setMenuFor(null);
+            setDestination("settings");
+          }}
+        >
+          <KiriIcon name="slider.horizontal.3" size={14} />
+        </button>
       </div>
 
+      {destination === "captures" ? (
+        <>
       {/* Slim filter bar above the content — identical in Library and
           Trash so both sections share the same interaction language.
           Section-level actions (Empty Trash) sit at the right end. */}
@@ -701,6 +733,10 @@ export function LibraryWindow() {
             </div>
           ))}
         </div>
+      )}
+        </>
+      ) : (
+        <SettingsView />
       )}
 
       {/* Notice toast */}
@@ -1621,51 +1657,6 @@ function BatchBarButton(props: {
   );
 }
 
-
-/** Compact EN / 中文 language toggle in the library header. The choice is
- * persisted via setLanguage (localStorage) and re-applies on next launch. */
-function LanguageSwitcher() {
-  const current = getLanguage();
-  const switchTo = (lang: "en" | "zh-Hans" | "ja") => {
-    setLanguage(lang);
-    // Persist via the backend (survives relaunch, shared across windows).
-    void api.setLanguage(lang).catch(() => {});
-  };
-  return (
-    <div
-      style={{
-        display: "flex",
-        background: "var(--kiri-group-fill)",
-        borderRadius: 11,
-        padding: 3,
-        gap: 2,
-        flexShrink: 0,
-      }}
-    >
-      {(["en", "zh-Hans", "ja"] as const).map((lang) => (
-        <button
-          key={lang}
-          onClick={() => switchTo(lang)}
-          style={{
-            height: 28,
-            minWidth: 34,
-            padding: "0 9px",
-            borderRadius: 8,
-            border: "none",
-            background: current === lang ? "var(--kiri-accent)" : "transparent",
-            color: current === lang ? "#fff" : "var(--kiri-secondary-label)",
-            font: "600 11px var(--kiri-font-ui)",
-            cursor: "pointer",
-            transition: "background 0.14s ease-out, color 0.14s ease-out",
-          }}
-          title={lang === "en" ? "English" : lang === "zh-Hans" ? "简体中文" : "日本語"}
-        >
-          {lang === "en" ? "EN" : lang === "zh-Hans" ? "中文" : "日本語"}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 function SegmentedPicker(props: {
   options: string[];

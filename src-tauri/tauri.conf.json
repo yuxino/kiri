@@ -25,7 +25,8 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost kiri: http://kiri.localhost; img-src 'self' data: blob: kiri: http://kiri.localhost; media-src 'self' blob: kiri: http://kiri.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "devCsp": "default-src 'self' http://localhost:1420; connect-src ipc: http://ipc.localhost kiri: http://kiri.localhost http://localhost:1420 ws://localhost:1420; img-src 'self' data: blob: kiri: http://kiri.localhost http://localhost:1420; media-src 'self' blob: kiri: http://kiri.localhost; style-src 'self' 'unsafe-inline' http://localhost:1420; script-src 'self' 'unsafe-eval' http://localhost:1420; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     }
   },
   "bundle": {

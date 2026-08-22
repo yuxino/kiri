@@ -19,7 +19,8 @@ pub fn activate_application(pid: u32) {
     if let Some(application) =
         NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
     {
-        application.activateWithOptions(objc2_app_kit::NSApplicationActivationOptions::ActivateAllWindows);
+        application
+            .activateWithOptions(objc2_app_kit::NSApplicationActivationOptions::ActivateAllWindows);
     }
 }
 
@@ -76,13 +77,32 @@ pub fn set_window_capture_excluded(app: &AppHandle, label: &str, excluded: bool)
 
 pub struct ClickMonitor {
     stop_flag: Arc<std::sync::atomic::AtomicBool>,
-    _thread: thread::JoinHandle<()>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl ClickMonitor {
+    fn shutdown(&mut self) {
+        self.stop_flag
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            // Joining ensures the installer thread removes the native NSEvent
+            // monitor before the Rust handle is considered stopped.
+            if thread.thread().id() != std::thread::current().id() {
+                let _ = thread.join();
+            }
+        }
+    }
 }
 
 impl ClickMonitorHandle for ClickMonitor {
-    fn stop(self: Box<Self>) {
-        self.stop_flag
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+    fn stop(mut self: Box<Self>) {
+        self.shutdown();
+    }
+}
+
+impl Drop for ClickMonitor {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -91,24 +111,50 @@ pub fn start_click_monitor(
 ) -> Result<Box<dyn ClickMonitorHandle + Send>> {
     let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flag = stop_flag.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
     let thread = thread::spawn(move || {
         // The global monitor dispatches on the thread that installs it, which
         // must run its own run loop.
+        let Some(_run_loop) = CFRunLoop::current() else {
+            let _ = ready_tx.send(false);
+            return;
+        };
         let block = RcBlock::new(move |event: std::ptr::NonNull<NSEvent>| {
             let event = unsafe { &*event.as_ptr() };
             callback(event.locationInWindow().x, event.locationInWindow().y);
         });
-        NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
+        let Some(monitor) = NSEvent::addGlobalMonitorForEventsMatchingMask_handler(
             NSEventMask::LeftMouseDown | NSEventMask::RightMouseDown,
             &block,
-        );
-        let _run_loop = CFRunLoop::current().expect("no run loop");
+        ) else {
+            let _ = ready_tx.send(false);
+            return;
+        };
+        if ready_tx.send(true).is_err() {
+            unsafe { NSEvent::removeMonitor(&monitor) };
+            return;
+        }
         while !flag.load(std::sync::atomic::Ordering::SeqCst) {
             unsafe { CFRunLoop::run_in_mode(kCFRunLoopDefaultMode, 0.1, true) };
         }
+        unsafe { NSEvent::removeMonitor(&monitor) };
     });
-    Ok(Box::new(ClickMonitor {
-        stop_flag,
-        _thread: thread,
-    }))
+    match ready_rx.recv() {
+        Ok(true) => Ok(Box::new(ClickMonitor {
+            stop_flag,
+            thread: Some(thread),
+        })),
+        Ok(false) => {
+            let _ = thread.join();
+            Err(anyhow::anyhow!(
+                "macOS did not install the global click monitor"
+            ))
+        }
+        Err(error) => {
+            let _ = thread.join();
+            Err(anyhow::anyhow!(
+                "global click monitor setup ended before reporting readiness: {error}"
+            ))
+        }
+    }
 }

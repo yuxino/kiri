@@ -3,12 +3,13 @@
 // SelectionOverlayController.swift.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   api,
-  dbg,
   DEFAULT_RECORDING_OPTIONS,
-  frozenImageUrl,
   type CaptureContextDto,
+  type PreparedOcrRequestDto,
   type RecordingOptions,
 } from "../lib/ipc";
 import { t } from "../i18n";
@@ -41,12 +42,15 @@ import {
 } from "../annotation/model";
 import AnnotationCanvas, { type AnnotationCanvasHandle } from "../annotation/AnnotationCanvas";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
+import { RemoteOcrConsent } from "../ocr/RemoteOcrConsent";
 
 type Phase =
   | "mode-select"
   | "selecting"
   | "annotating"
-  | "ocr-drag"
+  | "ocr-preparing"
+  | "ocr-consent"
+  | "ocr-recognizing"
   | "ocr-result"
   | "record-options";
 
@@ -56,9 +60,7 @@ const ACCENT = "#7D69F5";
 
 // --- window hover candidate (WindowSelectionGeometry.candidate port) ---
 function reportFrontend(message: string) {
-  void import("@tauri-apps/api/core").then(({ invoke }) => {
-    invoke("log_frontend_error", { message });
-  });
+  void invoke("log_frontend_error", { message }).catch(() => {});
 }
 
 function windowCandidate(
@@ -96,64 +98,93 @@ export function OverlayWindow() {
   const [canRedo, setCanRedo] = useState(false);
   const [ocrText, setOcrText] = useState("");
   const [ocrFailed, setOcrFailed] = useState(false);
+  const [preparedOcr, setPreparedOcr] = useState<PreparedOcrRequestDto | null>(null);
+  const [remoteOcrFailed, setRemoteOcrFailed] = useState(false);
   const [recordOptions, setRecordOptions] = useState<RecordingOptions>(DEFAULT_RECORDING_OPTIONS);
   const [micSupported, setMicSupported] = useState(true);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const canvasRef = useRef<AnnotationCanvasHandle>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const modeRef = useRef<Mode>("screenshot");
+  const preparedOcrRef = useRef<PreparedOcrRequestDto | null>(null);
+  const ocrGenerationRef = useRef(0);
   modeRef.current = mode;
 
   // Load context on mount.
   useEffect(() => {
-    dbg(`overlay mount: inner=${window.innerWidth}x${window.innerHeight} dpr=${window.devicePixelRatio}`);
+    let disposed = false;
+    let failed = false;
+    let frozenBlobUrl: string | null = null;
+    const abortOverlay = (message: string) => {
+      if (disposed || failed) return;
+      failed = true;
+      reportFrontend(message);
+      void api.cancelCapture().catch(() => getCurrentWindow().close());
+    };
+    const captureToken = new URLSearchParams(window.location.search).get("captureToken");
+    if (!captureToken || !/^[a-f0-9]{32}$/.test(captureToken)) {
+      abortOverlay("overlay capture token is missing or invalid");
+      return () => {
+        disposed = true;
+      };
+    }
+    const frozenCaptureUrl = `kiri://capture/frozen/${captureToken}.png`;
     (window as unknown as { __kiriOverlay: boolean }).__kiriOverlay = true;
     api.startCapture()
       .then((ctx) => {
-        dbg(`overlay startCapture ok: display=${ctx.displayWidth}x${ctx.displayHeight} windows=${ctx.windowRects.length} scale=${ctx.scale}`);
-
         setContext(ctx);
       })
       .catch((error) => {
-        void import("@tauri-apps/api/core").then(({ invoke }) => {
-          invoke("log_frontend_error", {
-            message: `overlay startCapture rejected: ${String(error)}`,
-          });
-        });
+        void invoke("log_frontend_error", {
+          message: `overlay startCapture rejected: ${String(error)}`,
+        }).catch(() => {});
         // Permission or capture failure: close the overlay so the library
         // window's error banner (emitted by the backend) is visible.
-        void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-          void getCurrentWindow().close();
-        });
+        void getCurrentWindow().close();
       });
     api.getRecordingOptions().then((options) => setRecordOptions(options)).catch(() => {});
     api.micSupported().then((supported) => setMicSupported(supported)).catch(() => {});
     // Load the frozen capture through a blob URL: canvas operations on the
     // custom-scheme image would taint the canvas and break PNG export.
-    fetch(frozenImageUrl())
-      .then((response) => response.blob())
+    fetch(frozenCaptureUrl)
+      .then((response) => {
+        if (!response.ok) throw new Error("frozen capture unavailable");
+        return response.blob();
+      })
       .then((blob) => {
+        if (disposed) return;
         const img = new Image();
-        img.onload = () => {
-          dbg(`frozen img loaded: ${img.naturalWidth}x${img.naturalHeight}`);
-        };
-        img.onerror = () => {
-          dbg("frozen img ERROR (blob)");
-        };
-        img.src = URL.createObjectURL(blob);
+        img.onerror = () => abortOverlay("overlay could not decode the frozen capture");
+        frozenBlobUrl = URL.createObjectURL(blob);
+        img.src = frozenBlobUrl;
         setFrozenSrc(img.src);
       })
-      .catch((error) => dbg(`frozen fetch failed: ${String(error)}`));
+      .catch((error) =>
+        abortOverlay(`overlay could not load the frozen capture: ${String(error)}`),
+      );
+    return () => {
+      disposed = true;
+      if (frozenBlobUrl) URL.revokeObjectURL(frozenBlobUrl);
+    };
   }, []);
 
   const bounds: Rect = context
     ? { x: 0, y: 0, width: context.displayWidth, height: context.displayHeight }
     : { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
 
-  const cancel = useCallback(() => {
-    dbg(`cancel() phase=${phaseRef.current}`);
-    void api.cancelCapture().catch(() => {});
+  const discardPreparedOcr = useCallback(() => {
+    ocrGenerationRef.current += 1;
+    const pending = preparedOcrRef.current;
+    preparedOcrRef.current = null;
+    setPreparedOcr(null);
+    setRemoteOcrFailed(false);
+    if (pending) void api.cancelPreparedOcr(pending.requestId).catch(() => {});
   }, []);
+
+  const cancel = useCallback(() => {
+    discardPreparedOcr();
+    void api.cancelCapture().catch(() => {});
+  }, [discardPreparedOcr]);
 
   const complete = useCallback(
     async (action: "copy" | "save" | "pin" | "edit") => {
@@ -167,11 +198,9 @@ export function OverlayWindow() {
         reportFrontend(`complete(${action}): exportPng returned no data`);
         return;
       }
-      dbg(`complete(${action}) pngBytes=${png.byteLength}`);
       const bytes = Array.from(png);
       try {
         await api.confirmCapture(bytes, action);
-        dbg(`complete(${action}) confirmCapture ok`);
       } catch (error) {
         reportFrontend(`confirm_capture(${action}) rejected: ${String(error)}`);
       }
@@ -179,43 +208,123 @@ export function OverlayWindow() {
     [],
   );
 
+  const recognizePreparedLocal = useCallback(async () => {
+    const pending = preparedOcrRef.current;
+    if (!pending) return;
+    const generation = ocrGenerationRef.current;
+    setRemoteOcrFailed(false);
+    setPhase("ocr-recognizing");
+    try {
+      const text = await api.recognizePreparedOcrLocal(pending.requestId);
+      if (generation !== ocrGenerationRef.current) return;
+      preparedOcrRef.current = null;
+      setPreparedOcr(null);
+      setOcrFailed(false);
+      setOcrText(text);
+      setPhase("ocr-result");
+    } catch {
+      if (generation !== ocrGenerationRef.current) return;
+      preparedOcrRef.current = null;
+      setPreparedOcr(null);
+      void api.cancelPreparedOcr(pending.requestId).catch(() => {});
+      setOcrFailed(true);
+      setOcrText("");
+      setPhase("ocr-result");
+    }
+  }, []);
+
+  const recognizePreparedRemote = useCallback(async () => {
+    const pending = preparedOcrRef.current;
+    const profile = pending?.profile;
+    if (!pending || !profile || pending.engine.kind !== "profile") return;
+    const generation = ocrGenerationRef.current;
+    setRemoteOcrFailed(false);
+    setPhase("ocr-recognizing");
+    try {
+      const text = await api.recognizePreparedOcrRemote(
+        pending.requestId,
+        profile.id,
+        profile.revision,
+      );
+      if (generation !== ocrGenerationRef.current) return;
+      preparedOcrRef.current = null;
+      setPreparedOcr(null);
+      setOcrFailed(false);
+      setOcrText(text);
+      setPhase("ocr-result");
+    } catch {
+      if (generation !== ocrGenerationRef.current) return;
+      // Keep the same prepared image available for an explicit Retry or the
+      // local-only action. A failed remote request is never retried silently.
+      setRemoteOcrFailed(true);
+      setPhase("ocr-consent");
+    }
+  }, []);
+
   const runOcr = useCallback(
     async (sel: Rect) => {
-      const image = imageRef.current;
-      if (!image) return;
-      const scale = image.naturalWidth / bounds.width;
-      const crop = document.createElement("canvas");
-      crop.width = Math.round(sel.width * scale);
-      crop.height = Math.round(sel.height * scale);
-      const ctx = crop.getContext("2d")!;
-      ctx.drawImage(
-        image,
-        sel.x * scale,
-        sel.y * scale,
-        sel.width * scale,
-        sel.height * scale,
-        0,
-        0,
-        crop.width,
-        crop.height,
-      );
-      const blob = await new Promise<Blob | null>((resolve) => crop.toBlob(resolve, "image/png"));
-      if (!blob) return;
-      const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
+      const generation = ocrGenerationRef.current + 1;
+      ocrGenerationRef.current = generation;
+      const previous = preparedOcrRef.current;
+      preparedOcrRef.current = null;
+      setPreparedOcr(null);
+      setRemoteOcrFailed(false);
+      setOcrFailed(false);
+      setOcrText("");
+      setPhase("ocr-preparing");
+      if (previous) void api.cancelPreparedOcr(previous.requestId).catch(() => {});
+
       try {
-        const text = await api.recognizeText(bytes);
-        setOcrFailed(false);
-        setOcrText(text);
-        setPhase("ocr-result");
+        const prepared = await api.prepareOcrRequest({
+          x: sel.x,
+          y: sel.y,
+          width: sel.width,
+          height: sel.height,
+        });
+        if (generation !== ocrGenerationRef.current) {
+          void api.cancelPreparedOcr(prepared.requestId).catch(() => {});
+          return;
+        }
+
+        preparedOcrRef.current = prepared;
+        setPreparedOcr(prepared);
+        if (prepared.engine.kind === "local") {
+          void recognizePreparedLocal();
+          return;
+        }
+
+        const profile = prepared.profile;
+        if (
+          !profile ||
+          !profile.hasApiKey ||
+          profile.id !== prepared.engine.profileId
+        ) {
+          preparedOcrRef.current = null;
+          setPreparedOcr(null);
+          void api.cancelPreparedOcr(prepared.requestId).catch(() => {});
+          setOcrFailed(true);
+          setPhase("ocr-result");
+          return;
+        }
+        setPhase("ocr-consent");
       } catch {
-        // The backend returns "No Text Found" for empty results and
-        // "Text Recognition Failed" for real failures.
+        if (generation !== ocrGenerationRef.current) return;
         setOcrFailed(true);
         setOcrText("");
         setPhase("ocr-result");
       }
     },
-    [bounds],
+    [recognizePreparedLocal],
+  );
+
+  useEffect(
+    () => () => {
+      ocrGenerationRef.current += 1;
+      const pending = preparedOcrRef.current;
+      preparedOcrRef.current = null;
+      if (pending) void api.cancelPreparedOcr(pending.requestId).catch(() => {});
+    },
+    [],
   );
 
   // Auto-run OCR when the user switches to OCR mode with an existing valid
@@ -227,13 +336,24 @@ export function OverlayWindow() {
     }
   }, [mode, phase, selection, runOcr]);
 
+  // Esc is a window-level capture action. Register it separately in the
+  // capture phase so focused text/number controls cannot consume it before
+  // the overlay closes, while leaving their other keys (notably Return)
+  // available to the normal bubbling shortcut handler below.
+  useEffect(() => {
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      cancel();
+    };
+    window.addEventListener("keydown", onEscape, true);
+    return () => window.removeEventListener("keydown", onEscape, true);
+  }, [cancel]);
+
   // --- keyboard ---
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        cancel();
-        return;
-      }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -253,6 +373,13 @@ export function OverlayWindow() {
       }
       if (e.key === "Enter" || e.key === "Return") {
         const ph = phaseRef.current;
+        if (ph === "ocr-consent") {
+          // Privacy default: Return never sends an image to a remote provider.
+          // It recognizes this one prepared image locally instead.
+          e.preventDefault();
+          void recognizePreparedLocal();
+          return;
+        }
         if (ph === "annotating") {
           void complete("copy");
           return;
@@ -301,7 +428,7 @@ export function OverlayWindow() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [cancel, complete, runOcr]);
+  }, [complete, recognizePreparedLocal, runOcr]);
 
   const phaseRef = useRef<Phase>("mode-select");
   phaseRef.current = phase;
@@ -334,7 +461,6 @@ export function OverlayWindow() {
       }
       if (phaseRef.current !== "mode-select" && phaseRef.current !== "selecting") return;
       const p = clampPoint(toPoint(e), bounds);
-      dbg(`pointerDown at ${p.x.toFixed(0)},${p.y.toFixed(0)} phase=${phaseRef.current}`);
       if (phaseRef.current === "selecting" && selectionRef.current) {
         // Handle or move the existing selection.
         const handle = hitTestHandle(p, selectionRef.current, 10);
@@ -408,7 +534,6 @@ export function OverlayWindow() {
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
       const p = clampPoint(toPoint(e), bounds);
-      dbg(`pointerUp at ${p.x.toFixed(0)},${p.y.toFixed(0)} phase=${phaseRef.current} drag=${!!drag}`);
       if (resizeHandle || moveDrag) {
         setResizeHandle(null);
         setMoveDrag(null);
@@ -443,7 +568,7 @@ export function OverlayWindow() {
       setPhase("selecting");
       setTool("select");
     } else if (modeRef.current === "ocr") {
-      setPhase("ocr-drag");
+      setPhase("ocr-preparing");
       void runOcr(sel);
     } else {
       setPhase("record-options");
@@ -458,6 +583,7 @@ export function OverlayWindow() {
   const switchMode = useCallback(
     (next: Mode) => {
       if (next === modeRef.current) return;
+      discardPreparedOcr();
       modeRef.current = next;
       setMode(next);
       setPhase("selecting");
@@ -491,7 +617,7 @@ export function OverlayWindow() {
       // With a valid region: screenshot re-shows the toolbar (selecting
       // phase with a selection); record shows the options popover.
     },
-    [],
+    [discardPreparedOcr],
   );
 
   // --- toolbar placement (spec §7.6) ---
@@ -512,6 +638,7 @@ export function OverlayWindow() {
   // --- render ---
   const selectingRect = drag && drag.moved && !resizeHandle ? normalized(drag.start, drag.current) : null;
   const displayRect = selection ?? selectingRect;
+  const activeDimRect = displayRect ?? hoverWindow;
   const annotating = phase === "annotating";
 
   return (
@@ -523,7 +650,7 @@ export function OverlayWindow() {
         // While the frozen capture is still loading, stay translucent so the
         // live screen shows through; the window becomes opaque once the
         // frozen image is ready (mirroring the original's freeze behavior).
-        background: frozenSrc ? "#141414" : "rgba(0,0,0,0.25)",
+        background: frozenSrc ? "#141414" : "transparent",
         overflow: "hidden",
         cursor: phase === "selecting" ? "crosshair" : "default",
       }}
@@ -555,7 +682,7 @@ export function OverlayWindow() {
       )}
 
       {/* Dim overlay */}
-      {phase !== "annotating" && (
+      {!activeDimRect && (
         <div
           style={{
             position: "absolute",
@@ -566,15 +693,15 @@ export function OverlayWindow() {
         />
       )}
       {/* Hover dim (spec: hover dims to 0.34, selection dims to 0.48) */}
-      {(hoverWindow || displayRect) && phase !== "annotating" && (
+      {activeDimRect && (
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
           <div
             style={{
               position: "absolute",
-              left: (hoverWindow ?? displayRect)!.x,
-              top: (hoverWindow ?? displayRect)!.y,
-              width: (hoverWindow ?? displayRect)!.width,
-              height: (hoverWindow ?? displayRect)!.height,
+              left: activeDimRect.x,
+              top: activeDimRect.y,
+              width: activeDimRect.width,
+              height: activeDimRect.height,
               boxShadow: "0 0 0 9999px rgba(0,0,0," + (displayRect ? "0.48" : "0.34") + ")",
             }}
           />
@@ -740,7 +867,8 @@ export function OverlayWindow() {
       )}
 
       {/* OCR states */}
-      {phase === "ocr-drag" && <HintLabel text={t("Recognizing Text…")} top={96} />}
+      {phase === "ocr-preparing" && <HintLabel text={t("Preparing Text…")} top={96} />}
+      {phase === "ocr-recognizing" && <HintLabel text={t("Recognizing Text…")} top={96} />}
 
       {/* Drag hint while creating a region (spec §3.2.5: shown when no
           toolbar exists yet and the user is dragging). */}
@@ -778,6 +906,17 @@ export function OverlayWindow() {
             void api.copyText(ocrText).catch(() => {});
           }}
           onClose={cancel}
+        />
+      )}
+      {phase === "ocr-consent" && preparedOcr?.profile && (
+        <RemoteOcrConsent
+          prepared={preparedOcr}
+          anchor={selection ?? { x: 0, y: 0, width: bounds.width, height: 0 }}
+          bounds={bounds}
+          failed={remoteOcrFailed}
+          onCancel={cancel}
+          onUseLocal={() => void recognizePreparedLocal()}
+          onSend={() => void recognizePreparedRemote()}
         />
       )}
 

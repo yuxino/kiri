@@ -3,7 +3,7 @@
 kiri grows from a reliable still-capture tool into a local visual capture
 workspace. Dates are intentionally omitted until each milestone is stable.
 
-## v0.3 — Tauri multi-platform rewrite
+## v1.3 — Tauri multi-platform rewrite
 
 The macOS + Windows rewrite in Tauri 2 (1:1 migration from the Swift
 original; behavior specs live in `docs/spec/swift/`).
@@ -18,13 +18,14 @@ original; behavior specs live in `docs/spec/swift/`).
 - [x] Local library with search, favorites, and recoverable trash
 - [x] Clipboard-first screenshot completion with focus restoration
 - [x] Local OCR (macOS Vision, Windows.Media.Ocr)
+- [x] Optional multi-profile remote OCR with per-selection consent and OS credential storage
 - [x] Region recording (SCK / WGC) with ffmpeg H.264 + AAC pipeline
 - [x] Optional system audio, pointer, and click highlights
 - [x] 3-2-1 countdown, pause/resume segment merging
 - [x] GIF export (≤15 s, 12 fps, 720 px long edge)
 - [x] English + Simplified Chinese, following the OS language
 
-Before a stable v0.3 release:
+Before the next stable release:
 
 - [ ] Windows acceptance testing (capture, recording, audio, OCR, ripple)
 - [ ] Mixed-scale multi-display acceptance testing
@@ -38,5 +39,5 @@ Before a stable v0.3 release:
 - [ ] MP4 trimming
 - [ ] Inline video and GIF playback
 - [ ] Recording duration and file-size safeguards
-- [ ] Tags and smart collections
+- [ ] Smart collections
 - [ ] Optional user-controlled sync

@@ -12,7 +12,7 @@ use crate::core::asset::CaptureKind;
 use crate::state::AppState;
 
 pub struct ProtocolStore {
-    pub frozen_png: Mutex<Option<Vec<u8>>>,
+    frozen_capture: Mutex<Option<FrozenCapture>>,
     pub pin_images: Mutex<HashMap<String, Vec<u8>>>,
     pub video_thumbnails: Mutex<HashMap<String, Vec<u8>>>,
 }
@@ -20,15 +20,37 @@ pub struct ProtocolStore {
 impl ProtocolStore {
     pub fn new() -> Self {
         Self {
-            frozen_png: Mutex::new(None),
+            frozen_capture: Mutex::new(None),
             pin_images: Mutex::new(HashMap::new()),
             video_thumbnails: Mutex::new(HashMap::new()),
         }
     }
 }
 
-pub fn set_frozen_png(store: &ProtocolStore, png: Vec<u8>) {
-    *store.frozen_png.lock().unwrap() = Some(png);
+struct FrozenCapture {
+    capture_id: uuid::Uuid,
+    token: String,
+    png: Vec<u8>,
+}
+
+pub fn set_frozen_png(store: &ProtocolStore, capture_id: uuid::Uuid, png: Vec<u8>) -> String {
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    *store.frozen_capture.lock().unwrap() = Some(FrozenCapture {
+        capture_id,
+        token: token.clone(),
+        png,
+    });
+    token
+}
+
+pub fn clear_frozen_png_for_capture(store: &ProtocolStore, capture_id: uuid::Uuid) {
+    let mut frozen_capture = store.frozen_capture.lock().unwrap();
+    if frozen_capture
+        .as_ref()
+        .is_some_and(|capture| capture.capture_id == capture_id)
+    {
+        *frozen_capture = None;
+    }
 }
 
 pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
@@ -38,9 +60,10 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     let state = app.state::<AppState>();
     let store = app.state::<ProtocolStore>();
 
-    // Frozen capture image: kiri://capture/frozen.png
-    if host == "capture" && path == "frozen.png" {
-        if let Some(bytes) = store.frozen_png.lock().unwrap().clone() {
+    // Frozen capture image: the unguessable per-capture token is injected
+    // only into the overlay URL, never returned by the public IPC context.
+    if host == "capture" {
+        if let Some(bytes) = frozen_png_for_path(&store, &path) {
             return respond_png(bytes);
         }
         return not_found();
@@ -78,7 +101,13 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             }
             // Video / GIF: serve a first-frame thumbnail (cached in memory).
             let cache_key = id.to_string();
-            if let Some(bytes) = store.video_thumbnails.lock().unwrap().get(&cache_key).cloned() {
+            if let Some(bytes) = store
+                .video_thumbnails
+                .lock()
+                .unwrap()
+                .get(&cache_key)
+                .cloned()
+            {
                 return respond(bytes, "image/png");
             }
             let ffmpeg = state
@@ -132,9 +161,37 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     not_found()
 }
 
+fn frozen_png_for_path(store: &ProtocolStore, path: &str) -> Option<Vec<u8>> {
+    let requested_token = path.strip_prefix("frozen/")?.strip_suffix(".png")?;
+    if requested_token.len() != 32 || !requested_token.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let capture = store.frozen_capture.lock().unwrap();
+    let capture = capture.as_ref()?;
+    constant_time_eq(requested_token.as_bytes(), capture.token.as_bytes())
+        .then(|| capture.png.clone())
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
 /// Serves media bytes, honoring a single `Range: bytes=start-end` header
 /// (enough for <video> seeking). Returns 206 Partial Content when ranged.
-fn respond_media(request: &Request<Vec<u8>>, bytes: Vec<u8>, content_type: &str) -> Response<Vec<u8>> {
+fn respond_media(
+    request: &Request<Vec<u8>>,
+    bytes: Vec<u8>,
+    content_type: &str,
+) -> Response<Vec<u8>> {
     let total = bytes.len() as u64;
     let range = request
         .headers()
@@ -205,4 +262,32 @@ fn not_found() -> Response<Vec<u8>> {
         .status(StatusCode::NOT_FOUND)
         .body(Vec::new())
         .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frozen_capture_requires_exact_per_capture_token_and_clear_revokes_it() {
+        let store = ProtocolStore::new();
+        let capture_id = uuid::Uuid::new_v4();
+        let token = set_frozen_png(&store, capture_id, vec![1, 2, 3]);
+        assert_eq!(
+            frozen_png_for_path(&store, &format!("frozen/{token}.png")),
+            Some(vec![1, 2, 3])
+        );
+        assert!(frozen_png_for_path(&store, "frozen.png").is_none());
+        assert!(
+            frozen_png_for_path(&store, "frozen/00000000000000000000000000000000.png").is_none()
+        );
+        assert!(frozen_png_for_path(&store, &format!("other/{token}.png")).is_none());
+        clear_frozen_png_for_capture(&store, uuid::Uuid::new_v4());
+        assert_eq!(
+            frozen_png_for_path(&store, &format!("frozen/{token}.png")),
+            Some(vec![1, 2, 3])
+        );
+        clear_frozen_png_for_capture(&store, capture_id);
+        assert!(frozen_png_for_path(&store, &format!("frozen/{token}.png")).is_none());
+    }
 }

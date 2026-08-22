@@ -8,9 +8,12 @@ mod commands;
 mod core;
 mod gif;
 mod ocr;
+mod ocr_commands;
+mod ocr_controller;
 mod platform;
 mod protocol;
 mod record;
+mod remote_ocr;
 mod state;
 mod thumbnail;
 
@@ -72,13 +75,34 @@ pub fn run() {
             install_tray(app.handle())?;
             Ok(())
         })
-.on_window_event(|window, event| {
+        .on_window_event(|window, event| {
             // The library window hides instead of closing (single-instance
             // Dock/taskbar app); capture sessions close it programmatically.
             match event {
-                tauri::WindowEvent::CloseRequested { .. } => {
-                }
+                tauri::WindowEvent::CloseRequested { .. } => {}
                 tauri::WindowEvent::Destroyed => {
+                    if let Some(state) = window.app_handle().try_state::<AppState>() {
+                        let label = window.label();
+                        let destroyed_overlay = {
+                            let mut capture = state.capture.lock().unwrap();
+                            capture.destroy_overlay(label)
+                        };
+                        if let Some((capture_id, ended_session)) = destroyed_overlay {
+                            state.ocr_requests.clear_owner(
+                                &crate::ocr_controller::OcrRequestOwner {
+                                    label: label.to_string(),
+                                    capture_id,
+                                },
+                            );
+                            if let Some(session) = ended_session {
+                                commands::teardown_cancelled_capture(
+                                    window.app_handle(),
+                                    session,
+                                    false,
+                                );
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -112,7 +136,14 @@ pub fn run() {
             commands::update_asset,
             commands::rename_asset,
             commands::set_tags,
-            commands::recognize_text,
+            ocr_commands::get_ocr_provider_settings,
+            ocr_commands::save_ocr_provider_profile,
+            ocr_commands::delete_ocr_provider_profile,
+            ocr_commands::set_active_ocr_engine,
+            ocr_commands::prepare_ocr_request,
+            ocr_commands::recognize_prepared_ocr_local,
+            ocr_commands::recognize_prepared_ocr_remote,
+            ocr_commands::cancel_prepared_ocr,
             commands::copy_text,
             commands::start_recording_flow,
             commands::cancel_recording_flow,
@@ -123,7 +154,6 @@ pub fn run() {
             commands::show_confirm_dialog,
             commands::mic_supported,
             commands::log_frontend_error,
-            commands::frontend_log,
             commands::get_locale,
             commands::get_language,
             commands::set_language,
@@ -201,9 +231,7 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
                 let config = recording.configuration.as_ref();
                 (
                     recording.is_recording
-                        && config
-                            .map(|c| c.options.highlights_clicks)
-                            .unwrap_or(false),
+                        && config.map(|c| c.options.highlights_clicks).unwrap_or(false),
                     config.map(|c| c.region),
                     config.map(|c| c.screen_frame),
                     config.map(|c| c.backing_scale),

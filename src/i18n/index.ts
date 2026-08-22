@@ -1,7 +1,7 @@
 /**
  * Kiri i18n — mirrors the Swift L10n behavior:
  *  - keys are the English strings themselves (English fallback)
- *  - follows the OS preferred language, only en + zh-Hans exist
+ *  - follows the OS preferred language; en, zh-Hans, and ja are supported
  *  - the user's manual choice is persisted by the backend (language.json)
  *    and wins over the system locale
  *  - `%@` / `%d` placeholders like String(format:)

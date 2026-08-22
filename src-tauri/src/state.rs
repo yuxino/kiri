@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use serde::Serialize;
@@ -16,14 +17,22 @@ use crate::record::SegmentEncoder;
 
 pub struct AppState {
     pub library: std::sync::Mutex<AssetLibrary>,
+    // Keeps the generated fixture library alive for exactly this process.
+    // Production libraries do not need a lifetime guard.
+    _temporary_library: Option<tempfile::TempDir>,
     pub capture: std::sync::Mutex<CaptureFlow>,
     pub recording: std::sync::Mutex<RecordingFlow>,
     pub ffmpeg_path: std::sync::OnceLock<PathBuf>,
     pub saved_recording_options: std::sync::Mutex<RecordingOptions>,
     pub library_root: PathBuf,
     pub gif_conversion_ids: std::sync::Mutex<HashSet<uuid::Uuid>>,
-    /// App-lifetime global click monitor (ripple source), installed once.
-    pub click_monitor: std::sync::Mutex<Option<Box<dyn crate::platform::ClickMonitorHandle + Send>>>,
+    /// Active click monitor (ripple source), installed only for recordings
+    /// that explicitly enable click highlights and removed when they finish.
+    pub click_monitor:
+        std::sync::Mutex<Option<Box<dyn crate::platform::ClickMonitorHandle + Send>>>,
+    pub ocr_providers: Arc<crate::ocr_controller::OcrProviderManager>,
+    pub ocr_requests: Arc<crate::ocr_controller::OcrRequestController>,
+    pub remote_ocr: Option<crate::remote_ocr::RemoteOcrClient>,
 }
 
 #[derive(Default)]
@@ -31,7 +40,28 @@ pub struct CaptureFlow {
     pub session: Option<CaptureSession>,
 }
 
+impl CaptureFlow {
+    /// Invalidates a destroyed overlay owner. The final owner atomically
+    /// consumes the session so a later `start_capture` cannot reuse a frozen
+    /// context with no live overlay.
+    pub fn destroy_overlay(&mut self, label: &str) -> Option<(uuid::Uuid, Option<CaptureSession>)> {
+        let session = self.session.as_mut()?;
+        if !session.overlay_labels.iter().any(|owner| owner == label) {
+            return None;
+        }
+        let capture_id = session.capture_id;
+        session.overlay_labels.retain(|owner| owner != label);
+        let ended_session = if session.overlay_labels.is_empty() {
+            self.session.take()
+        } else {
+            None
+        };
+        Some((capture_id, ended_session))
+    }
+}
+
 pub struct CaptureSession {
+    pub capture_id: uuid::Uuid,
     pub display: CapturedDisplay,
     pub source_application: Option<String>,
     /// PID of the application that was frontmost before capture started.
@@ -146,10 +176,16 @@ pub enum RecoveryAction {
 }
 
 impl AppState {
-    pub fn new(_app: &AppHandle) -> anyhow::Result<Self> {
-        let (library, root) = open_library()?;
+    pub fn new(app: &AppHandle) -> anyhow::Result<Self> {
+        let (library, root, temporary_library) = open_library()?;
+        let ocr_providers = app
+            .path()
+            .app_config_dir()
+            .map(|path| Arc::new(crate::ocr_controller::OcrProviderManager::open(&path)))
+            .unwrap_or_else(|_| Arc::new(crate::ocr_controller::OcrProviderManager::unavailable()));
         Ok(Self {
             library: std::sync::Mutex::new(library),
+            _temporary_library: temporary_library,
             capture: Default::default(),
             recording: Default::default(),
             ffmpeg_path: std::sync::OnceLock::new(),
@@ -157,6 +193,9 @@ impl AppState {
             library_root: root,
             gif_conversion_ids: Default::default(),
             click_monitor: std::sync::Mutex::new(None),
+            ocr_providers,
+            ocr_requests: Arc::new(crate::ocr_controller::OcrRequestController::default()),
+            remote_ocr: crate::remote_ocr::RemoteOcrClient::new().ok(),
         })
     }
 
@@ -164,28 +203,33 @@ impl AppState {
         if let Some(path) = self.ffmpeg_path.get() {
             return Ok(path.clone());
         }
-        let resource_dir = app
-            .path()
-            .resource_dir()
-            .ok();
+        let resource_dir = app.path().resource_dir().ok();
         let path = crate::record::ensure_ffmpeg(resource_dir)?;
         let _ = self.ffmpeg_path.set(path.clone());
         Ok(path)
     }
 
     pub fn asset_file_url(&self, asset: &CaptureAsset) -> PathBuf {
-        self.library_root
-            .join("Assets")
-            .join(&asset.filename)
+        self.library_root.join("Assets").join(&asset.filename)
     }
 }
 
-fn open_library() -> anyhow::Result<(AssetLibrary, PathBuf)> {
-    let root = AssetLibrary::default_root_url()
+fn open_library() -> anyhow::Result<(AssetLibrary, PathBuf, Option<tempfile::TempDir>)> {
+    open_library_for_mode(std::env::var("KIRI_CAPTURE_FIXTURE").as_deref() == Ok("1"))
+}
+
+fn open_library_for_mode(
+    use_temporary_fixture: bool,
+) -> anyhow::Result<(AssetLibrary, PathBuf, Option<tempfile::TempDir>)> {
+    let temporary_library = use_temporary_fixture.then(tempfile::tempdir).transpose()?;
+    let root = temporary_library
+        .as_ref()
+        .map(|directory| directory.path().to_path_buf())
+        .or_else(AssetLibrary::default_root_url)
         .or_else(|| dirs::data_local_dir().map(|dir| dir.join("kiri")))
         .unwrap_or_else(|| std::env::temp_dir().join("kiri-library"));
     let library = AssetLibrary::open(root.clone())?;
-    Ok((library, root))
+    Ok((library, root, temporary_library))
 }
 
 // ---------------------------------------------------------------------------
@@ -369,9 +413,7 @@ fn urlencode(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     for byte in value.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' => {
-                out.push(byte as char)
-            }
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'.' | b'-' | b'_' => out.push(byte as char),
             b' ' => out.push_str("%20"),
             _ => out.push_str(&format!("%{byte:02X}")),
         }
@@ -537,7 +579,7 @@ fn language_path(app: &AppHandle) -> PathBuf {
         .join("language.json")
 }
 
-/// Returns the persisted language ("en" | "zh-Hans") or empty string when
+/// Returns the persisted language ("en" | "zh-Hans" | "ja") or empty string when
 /// the user has never picked one (then the system locale applies).
 pub fn load_language(app: &AppHandle) -> String {
     let path = language_path(app);
@@ -559,7 +601,12 @@ pub fn save_language(app: &AppHandle, language: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{mark_error_seen, toast_position, urlencode};
+    use super::{
+        mark_error_seen, open_library_for_mode, toast_position, urlencode, CaptureFlow,
+        CaptureSession,
+    };
+    use crate::capture::CapturedDisplay;
+    use crate::core::geometry::Rect;
 
     #[test]
     fn urlencode_escapes_spaces_and_keeps_words() {
@@ -577,16 +624,29 @@ mod tests {
         let (x, y) = toast_position(tauri::PhysicalSize::new(3024, 1964), 2.0);
         assert_eq!(x, (3024.0 / 2.0 - 360.0) / 2.0);
         assert_eq!(y, 24.0);
-        assert!(x < 1512.0 && x >= 0.0, "x={x} must be on-screen");
-        assert!(y < 982.0 && y >= 0.0, "y={y} must be on-screen");
+        assert!((0.0..1512.0).contains(&x), "x={x} must be on-screen");
+        assert!((0.0..982.0).contains(&y), "y={y} must be on-screen");
 
         // Non-retina 1920×1080 @1x stays on-screen too.
         let (x, y) = toast_position(tauri::PhysicalSize::new(1920, 1080), 1.0);
-        assert!(x < 1920.0 && x >= 0.0 && y < 1080.0 && y >= 0.0);
+        assert!((0.0..1920.0).contains(&x) && (0.0..1080.0).contains(&y));
 
         // Small screens must not go negative.
         let (x, _) = toast_position(tauri::PhysicalSize::new(320, 240), 1.0);
         assert!(x >= 0.0);
+    }
+
+    #[test]
+    fn capture_fixture_uses_an_ephemeral_library() {
+        let (_library, root, temporary_library) = open_library_for_mode(true).unwrap();
+        let temporary_library = temporary_library.expect("fixture library must have a guard");
+
+        assert_eq!(root, temporary_library.path());
+        assert!(root.join("Assets").is_dir());
+        assert!(root.join("Thumbnails").is_dir());
+
+        drop(temporary_library);
+        assert!(!root.exists());
     }
 
     #[test]
@@ -597,5 +657,38 @@ mod tests {
         assert!(!mark_error_seen("Screen Recording is off."));
         assert!(mark_error_seen("A different error."));
         assert!(!mark_error_seen("A different error."));
+    }
+
+    #[test]
+    fn final_destroyed_overlay_consumes_capture_session() {
+        let capture_id = uuid::Uuid::new_v4();
+        let mut flow = CaptureFlow {
+            session: Some(CaptureSession {
+                capture_id,
+                display: CapturedDisplay {
+                    png_data: vec![1],
+                    pixel_width: 1,
+                    pixel_height: 1,
+                    screen_frame: Rect::new(0.0, 0.0, 1.0, 1.0),
+                    window_rects: Vec::new(),
+                    display_id: 1,
+                    backing_scale: 1.0,
+                },
+                source_application: None,
+                return_pid: None,
+                was_kiri_frontmost: true,
+                hidden_windows: Vec::new(),
+                overlay_labels: vec!["overlay-a".into(), "overlay-b".into()],
+            }),
+        };
+
+        let (first_id, ended) = flow.destroy_overlay("overlay-a").unwrap();
+        assert_eq!(first_id, capture_id);
+        assert!(ended.is_none());
+        assert!(flow.session.is_some());
+        let (_, ended) = flow.destroy_overlay("overlay-b").unwrap();
+        let ended = ended.expect("last overlay must consume the session");
+        assert_eq!(ended.capture_id, capture_id);
+        assert!(flow.session.is_none());
     }
 }

@@ -32,8 +32,6 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-internal-toggle-maximize",
     "core:event:default",
-    "core:webview:allow-create-webview-window",
-    "dialog:default",
-    "opener:default"
+    "dialog:default"
   ]
 }

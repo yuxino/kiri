@@ -4,7 +4,7 @@ version = "1.3.0"
 description = "Kiri - a fast, local-first capture workspace"
 authors = ["yuxino"]
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [lib]
 name = "kiri_lib"
@@ -29,6 +29,7 @@ serde_json = "1"
 anyhow = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 arboard = "3"
@@ -42,6 +43,11 @@ env_logger = "0.11"
 once_cell = "1"
 os_pipe = "1"
 ffmpeg-sidecar = "2"
+base64 = "0.22"
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls", "system-proxy"] }
+secrecy = "0.10"
+tempfile = "3"
+url = "2.5"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", features = ["exception"] }
@@ -119,6 +125,7 @@ objc2-vision = { version = "0.3", features = [
     "VNTypes",
     "VNDefines",
 ] }
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
@@ -139,6 +146,9 @@ windows = { version = "0.62", features = [
     "Foundation",
 ] }
 windows-capture = "2.0"
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
 
-[dev-dependencies]
-tempfile = "3"
+# Keep the shipped Tauri crate self-contained when a contributor has an
+# unrelated Cargo workspace in a parent directory.
+[workspace]
+resolver = "2"

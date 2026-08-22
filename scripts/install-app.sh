@@ -9,9 +9,36 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ -z "${KIRI_SIGNING_IDENTITY:-}" ] && security find-identity -v -p codesigning 2>/dev/null | grep -q "mimi Local Development"; then
-  export KIRI_SIGNING_IDENTITY="mimi Local Development"
+available_identity_names() {
+  /usr/bin/security find-identity -v -p codesigning 2>/dev/null \
+    | /usr/bin/sed -n 's/^[^"]*"\([^"]*\)".*$/\1/p'
+}
+
+automatic_identity() {
+  local prefix candidate
+  for prefix in "Apple Development:" "Developer ID Application:"; do
+    while IFS= read -r candidate; do
+      case "$candidate" in
+        "$prefix"*) printf '%s\n' "$candidate"; return 0 ;;
+      esac
+    done < <(available_identity_names)
+  done
+  while IFS= read -r candidate; do
+    case "$candidate" in
+      *" Local Development") printf '%s\n' "$candidate"; return 0 ;;
+    esac
+  done < <(available_identity_names)
+  return 1
+}
+
+if [ -z "${KIRI_SIGNING_IDENTITY:-}" ]; then
+  KIRI_SIGNING_IDENTITY="$(automatic_identity || true)"
 fi
+if [ -z "$KIRI_SIGNING_IDENTITY" ]; then
+  echo "install-app: no stable code-signing identity found; set KIRI_SIGNING_IDENTITY" >&2
+  exit 1
+fi
+export KIRI_SIGNING_IDENTITY
 
 ./scripts/package-app.sh --bundles app
 

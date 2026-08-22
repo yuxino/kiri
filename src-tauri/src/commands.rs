@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::capture::current as capture_backend;
 use crate::core::asset::{CaptureAsset, CaptureKind};
@@ -14,13 +14,12 @@ use crate::core::geometry::Rect;
 use crate::core::policy::RecordingOptions;
 use crate::core::shortcut::KIRI_CAPTURE;
 use crate::platform;
-use crate::state::{
-    emit_error, emit_library_changed, emit_notice, emit_notice_local, emit_recording_state, ActiveRecording,
-    AppState,
-    CaptureSession, RecordingConfiguration, RecordingFlow,
-};
 #[cfg(target_os = "macos")]
 use crate::state::RecoveryAction;
+use crate::state::{
+    emit_error, emit_library_changed, emit_notice, emit_notice_local, emit_recording_state,
+    ActiveRecording, AppState, CaptureSession, RecordingConfiguration, RecordingFlow,
+};
 
 // ---------------------------------------------------------------------------
 // DTOs
@@ -91,7 +90,11 @@ fn asset_dto(asset: &CaptureAsset, root: &std::path::Path) -> AssetDto {
         source_application: asset.source_application.clone(),
         is_favorite: asset.is_favorite,
         trashed_at: asset.trashed_at,
-        file_path: root.join("Assets").join(&asset.filename).display().to_string(),
+        file_path: root
+            .join("Assets")
+            .join(&asset.filename)
+            .display()
+            .to_string(),
         gif_eligible: asset.kind == CaptureKind::Video
             && crate::core::policy::RecordingPolicy::is_gif_eligible(asset.duration),
     }
@@ -113,7 +116,6 @@ pub fn list_assets(
     let root = state.library_root.clone();
     Ok(assets.iter().map(|asset| asset_dto(asset, &root)).collect())
 }
-
 
 /// Average brightness (0-255) of a PNG buffer; None if undecodable.
 fn png_average(png: &[u8]) -> Option<(u32, u32, f64)> {
@@ -153,7 +155,9 @@ fn with_asset_mutation(
 #[tauri::command]
 pub fn set_favorite(app: AppHandle, id: String, favorite: bool) -> Result<(), String> {
     with_asset_mutation(&app, &id, |library, parsed| {
-        library.set_favorite(favorite, parsed).map_err(|e| e.to_string())
+        library
+            .set_favorite(favorite, parsed)
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -171,14 +175,20 @@ pub fn restore_asset(app: AppHandle, id: String) -> Result<(), String> {
     with_asset_mutation(&app, &id, |library, parsed| {
         library.restore(parsed).map_err(|e| e.to_string())
     })?;
-    emit_notice_local(&app, "Restored to Library".into(), "arrow.uturn.backward".into());
+    emit_notice_local(
+        &app,
+        "Restored to Library".into(),
+        "arrow.uturn.backward".into(),
+    );
     Ok(())
 }
 
 #[tauri::command]
 pub fn permanently_delete(app: AppHandle, id: String) -> Result<(), String> {
     with_asset_mutation(&app, &id, |library, parsed| {
-        library.permanently_delete(parsed).map_err(|e| e.to_string())
+        library
+            .permanently_delete(parsed)
+            .map_err(|e| e.to_string())
     })?;
     emit_notice_local(&app, "Deleted Permanently".into(), "trash.fill".into());
     Ok(())
@@ -251,7 +261,9 @@ pub fn batch_set_favorite(app: AppHandle, ids: Vec<String>, favorite: bool) -> R
         let state = app.state::<AppState>();
         let mut library = state.library.lock().unwrap();
         for id in &parsed {
-            library.set_favorite(favorite, id).map_err(|e| e.to_string())?;
+            library
+                .set_favorite(favorite, id)
+                .map_err(|e| e.to_string())?;
         }
     }
     emit_library_changed(&app);
@@ -274,7 +286,11 @@ pub fn copy_asset(app: AppHandle, id: String) -> Result<(), String> {
     drop(library);
     let data = std::fs::read(&path).map_err(|e| e.to_string())?;
     platform::write_image_to_clipboard(&data).map_err(|e| e.to_string())?;
-    emit_notice_local(&app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
+    emit_notice_local(
+        &app,
+        "Copied to Clipboard".into(),
+        "checkmark.circle.fill".into(),
+    );
     Ok(())
 }
 
@@ -428,27 +444,6 @@ fn convert_asset_to_gif(
 pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
     log::info!("start_capture: beginning capture flow");
 
-    // Pre-flight the capture permission so failures surface as a visible,
-    // actionable banner in the library window instead of a silent no-op
-    // (spec §6: missing permission opens a clear system-settings guide).
-    #[cfg(target_os = "macos")]
-    if std::env::var("KIRI_CAPTURE_FIXTURE").as_deref() != Ok("1") {
-        use crate::capture::current::PermissionState;
-        match crate::capture::current::check_capture_permission() {
-            PermissionState::Authorized => {}
-            PermissionState::RestartRequired => {
-                let message = "Screen Recording access was granted. Quit and reopen Kiri once to finish enabling capture.";
-                emit_error(&app, message.into(), Some(RecoveryAction::QuitKiri));
-                return Err(message.into());
-            }
-            PermissionState::SettingsRequired => {
-                let message = "Screen Recording is off. Enable Kiri in System Settings, then quit and reopen it once.";
-                emit_error(&app, message.into(), Some(RecoveryAction::OpenSettings));
-                return Err(message.into());
-            }
-        }
-    }
-
     {
         let state = app.state::<AppState>();
         let capture = state.capture.lock().unwrap();
@@ -477,6 +472,28 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
         }
     }
 
+    // Pre-flight only after ruling out an existing capture session. The
+    // overlay asks for its current context when it mounts (twice under React
+    // StrictMode in development), and that re-entry must never touch the
+    // system permission request path.
+    #[cfg(target_os = "macos")]
+    if std::env::var("KIRI_CAPTURE_FIXTURE").as_deref() != Ok("1") {
+        use crate::capture::current::PermissionState;
+        match crate::capture::current::check_capture_permission() {
+            PermissionState::Authorized => {}
+            PermissionState::RestartRequired => {
+                let message = "Screen Recording access was granted. Quit and reopen Kiri once to finish enabling capture.";
+                emit_error(&app, message.into(), Some(RecoveryAction::QuitKiri));
+                return Err(message.into());
+            }
+            PermissionState::SettingsRequired => {
+                let message = "Screen Recording is off. Enable Kiri in System Settings, then quit and reopen it once.";
+                emit_error(&app, message.into(), Some(RecoveryAction::OpenSettings));
+                return Err(message.into());
+            }
+        }
+    }
+
     let (pid, name) = platform::frontmost_application()
         .map(|(pid, name)| (Some(pid), name))
         .unwrap_or((None, None));
@@ -498,32 +515,52 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
         source_application: name.clone(),
     };
 
-    {
+    let capture_id = uuid::Uuid::new_v4();
+    let overlay_frame = display.screen_frame;
+    let capture_token = {
         let store = app.state::<crate::protocol::ProtocolStore>();
-        crate::protocol::set_frozen_png(&store, display.png_data.clone());
-    }
+        crate::protocol::set_frozen_png(&store, capture_id, display.png_data.clone())
+    };
 
-    let overlay_label = create_overlay_window(&app, &display).map_err(|error| {
-        log::error!("start_capture: overlay window creation failed: {error}");
-        error.to_string()
-    })?;
-    // Make the app active so the overlay webview receives keyboard input
-    // (Esc/Return/tool keys) while the user interacts with it.
-    platform::activate_self();
-    log::info!("start_capture: overlay window ready ({overlay_label})");
-
+    let overlay_label = "overlay".to_string();
     {
         let state = app.state::<AppState>();
         let mut capture = state.capture.lock().unwrap();
         capture.session = Some(CaptureSession {
+            capture_id,
             display,
             source_application: name,
             return_pid: pid,
             was_kiri_frontmost,
             hidden_windows,
-            overlay_labels: vec![overlay_label],
+            overlay_labels: vec![overlay_label.clone()],
         });
     }
+
+    if let Err(error) = create_overlay_window(&app, overlay_frame, &capture_token) {
+        let failed_session = {
+            let state = app.state::<AppState>();
+            let mut capture = state.capture.lock().unwrap();
+            if capture
+                .session
+                .as_ref()
+                .is_some_and(|session| session.capture_id == capture_id)
+            {
+                capture.session.take()
+            } else {
+                None
+            }
+        };
+        if let Some(session) = failed_session {
+            teardown_cancelled_capture(&app, session, false);
+        }
+        log::error!("start_capture: overlay window creation failed: {error}");
+        return Err(error.to_string());
+    }
+    // Make the app active so the overlay webview receives keyboard input
+    // (Esc/Return/tool keys) while the user interacts with it.
+    platform::activate_self();
+    log::info!("start_capture: overlay window ready ({overlay_label})");
 
     Ok(context)
 }
@@ -541,7 +578,8 @@ fn hide_library_windows(app: &AppHandle) -> Vec<String> {
 
 fn create_overlay_window(
     app: &AppHandle,
-    display: &crate::capture::CapturedDisplay,
+    screen_frame: Rect,
+    capture_token: &str,
 ) -> anyhow::Result<String> {
     let label = "overlay".to_string();
     // Tauri inner_size/position are LOGICAL (points on macOS, DIPs on
@@ -549,11 +587,11 @@ fn create_overlay_window(
     let builder = WebviewWindowBuilder::new(
         app,
         label.clone(),
-        WebviewUrl::App("index.html?window=overlay".into()),
+        WebviewUrl::App(format!("index.html?window=overlay&captureToken={capture_token}").into()),
     )
     .title("kiri")
-    .inner_size(display.screen_frame.width, display.screen_frame.height)
-    .position(display.screen_frame.x, display.screen_frame.y)
+    .inner_size(screen_frame.width, screen_frame.height)
+    .position(screen_frame.x, screen_frame.y)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
@@ -564,13 +602,16 @@ fn create_overlay_window(
     // race WKWebView initialization and leave the page blank on macOS.
     let window = builder.build()?;
     raise_overlay_window(&window);
-    window.set_focus()?;
+    if let Err(error) = window.set_focus() {
+        let _ = window.close();
+        return Err(error.into());
+    }
     Ok(label)
 }
 
 #[cfg(target_os = "macos")]
 fn raise_overlay_window(window: &tauri::WebviewWindow) {
-    use objc2_app_kit::{NSWindow, NSScreenSaverWindowLevel};
+    use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow};
     if let Ok(ns_window) = window.ns_window() {
         let ns_window = ns_window as *mut NSWindow;
         let ns_window = unsafe { &*ns_window };
@@ -582,16 +623,43 @@ fn raise_overlay_window(window: &tauri::WebviewWindow) {
 fn raise_overlay_window(_window: &tauri::WebviewWindow) {}
 
 #[tauri::command]
-pub fn cancel_capture(app: AppHandle) -> Result<(), String> {
-    log::info!("[dbg] cancel_capture invoked");
+pub fn cancel_capture(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let mut capture = state.capture.lock().unwrap();
-    let Some(session) = capture.session.take() else {
+    let session = {
+        let mut capture = state.capture.lock().unwrap();
+        match capture.session.as_ref() {
+            Some(session)
+                if session
+                    .overlay_labels
+                    .iter()
+                    .any(|label| label == window.label()) =>
+            {
+                capture.session.take()
+            }
+            Some(_) => return Err("Capture command is only available to its overlay.".into()),
+            None if window.label() == "overlay" => None,
+            None => return Err("Capture command is only available to its overlay.".into()),
+        }
+    };
+    let Some(session) = session else {
+        let _ = window.close();
         return Ok(());
     };
-    for label in &session.overlay_labels {
-        if let Some(window) = app.get_webview_window(label) {
-            let _ = window.close();
+    teardown_cancelled_capture(&app, session, true);
+    Ok(())
+}
+
+pub(crate) fn teardown_cancelled_capture(
+    app: &AppHandle,
+    session: CaptureSession,
+    close_overlays: bool,
+) {
+    invalidate_capture_resources(app, &session);
+    if close_overlays {
+        for label in &session.overlay_labels {
+            if let Some(window) = app.get_webview_window(label) {
+                let _ = window.close();
+            }
         }
     }
     if session.was_kiri_frontmost {
@@ -604,7 +672,22 @@ pub fn cancel_capture(app: AppHandle) -> Result<(), String> {
     } else if let Some(pid) = session.return_pid {
         platform::activate_application(pid);
     }
-    Ok(())
+}
+
+fn invalidate_capture_resources(app: &AppHandle, session: &CaptureSession) {
+    let state = app.state::<AppState>();
+    for label in &session.overlay_labels {
+        state
+            .ocr_requests
+            .clear_owner(&crate::ocr_controller::OcrRequestOwner {
+                label: label.clone(),
+                capture_id: session.capture_id,
+            });
+    }
+    crate::protocol::clear_frozen_png_for_capture(
+        &app.state::<crate::protocol::ProtocolStore>(),
+        session.capture_id,
+    );
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -621,6 +704,8 @@ pub fn confirm_capture(app: AppHandle, request: ConfirmCaptureRequest) -> Result
     let Some(session) = capture.session.take() else {
         return Err("No active capture session.".into());
     };
+    drop(capture);
+    invalidate_capture_resources(&app, &session);
     // Errors must be visible: show the library window before emitting.
     let session_failure = match confirm_capture_inner(&app, &state, session, request) {
         Ok(()) => return Ok(()),
@@ -638,7 +723,11 @@ fn confirm_capture_inner(
     session: CaptureSession,
     request: ConfirmCaptureRequest,
 ) -> Result<(), String> {
-    log::info!("confirm_capture: action={} bytes={}", request.action, request.png.len());
+    log::info!(
+        "confirm_capture: action={} bytes={}",
+        request.action,
+        request.png.len()
+    );
 
     for label in &session.overlay_labels {
         if let Some(window) = app.get_webview_window(label) {
@@ -650,9 +739,17 @@ fn confirm_capture_inner(
     if action == "copy" {
         if let Err(error) = platform::write_image_to_clipboard(&request.png) {
             log::error!("confirm_capture: clipboard write failed: {error}");
-            emit_error(app, "Could not copy the capture to the clipboard.".into(), None);
+            emit_error(
+                app,
+                "Could not copy the capture to the clipboard.".into(),
+                None,
+            );
         } else {
-            emit_notice(app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
+            emit_notice(
+                app,
+                "Copied to Clipboard".into(),
+                "checkmark.circle.fill".into(),
+            );
         }
     }
 
@@ -794,7 +891,11 @@ pub fn update_asset(app: AppHandle, id: String, request: UpdateAssetRequest) -> 
         let _ = std::fs::write(save_path, &request.png);
     }
     if request.copy_to_clipboard && platform::write_image_to_clipboard(&request.png).is_ok() {
-        emit_notice(&app, "Copied to Clipboard".into(), "checkmark.circle.fill".into());
+        emit_notice(
+            &app,
+            "Copied to Clipboard".into(),
+            "checkmark.circle.fill".into(),
+        );
     }
     emit_library_changed(&app);
     Ok(())
@@ -809,7 +910,14 @@ pub fn rename_asset(app: AppHandle, id: String, title: String) -> Result<(), Str
     let state = app.state::<AppState>();
     let mut library = state.library.lock().unwrap();
     library
-        .set_title(if trimmed.is_empty() { None } else { Some(trimmed) }, &parsed)
+        .set_title(
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed)
+            },
+            &parsed,
+        )
         .map_err(|e| e.to_string())?;
     drop(library);
     emit_library_changed(&app);
@@ -826,18 +934,6 @@ pub fn set_tags(app: AppHandle, id: String, tags: Vec<String>) -> Result<(), Str
     drop(library);
     emit_library_changed(&app);
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// OCR (Vision / Media.Ocr are thread-safe)
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn recognize_text(png: Vec<u8>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || crate::ocr::recognize_text(&png))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -866,6 +962,8 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
         let Some(session) = capture.session.take() else {
             return Err("No active capture session.".into());
         };
+        drop(capture);
+        invalidate_capture_resources(&app, &session);
         for label in &session.overlay_labels {
             if let Some(window) = app.get_webview_window(label) {
                 let _ = window.close();
@@ -979,7 +1077,10 @@ pub fn cancel_recording_flow(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn create_control_panel(app: &AppHandle, configuration: &RecordingConfiguration) -> Result<(), String> {
+fn create_control_panel(
+    app: &AppHandle,
+    configuration: &RecordingConfiguration,
+) -> Result<(), String> {
     let frame = configuration.screen_frame;
     // Default position: bottom-right, lifted clear of the Dock (64pt from
     // the bottom). The user can drag the panel; the frontend persists the
@@ -1141,8 +1242,15 @@ fn start_encoder(
         encoder_config.audio.is_some(),
         encoder_config.mic.is_some(),
     );
-    crate::record::SegmentEncoder::start(&encoder_config, out_path, &ffmpeg, video_rx, audio_rx, mic_rx)
-        .map_err(|e| e.to_string())
+    crate::record::SegmentEncoder::start(
+        &encoder_config,
+        out_path,
+        &ffmpeg,
+        video_rx,
+        audio_rx,
+        mic_rx,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1170,7 +1278,9 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
         // The click monitor needs the Input Monitoring permission; install
         // it only while highlighting clicks (avoids a permission prompt at
         // every launch).
-        let _ = crate::ensure_click_monitor(&app);
+        if let Err(error) = crate::ensure_click_monitor(&app) {
+            log::warn!("recording: global click monitor unavailable: {error}");
+        }
     }
 
     // Mark the session as starting so the control panel shows a spinner
@@ -1259,7 +1369,11 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
         });
     }
 
-    emit_notice(&app, "Recording Started".into(), "record.circle.fill".into());
+    emit_notice(
+        &app,
+        "Recording Started".into(),
+        "record.circle.fill".into(),
+    );
     Ok(())
 }
 
@@ -1484,8 +1598,8 @@ fn finalize_recording(app: &AppHandle, segments: Vec<PathBuf>) -> Result<(), Str
         uuid::Uuid::new_v4().to_string().to_lowercase()
     ));
     crate::record::merge_segments(&segments, &merged_path, &ffmpeg).map_err(|e| e.to_string())?;
-    let (pixel_width, pixel_height, duration) = crate::record::probe_video(&ffmpeg, &merged_path)
-        .unwrap_or((0, 0, None));
+    let (pixel_width, pixel_height, duration) =
+        crate::record::probe_video(&ffmpeg, &merged_path).unwrap_or((0, 0, None));
     let mut library = state.library.lock().unwrap();
     let imported = library
         .import_file(
@@ -1513,13 +1627,42 @@ fn finalize_recording(app: &AppHandle, segments: Vec<PathBuf>) -> Result<(), Str
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn frontend_log(message: String) {
-    log::info!("[ui] {message}");
+pub fn log_frontend_error(window: WebviewWindow, message: String) -> Result<(), String> {
+    require_known_frontend_window(&window)?;
+    log::error!("[frontend] {}", sanitize_frontend_log(message));
+    Ok(())
 }
 
-#[tauri::command]
-pub fn log_frontend_error(message: String) {
-    log::error!("[frontend] {message}");
+fn require_known_frontend_window(window: &WebviewWindow) -> Result<(), String> {
+    let label = window.label();
+    if matches!(
+        label,
+        "library" | "overlay" | "countdown" | "control-panel" | "ripple" | "confirm" | "toast"
+    ) || ["viewer-", "pin-", "editor-"]
+        .iter()
+        .any(|prefix| label.starts_with(prefix))
+    {
+        Ok(())
+    } else {
+        Err("This command is unavailable from this window.".into())
+    }
+}
+
+fn sanitize_frontend_log(message: String) -> String {
+    const MAX_BYTES: usize = 4 * 1024;
+    let mut sanitized = String::with_capacity(message.len().min(MAX_BYTES));
+    for character in message.chars() {
+        let character = if character.is_control() {
+            ' '
+        } else {
+            character
+        };
+        if sanitized.len() + character.len_utf8() > MAX_BYTES {
+            break;
+        }
+        sanitized.push(character);
+    }
+    sanitized
 }
 
 #[tauri::command]
@@ -1531,7 +1674,14 @@ pub fn show_confirm_dialog(
     confirmLabel: String,
     ids: Option<Vec<String>>,
 ) {
-    crate::state::show_confirm_dialog(&app, kind, title, message, confirmLabel, ids.unwrap_or_default());
+    crate::state::show_confirm_dialog(
+        &app,
+        kind,
+        title,
+        message,
+        confirmLabel,
+        ids.unwrap_or_default(),
+    );
 }
 
 #[tauri::command]
@@ -1578,15 +1728,24 @@ pub fn open_settings(action: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let url = match action.as_str() {
-            "openSettings" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
-            "openAccessibilitySettings" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
-            "openInputMonitoringSettings" => "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent",
-            "openMicrophoneSettings" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+            "openSettings" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+            }
+            "openAccessibilitySettings" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            }
+            "openInputMonitoringSettings" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent"
+            }
+            "openMicrophoneSettings" => {
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+            }
             _ => return Err("unknown action".into()),
         };
         let workspace = objc2_app_kit::NSWorkspace::sharedWorkspace();
-        let url = objc2_foundation::NSURL::URLWithString(&objc2_foundation::NSString::from_str(url))
-            .ok_or_else(|| "bad url".to_string())?;
+        let url =
+            objc2_foundation::NSURL::URLWithString(&objc2_foundation::NSString::from_str(url))
+                .ok_or_else(|| "bad url".to_string())?;
         workspace.openURL(&url);
     }
     #[cfg(windows)]
@@ -1626,6 +1785,19 @@ pub fn open_devtools(app: AppHandle) -> Result<(), String> {
         window.open_devtools();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod command_security_tests {
+    use super::sanitize_frontend_log;
+
+    #[test]
+    fn frontend_error_log_is_single_line_and_bounded() {
+        let sanitized = sanitize_frontend_log(format!("first\nsecond\0{}", "界".repeat(2_000)));
+        assert!(!sanitized.chars().any(char::is_control));
+        assert!(sanitized.len() <= 4 * 1024);
+        assert!(sanitized.starts_with("first second "));
+    }
 }
 
 #[tauri::command]

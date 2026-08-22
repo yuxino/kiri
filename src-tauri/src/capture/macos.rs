@@ -10,7 +10,7 @@ use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2::{AnyThread, DefinedClass};
-use objc2_app_kit::{NSEvent, NSScreen, NSBitmapImageRep};
+use objc2_app_kit::{NSBitmapImageRep, NSEvent, NSScreen};
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGImage};
 use objc2_core_media::{
@@ -18,15 +18,14 @@ use objc2_core_media::{
     CMSampleBuffer, CMTime,
 };
 use objc2_core_video::{
-    CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferGetHeight,
-    CVPixelBufferGetWidth, CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags,
-    CVPixelBufferUnlockBaseAddress,
+    CVPixelBuffer, CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow,
+    CVPixelBufferGetHeight, CVPixelBufferGetWidth, CVPixelBufferLockBaseAddress,
+    CVPixelBufferLockFlags, CVPixelBufferUnlockBaseAddress,
 };
-use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString, NSError, NSObject};
+use objc2_foundation::{NSArray, NSDictionary, NSError, NSNumber, NSObject, NSString};
 use objc2_screen_capture_kit::{
-    SCContentFilter, SCDisplay, SCScreenshotManager, SCShareableContent,
-    SCStream, SCStreamConfiguration, SCStreamDelegate, SCStreamOutput, SCStreamOutputType,
-    SCWindow,
+    SCContentFilter, SCDisplay, SCScreenshotManager, SCShareableContent, SCStream,
+    SCStreamConfiguration, SCStreamDelegate, SCStreamOutput, SCStreamOutputType, SCWindow,
 };
 
 use crate::core::geometry::Rect;
@@ -50,32 +49,129 @@ pub enum PermissionState {
     SettingsRequired,
 }
 
+/// Process-scoped permission gate. The closures keep the state machine
+/// independently testable without invoking macOS privacy APIs from tests.
+struct ScreenCapturePermissionGate {
+    cached: std::sync::Mutex<Option<PermissionState>>,
+}
+
+impl ScreenCapturePermissionGate {
+    const fn new() -> Self {
+        Self {
+            cached: std::sync::Mutex::new(None),
+        }
+    }
+
+    fn check(
+        &self,
+        preflight: impl FnOnce() -> bool,
+        request: impl FnOnce() -> bool,
+    ) -> PermissionState {
+        // Hold the gate while checking and requesting so concurrent capture
+        // triggers cannot both reach the system request API.
+        let mut cached = self.cached.lock().unwrap();
+        // Authorized wins unconditionally: if the user grants access in
+        // System Settings, preflight overrides any stale denial cache.
+        if preflight() {
+            *cached = None;
+            return PermissionState::Authorized;
+        }
+        if let Some(state) = *cached {
+            return state;
+        }
+        let state = if request() {
+            PermissionState::RestartRequired
+        } else {
+            PermissionState::SettingsRequired
+        };
+        *cached = Some(state);
+        state
+    }
+}
+
 // Caches the `CGRequestScreenCaptureAccess` outcome so the system prompt is
 // shown at most once per launch (mirrors `ScreenCapturePermissionGate`:
 // "已有缓存 → 直接返回缓存值,避免重复弹权限框"). Without this, every
 // `start_capture` re-invoked the request API and macOS re-prompts even
 // though the user already granted (or already declined) access.
-static PERMISSION_CACHE: std::sync::Mutex<Option<PermissionState>> = std::sync::Mutex::new(None);
+static PERMISSION_GATE: ScreenCapturePermissionGate = ScreenCapturePermissionGate::new();
 
 /// Mirrors `ScreenCapturePermissionGate` (preflight → request, cached).
 pub fn check_capture_permission() -> PermissionState {
-    // Authorized wins unconditionally: if the user just granted access in
-    // System Settings, preflight flips to true and the stale cache is
-    // cleared so later calls report Authorized instead of the old denial.
-    if unsafe { CGPreflightScreenCaptureAccess() } {
-        *PERMISSION_CACHE.lock().unwrap() = None;
-        return PermissionState::Authorized;
+    PERMISSION_GATE.check(
+        || unsafe { CGPreflightScreenCaptureAccess() },
+        || unsafe { CGRequestScreenCaptureAccess() },
+    )
+}
+
+#[cfg(test)]
+mod permission_tests {
+    use std::cell::Cell;
+
+    use super::{PermissionState, ScreenCapturePermissionGate};
+
+    #[test]
+    fn authorized_preflight_never_requests_access() {
+        let gate = ScreenCapturePermissionGate::new();
+        let request_count = Cell::new(0);
+
+        let state = gate.check(
+            || true,
+            || {
+                request_count.set(request_count.get() + 1);
+                false
+            },
+        );
+
+        assert_eq!(state, PermissionState::Authorized);
+        assert_eq!(request_count.get(), 0);
     }
-    if let Some(cached) = *PERMISSION_CACHE.lock().unwrap() {
-        return cached;
+
+    #[test]
+    fn denied_request_is_cached_for_the_process() {
+        let gate = ScreenCapturePermissionGate::new();
+        let request_count = Cell::new(0);
+
+        for _ in 0..2 {
+            let state = gate.check(
+                || false,
+                || {
+                    request_count.set(request_count.get() + 1);
+                    false
+                },
+            );
+            assert_eq!(state, PermissionState::SettingsRequired);
+        }
+
+        assert_eq!(request_count.get(), 1);
     }
-    let state = if unsafe { CGRequestScreenCaptureAccess() } {
-        PermissionState::RestartRequired
-    } else {
-        PermissionState::SettingsRequired
-    };
-    *PERMISSION_CACHE.lock().unwrap() = Some(state);
-    state
+
+    #[test]
+    fn granted_request_is_cached_until_preflight_authorizes() {
+        let gate = ScreenCapturePermissionGate::new();
+        let request_count = Cell::new(0);
+
+        let first = gate.check(
+            || false,
+            || {
+                request_count.set(request_count.get() + 1);
+                true
+            },
+        );
+        let cached = gate.check(
+            || false,
+            || {
+                request_count.set(request_count.get() + 1);
+                false
+            },
+        );
+        let authorized = gate.check(|| true, || false);
+
+        assert_eq!(first, PermissionState::RestartRequired);
+        assert_eq!(cached, PermissionState::RestartRequired);
+        assert_eq!(authorized, PermissionState::Authorized);
+        assert_eq!(request_count.get(), 1);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +191,12 @@ fn make_fixture() -> Result<CapturedDisplay> {
     let height = (screen.frame.height * scale).round() as u32;
 
     // Two "windows" in display-local points (like the Swift fixture).
-    let window_one = Rect::new(90.0, 75.0, (620.0_f64).min(screen.frame.width - 180.0), (420.0_f64).min(screen.frame.height - 180.0));
+    let window_one = Rect::new(
+        90.0,
+        75.0,
+        (620.0_f64).min(screen.frame.width - 180.0),
+        (420.0_f64).min(screen.frame.height - 180.0),
+    );
     let window_two = Rect::new(
         (240.0_f64).min(screen.frame.width * 0.42),
         155.0,
@@ -124,7 +225,10 @@ fn make_fixture() -> Result<CapturedDisplay> {
 
     let mut png_bytes = Vec::new();
     image
-        .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .write_to(
+            &mut std::io::Cursor::new(&mut png_bytes),
+            image::ImageFormat::Png,
+        )
         .map_err(|e| anyhow!("{e}"))?;
 
     Ok(CapturedDisplay {
@@ -137,7 +241,6 @@ fn make_fixture() -> Result<CapturedDisplay> {
         backing_scale: scale,
     })
 }
-
 
 /// Average brightness (0-255) of a PNG buffer; None if undecodable.
 fn png_average(png: &[u8]) -> Option<(u32, u32, f64)> {
@@ -211,18 +314,20 @@ fn shareable_content() -> Result<Retained<SCShareableContent>> {
     // starts off the UI thread). dispatch2 lets us hop to the main queue and
     // wait for the completion handler synchronously.
     let (tx, rx) = mpsc::channel::<std::result::Result<Retained<SCShareableContent>, String>>();
-    let block = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
-        let result = if error.is_null() && !content.is_null() {
-            // Completion handlers deliver autoreleased (+0) objects; retain.
-            Ok(unsafe { Retained::retain(content).unwrap() })
-        } else if !error.is_null() {
-            let error = unsafe { Retained::retain(error).unwrap() };
-            Err(error.localizedDescription().to_string())
-        } else {
-            Err("shareable content failed".to_string())
-        };
-        let _ = tx.send(result);
-    });
+    let block = RcBlock::new(
+        move |content: *mut SCShareableContent, error: *mut NSError| {
+            let result = if error.is_null() && !content.is_null() {
+                // Completion handlers deliver autoreleased (+0) objects; retain.
+                Ok(unsafe { Retained::retain(content).unwrap() })
+            } else if !error.is_null() {
+                let error = unsafe { Retained::retain(error).unwrap() };
+                Err(error.localizedDescription().to_string())
+            } else {
+                Err("shareable content failed".to_string())
+            };
+            let _ = tx.send(result);
+        },
+    );
     unsafe {
         SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(
             false,
@@ -235,8 +340,7 @@ fn shareable_content() -> Result<Retained<SCShareableContent>> {
         .recv_timeout(std::time::Duration::from_secs(8))
         .map_err(|_| anyhow!("shareable content timed out after 8s"))?;
     log::info!("shareable_content: got SCK callback");
-    result
-        .map_err(|message| anyhow!(message))
+    result.map_err(|message| anyhow!(message))
 }
 
 fn make_filter(
@@ -255,8 +359,7 @@ fn make_filter(
             let excepted: Vec<Retained<SCWindow>> = windows
                 .iter()
                 .filter(|window| {
-                    unsafe { window.owningApplication() }
-                        .map(|app| unsafe { app.processID() })
+                    unsafe { window.owningApplication() }.map(|app| unsafe { app.processID() })
                         == Some(own_process_id)
                         && excepted_window_ids.contains(&unsafe { window.windowID() })
                 })
@@ -277,8 +380,7 @@ fn make_filter(
             let excluded: Vec<Retained<SCWindow>> = windows
                 .iter()
                 .filter(|window| {
-                    unsafe { window.owningApplication() }
-                        .map(|app| unsafe { app.processID() })
+                    unsafe { window.owningApplication() }.map(|app| unsafe { app.processID() })
                         == Some(own_process_id)
                         && !excepted_window_ids.contains(&unsafe { window.windowID() })
                 })
@@ -354,7 +456,10 @@ fn cgimage_to_png(image: &CFRetained<CGImage>) -> Result<(Vec<u8>, i64, i64)> {
     .ok_or_else(|| anyhow!("could not encode capture as PNG"))?;
     let mut bytes = vec![0u8; data.len()];
     unsafe {
-        data.getBytes_length(std::ptr::NonNull::new_unchecked(bytes.as_mut_ptr() as *mut std::ffi::c_void), data.len());
+        data.getBytes_length(
+            std::ptr::NonNull::new_unchecked(bytes.as_mut_ptr() as *mut std::ffi::c_void),
+            data.len(),
+        );
     }
     Ok((bytes, width, height))
 }
@@ -390,8 +495,12 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
 
     let configuration = unsafe {
         let configuration = SCStreamConfiguration::new();
-        let width = ((display.width() as f64) * screen.backing_scale).round().max(1.0) as i64;
-        let height = ((display.height() as f64) * screen.backing_scale).round().max(1.0) as i64;
+        let width = ((display.width() as f64) * screen.backing_scale)
+            .round()
+            .max(1.0) as i64;
+        let height = ((display.height() as f64) * screen.backing_scale)
+            .round()
+            .max(1.0) as i64;
         configuration.setWidth(width as usize);
         configuration.setHeight(height as usize);
         configuration.setShowsCursor(false);
@@ -506,14 +615,10 @@ impl MacRecordingSession {
         let filter = make_filter(&content, &display, own_process_id, excepted_window_ids);
         log::info!("MacRecordingSession: filter created");
 
-        let width = crate::core::policy::RecordingPolicy::pixel_dimension(
-            region.width,
-            backing_scale,
-        );
-        let height = crate::core::policy::RecordingPolicy::pixel_dimension(
-            region.height,
-            backing_scale,
-        );
+        let width =
+            crate::core::policy::RecordingPolicy::pixel_dimension(region.width, backing_scale);
+        let height =
+            crate::core::policy::RecordingPolicy::pixel_dimension(region.height, backing_scale);
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let (result_tx, result_rx) = mpsc::channel::<Result<()>>();
@@ -549,7 +654,8 @@ impl MacRecordingSession {
                 });
                 configuration.setQueueDepth(6);
                 configuration.setPixelFormat(0x4247_5241); // kCVPixelFormatType_32BGRA
-                configuration.setCaptureResolution(objc2_screen_capture_kit::SCCaptureResolutionType::Best);
+                configuration
+                    .setCaptureResolution(objc2_screen_capture_kit::SCCaptureResolutionType::Best);
                 configuration.setScalesToFit(false);
                 configuration.setShowsCursor(options.shows_cursor);
                 configuration.setShowMouseClicks(false);
@@ -812,15 +918,15 @@ objc2::define_class!(
             let state = unsafe { &*(self.ivars().state as *const DelegateState) };
             // Late callback after stop: ignore to avoid use-after-free of
             // the senders (the receiver is dropped once the stream stops).
-            if state
-                .stopped
-                .load(std::sync::atomic::Ordering::Relaxed)
-            {
+            if state.stopped.load(std::sync::atomic::Ordering::Relaxed) {
                 return;
             }
             if of_type == SCStreamOutputType::Screen {
                 if let Some(frame) = copy_pixel_buffer(buffer) {
-                    let count = state.frames.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    let count = state
+                        .frames
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        + 1;
                     if count % 30 == 0 {
                         log::info!("MacRecordingSession: {count} frames captured");
                     }
@@ -881,7 +987,8 @@ objc2::define_class!(
 
 impl KiriStreamDelegate {
     pub fn with_state(state_ptr: usize) -> Retained<Self> {
-        let this = KiriStreamDelegate::alloc().set_ivars(KiriStreamDelegateIvars { state: state_ptr });
+        let this =
+            KiriStreamDelegate::alloc().set_ivars(KiriStreamDelegateIvars { state: state_ptr });
         unsafe { msg_send![super(this), init] }
     }
 }

@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Cargo runner used by `pnpm tauri dev` on macOS. It gives every rebuilt
+# development executable the same designated requirement before launching it,
+# so macOS privacy grants survive Rust hot reloads.
+set -euo pipefail
+
+fail() {
+  echo "kiri dev signing: $*" >&2
+  exit 1
+}
+
+if [ "$#" -lt 1 ]; then
+  fail "Cargo did not provide an executable to launch."
+fi
+
+binary_input="$1"
+shift
+
+if [ -L "$binary_input" ]; then
+  fail "refusing to sign a symbolic link: $binary_input"
+fi
+if [ ! -f "$binary_input" ] || [ ! -x "$binary_input" ]; then
+  fail "expected an executable file, got: $binary_input"
+fi
+
+script_dir="$(cd "$(dirname "$0")" && pwd -P)"
+repository_root="$(/bin/realpath "$script_dir/..")"
+binary="$(/bin/realpath "$binary_input")"
+target_prefix="$repository_root/src-tauri/target/"
+
+case "$binary" in
+  "$target_prefix"*) ;;
+  *) fail "refusing to sign an executable outside src-tauri/target: $binary" ;;
+esac
+
+relative_path="${binary#"$target_prefix"}"
+IFS='/' read -r -a path_parts <<< "$relative_path"
+valid_target=false
+if [ "${#path_parts[@]}" -eq 2 ] \
+  && { [ "${path_parts[0]}" = "debug" ] || [ "${path_parts[0]}" = "release" ]; } \
+  && [ "${path_parts[1]}" = "kiri" ]; then
+  valid_target=true
+elif [ "${#path_parts[@]}" -eq 3 ] \
+  && [ -n "${path_parts[0]}" ] \
+  && { [ "${path_parts[1]}" = "debug" ] || [ "${path_parts[1]}" = "release" ]; } \
+  && [ "${path_parts[2]}" = "kiri" ]; then
+  valid_target=true
+fi
+if [ "$valid_target" != true ]; then
+  fail "refusing unexpected Cargo target path: $binary"
+fi
+
+file_description="$(/usr/bin/file -b "$binary")"
+case "$file_description" in
+  Mach-O*) ;;
+  *) fail "expected a Mach-O executable, got: $file_description" ;;
+esac
+
+available_identity_names() {
+  /usr/bin/security find-identity -v -p codesigning 2>/dev/null \
+    | /usr/bin/sed -n 's/^[^"]*"\([^"]*\)".*$/\1/p'
+}
+
+automatic_identity() {
+  local prefix candidate
+  for prefix in "Apple Development:" "Developer ID Application:"; do
+    while IFS= read -r candidate; do
+      case "$candidate" in
+        "$prefix"*) printf '%s\n' "$candidate"; return 0 ;;
+      esac
+    done < <(available_identity_names)
+  done
+  while IFS= read -r candidate; do
+    case "$candidate" in
+      *" Local Development") printf '%s\n' "$candidate"; return 0 ;;
+    esac
+  done < <(available_identity_names)
+  return 1
+}
+
+identity="${KIRI_DEV_SIGNING_IDENTITY:-${KIRI_SIGNING_IDENTITY:-}}"
+if [ -z "$identity" ]; then
+  identity="$(automatic_identity || true)"
+fi
+
+if [ -z "$identity" ]; then
+  if [ "${KIRI_ALLOW_ADHOC_SIGNING:-0}" = "1" ]; then
+    identity="-"
+    echo "kiri dev signing: using explicitly requested ad-hoc signing; macOS may ask for permissions again after rebuilds" >&2
+  else
+    fail "no stable code-signing identity found. Install an Apple Development certificate or set KIRI_DEV_SIGNING_IDENTITY. For UI-only fixture work, explicitly set both KIRI_CAPTURE_FIXTURE=1 and KIRI_ALLOW_ADHOC_SIGNING=1."
+  fi
+fi
+
+if [ "$identity" = "-" ] && [ "${KIRI_ALLOW_ADHOC_SIGNING:-0}" != "1" ]; then
+  fail "ad-hoc signing must be explicitly enabled with KIRI_ALLOW_ADHOC_SIGNING=1"
+fi
+
+signing_identifier="io.yuxino.kiri.dev"
+/usr/bin/codesign \
+  --force \
+  --sign "$identity" \
+  --identifier "$signing_identifier" \
+  --timestamp=none \
+  "$binary"
+/usr/bin/codesign --verify --strict "$binary"
+
+echo "kiri dev signing: ready as $signing_identifier ($identity)" >&2
+exec "$binary" "$@"

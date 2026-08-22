@@ -583,12 +583,10 @@ mod tests {
             std::env::var("KIRI_FFMPEG_PATH").ok().map(PathBuf::from),
             Some(ffmpeg_cache_path()),
         ];
-        for candidate in candidates.into_iter().flatten() {
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-        None
+        candidates
+            .into_iter()
+            .flatten()
+            .find(|candidate| candidate.exists())
     }
 
     fn probe_streams(ffmpeg: &Path, video: &Path) -> String {

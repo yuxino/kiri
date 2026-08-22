@@ -1,6 +1,6 @@
 # Kiri Tauri 迁移设计(1:1 复刻, macOS + Windows)
 
-> 状态:已定稿,正在实施
+> 状态:迁移已落地,持续演进
 > 蓝本:本仓库 Swift/macOS 原版(约 1.07 万行,行为规格见 `docs/spec/swift/`)
 > 目标:用 Tauri 2 + React 全量复刻,支持 macOS 与 Windows,原版行为逐条对齐。
 
@@ -10,12 +10,12 @@
 
 - **截图**:全局快捷键 ⇧⌘A(macOS)/Shift+Ctrl+A(Windows)→ 冻结屏 → 窗口悬停单描边选中 / 手动区域拖拽(8 手柄)→ 标注 → 剪贴板优先 + 入库,焦点归还原应用。
 - **标注**:画笔/矩形/直线/箭头/文字/马赛克,撤销重做,内联文字编辑(IME),实时字号。
-- **OCR**:第三捕获模式,本地识别,结果复制到剪贴板。
+- **OCR**:第三捕获模式,默认本地识别;可选多套远程配置,每张图片发送前逐次确认,结果复制到剪贴板。
 - **录屏**:区域录制 + 可选系统音频/麦克风/光标/点击涟漪,3-2-1 倒计时,暂停恢复(分段合并),控件不入视频。
 - **GIF**:≤15s 录屏转 GIF(12fps、长边 720)。
 - **库**:本地文件 + `library.json` 索引,搜索/收藏/复制/打开/在文件管理器中显示/回收站(可恢复)。
 - **双语言**:en + zh-Hans,跟随系统首选语言。
-- **本地优先**:无网络、无分析、无账号。
+- **本地优先**:无分析、无账号;只有用户明确确认的当前 OCR 选区可以发往所选远程服务。
 
 不可妥协清单与跨平台等价映射详见 `docs/spec/swift/product-contract.md`。
 
@@ -33,9 +33,9 @@
 | 编码/复用 | ffmpeg-sidecar(H.264/HEVC 硬件优先,AAC) | 双平台同一条编码链路 |
 | 全局快捷键 | macOS:`CGEventTap`(吞事件,独占);Windows:`RegisterHotKey` | 与原版独占语义一致 |
 | 剪贴板 | `arboard` | 图片/文本双平台 |
-| OCR | macOS:`objc2-vision` VNRecognizeTextRequest;Windows:`Windows.Media.Ocr` | 均本地 |
+| OCR | macOS:`objc2-vision`;Windows:`Windows.Media.Ocr`;可选 Rust OpenAI Chat Completions 适配器 | 默认本地;远程逐图确认 |
 | 存储 | `~/Library/Application Support/kiri` / `%APPDATA%\kiri` | 与 Swift 版同一 schema,用户库无缝延续 |
-| i18n | 自定义轻量字典(210 key 全表见 spec) | 跟随系统语言,key 即英文回退 |
+| i18n | 自定义轻量字典,英/简中 key 集合一致;保留现有日文字典 | 跟随系统语言,key 即英文回退 |
 
 ## 3. 窗口架构
 

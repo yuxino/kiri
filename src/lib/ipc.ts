@@ -76,6 +76,62 @@ export interface ErrorDto {
   recovery: string | null;
 }
 
+export type OcrProviderPreset = "aliyunBailian" | "openAi" | "customOpenAi";
+
+type OcrProtocol = "openAiChatCompletions";
+
+export type OcrEngineRef =
+  | { kind: "local" }
+  | { kind: "profile"; profileId: string };
+
+export interface OcrProviderProfileDto {
+  id: string;
+  revision: number;
+  name: string;
+  provider: OcrProviderPreset;
+  protocol: OcrProtocol;
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+}
+
+export interface OcrProviderSettingsDto {
+  schemaVersion: number;
+  activeEngine: OcrEngineRef;
+  profiles: OcrProviderProfileDto[];
+  warning?: string | null;
+}
+
+export interface SaveOcrProviderProfileRequest {
+  id?: string;
+  revision?: number;
+  name: string;
+  provider: OcrProviderPreset;
+  protocol: OcrProtocol;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+}
+
+export interface PreparedOcrProfileDto {
+  id: string;
+  revision: number;
+  name: string;
+  provider: OcrProviderPreset;
+  origin: string;
+  model: string;
+  hasApiKey: boolean;
+}
+
+export interface PreparedOcrRequestDto {
+  requestId: string;
+  engine: OcrEngineRef;
+  imageWidth: number;
+  imageHeight: number;
+  byteLength: number;
+  profile?: PreparedOcrProfileDto | null;
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -116,8 +172,34 @@ export const api = {
   cancelCapture: () => invoke<void>("cancel_capture"),
   confirmCapture: (png: number[], action: string) =>
     invoke<void>("confirm_capture", { request: { png, action } }),
-  recognizeText: (png: number[]) => invoke<string>("recognize_text", { png }),
   copyText: (text: string) => invoke<void>("copy_text", { text }),
+  getOcrProviderSettings: () =>
+    invoke<OcrProviderSettingsDto>("get_ocr_provider_settings"),
+  saveOcrProviderProfile: (request: SaveOcrProviderProfileRequest) =>
+    invoke<OcrProviderSettingsDto>("save_ocr_provider_profile", { request }),
+  deleteOcrProviderProfile: (profileId: string, profileRevision: number) =>
+    invoke<OcrProviderSettingsDto>("delete_ocr_provider_profile", {
+      profileId,
+      profileRevision,
+    }),
+  setActiveOcrEngine: (engine: OcrEngineRef) =>
+    invoke<OcrProviderSettingsDto>("set_active_ocr_engine", { engine }),
+  prepareOcrRequest: (selection: RectDto) =>
+    invoke<PreparedOcrRequestDto>("prepare_ocr_request", { selection }),
+  recognizePreparedOcrLocal: (requestId: string) =>
+    invoke<string>("recognize_prepared_ocr_local", { requestId }),
+  recognizePreparedOcrRemote: (
+    requestId: string,
+    profileId: string,
+    profileRevision: number,
+  ) =>
+    invoke<string>("recognize_prepared_ocr_remote", {
+      requestId,
+      profileId,
+      profileRevision,
+    }),
+  cancelPreparedOcr: (requestId: string) =>
+    invoke<void>("cancel_prepared_ocr", { requestId }),
 
   startRecordingFlow: (region: RectDto, options: RecordingOptions) =>
     invoke<void>("start_recording_flow", { request: { region, options } }),
@@ -145,10 +227,6 @@ export const api = {
 // Events
 // ---------------------------------------------------------------------------
 
-export function dbg(message: string): void {
-  void invoke("frontend_log", { message }).catch(() => {});
-}
-
 export function onNotice(handler: (notice: NoticeDto) => void): Promise<UnlistenFn> {
   return listen<NoticeDto>("notice", (event) => handler(event.payload));
 }
@@ -165,10 +243,6 @@ export function onRecordingState(
   handler: (state: RecordingState) => void,
 ): Promise<UnlistenFn> {
   return listen<RecordingState>("recording-state", (event) => handler(event.payload));
-}
-
-export function frozenImageUrl(): string {
-  return "kiri://capture/frozen.png";
 }
 
 export function pinImageUrl(id: string): string {

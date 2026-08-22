@@ -2,6 +2,7 @@
 // (EditorWindowController.swift): 880×620, dark, 58pt toolbar, same canvas.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "../lib/ipc";
 import { t } from "../i18n";
 import type { Rect } from "../annotation/geom";
@@ -104,9 +105,7 @@ export function EditorWindow(props: { id: string }) {
   }, []);
 
   function closeWindow() {
-    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      void getCurrentWindow().close();
-    });
+    void getCurrentWindow().close();
   }
 
   async function complete(copyToClipboard: boolean) {
