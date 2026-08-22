@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { api, onError, onLibraryChanged, onNotice, type AssetDto, type ErrorDto, type NoticeDto } from "../lib/ipc";
 import { t, fmt } from "../i18n";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import brandIcon from "../assets/kiri-icon.png";
+import brandIcon from "../../src-tauri/icons/128x128.png";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 import { SettingsView } from "../settings/SettingsView";
 
@@ -54,6 +54,7 @@ export function LibraryWindow() {
   const [assets, setAssets] = useState<AssetDto[]>([]);
   const [section, setSection] = useState<Section>("library");
   const [destination, setDestination] = useState<Destination>("captures");
+  const [query, setQuery] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState<NoticeDto | null>(null);
   const [error, setError] = useState<ErrorDto | null>(null);
@@ -72,8 +73,25 @@ export function LibraryWindow() {
   // scroll container's coordinates; null when not band-selecting.
   const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const gridScrollRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const refreshGenerationRef = useRef(0);
+  const queryRef = useRef(query);
+  queryRef.current = query;
   // Card id → DOM element, registered while rendering, used for hit tests.
   const cardElsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+
+  // View-layer filters shared by Library and Trash, applied on top of the
+  // backend text search.
+  const filteredAssets = useMemo(() => {
+    return assets.filter((asset) => {
+      if (favoritesOnly && !asset.isFavorite) return false;
+      if (tagFilter && !asset.tags.some((tag) => tag.toLowerCase() === tagFilter.toLowerCase())) {
+        return false;
+      }
+      if (kindFilter === "all") return true;
+      return asset.kind === kindFilter;
+    });
+  }, [assets, kindFilter, favoritesOnly, tagFilter]);
 
   // Select a single card (clears others) — the default click behavior.
   const selectSingle = (id: string) => setSelection(new Set([id]));
@@ -88,7 +106,7 @@ export function LibraryWindow() {
   };
 
   const clearSelection = () => setSelection(new Set());
-  const selectAll = () => setSelection(new Set(assets.map((a) => a.id)));
+  const selectAll = () => setSelection(new Set(filteredAssets.map((asset) => asset.id)));
 
   // Stable ordered list of selected ids (Set preserves insertion order).
   const selectionIds = [...selection];
@@ -203,28 +221,31 @@ export function LibraryWindow() {
   // assets that are no longer visible.
   useEffect(() => {
     clearSelection();
-  }, [section, kindFilter, favoritesOnly, tagFilter]);
+  }, [section, destination, query, kindFilter, favoritesOnly, tagFilter]);
 
   useEffect(() => {
     api.getShortcutLabel().then(setShortcutLabel).catch(() => {});
   }, []);
 
   const showingTrash = section === "trash";
+  const showingTrashRef = useRef(showingTrash);
+  showingTrashRef.current = showingTrash;
 
   const refresh = useCallback(async () => {
-    const list = await api.listAssets("", showingTrash);
+    const generation = ++refreshGenerationRef.current;
+    const list = await api.listAssets(queryRef.current.trim(), showingTrashRef.current);
+    if (generation !== refreshGenerationRef.current) return;
     setAssets(list);
     setLoaded(true);
-  }, [showingTrash]);
+  }, []);
 
   useEffect(() => {
     void refresh().catch(() => {});
-  }, [refresh]);
+  }, [query, refresh, showingTrash]);
 
   useEffect(() => {
-    const unsubs: Promise<() => void>[] = [];
-    unsubs.push(
-      onLibraryChanged(() => void refresh().catch(() => {})).then((fn) => () => fn()),
+    const subscriptions = [
+      onLibraryChanged(() => void refresh().catch(() => {})),
       onNotice((n) => {
         setNotice(n);
         setTimeout(() => {
@@ -232,17 +253,29 @@ export function LibraryWindow() {
         }, 2000);
       }),
       onError((e) => setError(e)),
-    );
+    ];
     return () => {
-      unsubs.forEach((p) => p.then((fn) => fn()));
+      subscriptions.forEach((subscription) => {
+        void subscription.then((dispose) => dispose()).catch(() => {});
+      });
     };
   }, [refresh]);
 
-  // ⌘A selects all; ⌘⌥I toggles the developer tools.
+  // ⌘/Ctrl+F focuses search, ⌘/Ctrl+A selects the visible filtered cards,
+  // and ⌘/Ctrl+Alt+I toggles the developer tools.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (
+        destination === "captures" &&
+        mod &&
+        !e.altKey &&
+        e.key.toLowerCase() === "f"
+      ) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      } else if (
         destination === "captures" &&
         mod &&
         !e.altKey &&
@@ -260,7 +293,7 @@ export function LibraryWindow() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [assets, destination]);
+  }, [assets, destination, favoritesOnly, kindFilter, query, tagFilter]);
 
   const gridStyle: React.CSSProperties = {
     display: "grid",
@@ -268,20 +301,6 @@ export function LibraryWindow() {
     gap: 20,
     alignContent: "start",
   };
-
-  // Front-end filters (kind + favorites) applied on top of the backend
-  // search — view-layer conveniences shared by Library and Trash so both
-  // sections behave identically.
-  const filteredAssets = useMemo(() => {
-    return assets.filter((asset) => {
-      if (favoritesOnly && !asset.isFavorite) return false;
-      if (tagFilter && !asset.tags.some((tag) => tag.toLowerCase() === tagFilter.toLowerCase())) {
-        return false;
-      }
-      if (kindFilter === "all") return true;
-      return asset.kind === kindFilter;
-    });
-  }, [assets, kindFilter, favoritesOnly, tagFilter]);
 
   // All tags in the current view, for the tag filter bar.
   const allTags = useMemo(() => {
@@ -292,8 +311,10 @@ export function LibraryWindow() {
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [assets]);
 
-  const isEmpty = assets.length === 0 && loaded;
-  const isFilterEmpty = !isEmpty && filteredAssets.length === 0 && loaded;
+  const hasActiveFilter =
+    query.trim().length > 0 || kindFilter !== "all" || favoritesOnly || tagFilter !== null;
+  const isEmpty = assets.length === 0 && loaded && !hasActiveFilter;
+  const isFilterEmpty = filteredAssets.length === 0 && loaded && hasActiveFilter;
 
   const openMenu = (id: string, x: number, y: number) => {
     if (menuFor === id) {
@@ -477,6 +498,39 @@ export function LibraryWindow() {
           </span>
         </div>
         <div style={{ flex: 1 }} />
+        {destination === "captures" && (
+          <div className="kiri-library-search">
+            <KiriIcon name="magnifyingglass" size={13} />
+            <input
+              ref={searchInputRef}
+              type="search"
+              value={query}
+              aria-label={t("Search captures")}
+              placeholder={t("Search captures")}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && query) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setQuery("");
+                }
+              }}
+            />
+            {query && (
+              <button
+                type="button"
+                aria-label={t("Clear Search")}
+                title={t("Clear Search")}
+                onClick={() => {
+                  setQuery("");
+                  searchInputRef.current?.focus();
+                }}
+              >
+                <KiriIcon name="xmark" size={10} />
+              </button>
+            )}
+          </div>
+        )}
         <SegmentedPicker
           options={[t("Library"), t("Trash")]}
           value={destination === "settings" ? -1 : section === "library" ? 0 : 1}

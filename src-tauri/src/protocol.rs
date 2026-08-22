@@ -110,11 +110,14 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             {
                 return respond(bytes, "image/png");
             }
-            let ffmpeg = state
-                .ffmpeg_path
-                .get()
-                .cloned()
-                .or_else(|| crate::record::ensure_ffmpeg(None).ok());
+            // Browsing the local library must never trigger a network
+            // download. Reuse an initialized encoder, or discover only a
+            // validated environment/cache/PATH installation.
+            let ffmpeg = state.ffmpeg_path.get().cloned().or_else(|| {
+                let path = crate::record::existing_ffmpeg()?;
+                let _ = state.ffmpeg_path.set(path.clone());
+                Some(path)
+            });
             if let Some(ffmpeg) = ffmpeg {
                 if let Some(thumbnail) = crate::thumbnail::video_first_frame(&ffmpeg, &file_path) {
                     store

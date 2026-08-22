@@ -21,8 +21,9 @@ Read it before editing, then read `docs/plans/2026-08-13-kiri-tauri-migration-de
 Kiri is a local-first capture utility for macOS and Windows. Preserve these
 decisions:
 
-- The global capture shortcut is `⇧⌘A` on macOS (exclusive, consumed via
-  CGEventTap) and `Shift+Ctrl+A` on Windows (RegisterHotKey).
+- The global capture shortcut is `⇧⌘A` on macOS and `Shift+Ctrl+A` on Windows.
+  Both use the platform's native global-hotkey registration; the shortcut does
+  not require Input Monitoring permission.
 - The initial overlay offers Screenshot, Record, and OCR.
 - Window hover shows exactly one restrained violet outline without handles,
   dimensions, stacked borders, or a following tooltip. A click selects that
@@ -40,17 +41,18 @@ decisions:
 - The optional violet click ripple is visible live and is also captured.
 - The 3-2-1 countdown is centered and compact; it must not dim the selected
   recording region.
-- User-facing UI supports English and Simplified Chinese and follows the OS
-  preferred language.
+- User-facing UI supports English, Simplified Chinese, and Japanese and follows
+  the OS preferred language.
 - Captures stay local. Never add uploads, analytics, accounts, or network
   behavior without an explicit product decision and privacy documentation.
-  (The one exception: ffmpeg is downloaded once at build/first-run time to
-  provide offline encoding.)
+  (The one exception: FFmpeg is downloaded once when the user first records or
+  converts a GIF and no usable local copy is available, then cached for offline
+  encoding. Browsing the library never triggers this download.)
 
 ## Repository map
 
 - `src/` — React frontend: capture overlay, annotation canvas, library,
-  editor, countdown/control/ripple windows, i18n (en/zh-Hans), design tokens.
+  editor, countdown/control/ripple windows, i18n (en/zh-Hans/ja), design tokens.
 - `src-tauri/src/core/` — platform-independent models: geometry, recording
   policy, shortcut model, asset library (byte-compatible with the Swift
   version's `library.json`).
@@ -63,7 +65,7 @@ decisions:
 - `src-tauri/src/commands.rs` — the AppModel-equivalent command surface.
 - `src-tauri/src/{ocr,gif,thumbnail,protocol,state}.rs` — OCR, GIF export,
   thumbnails, `kiri://` protocol, shared state.
-- `scripts/` — packaging (package-app.sh, install-app.sh, ensure-ffmpeg.mjs).
+- `scripts/` — packaging, stable development signing, and app-icon validation.
 - `docs/spec/swift/` — 1:1 behavior specs (the migration source of truth).
 - `docs/adr/` — accepted architecture/product decisions.
 
@@ -135,7 +137,7 @@ through GitHub Actions (`.github/workflows/build.yml`).
 
 - All user-facing strings go through `t()`/`fmt()` in `src/i18n`; the English
   string is the key (matching the Swift L10n behavior).
-- Keep the English and zh-Hans dictionaries identical in key set.
+- Keep the English, zh-Hans, and Japanese dictionaries identical in key set.
 - Update `README.md` and `README_ZH.md` together for user-visible behavior.
   `README_JA.md` is not synchronized; do not claim it is.
 - Record durable interaction changes as a new ADR instead of rewriting old

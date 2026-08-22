@@ -14,7 +14,7 @@
 - **录屏**:区域录制 + 可选系统音频/麦克风/光标/点击涟漪,3-2-1 倒计时,暂停恢复(分段合并),控件不入视频。
 - **GIF**:≤15s 录屏转 GIF(12fps、长边 720)。
 - **库**:本地文件 + `library.json` 索引,搜索/收藏/复制/打开/在文件管理器中显示/回收站(可恢复)。
-- **双语言**:en + zh-Hans,跟随系统首选语言。
+- **三语言**:en + zh-Hans + ja,跟随系统首选语言。
 - **本地优先**:无分析、无账号;只有用户明确确认的当前 OCR 选区可以发往所选远程服务。
 
 不可妥协清单与跨平台等价映射详见 `docs/spec/swift/product-contract.md`。
@@ -31,11 +31,11 @@
 | 录屏(macOS) | `objc2-screen-capture-kit` `SCStream`(视频+系统音频+麦克风) | 与原版 Legacy 后端等价,同一时钟域 |
 | 录屏(Windows) | `windows-capture`(WGC)+ `cpal`(WASAPI 回环 + 麦克风) | 系统音频内置支持 |
 | 编码/复用 | ffmpeg-sidecar(H.264/HEVC 硬件优先,AAC) | 双平台同一条编码链路 |
-| 全局快捷键 | macOS:`CGEventTap`(吞事件,独占);Windows:`RegisterHotKey` | 与原版独占语义一致 |
+| 全局快捷键 | `tauri-plugin-global-shortcut`(macOS Carbon `RegisterEventHotKey`;Windows `RegisterHotKey`) | 原生全局注册,无需输入监控权限 |
 | 剪贴板 | `arboard` | 图片/文本双平台 |
 | OCR | macOS:`objc2-vision`;Windows:`Windows.Media.Ocr`;可选 Rust OpenAI Chat Completions 适配器 | 默认本地;远程逐图确认 |
 | 存储 | `~/Library/Application Support/kiri` / `%APPDATA%\kiri` | 与 Swift 版同一 schema,用户库无缝延续 |
-| i18n | 自定义轻量字典,英/简中 key 集合一致;保留现有日文字典 | 跟随系统语言,key 即英文回退 |
+| i18n | 自定义轻量字典,英/简中/日 key 集合一致 | 跟随系统语言,key 即英文回退 |
 
 ## 3. 窗口架构
 
@@ -60,14 +60,14 @@
    │  stdin 管道(两个 pipe:video / audio)
    ▼
 ffmpeg -f rawvideo -pix_fmt bgra -s WxH -r 30 -i pipe:v
-       -f f32le -ar 48000 -ac 2 -i pipe:a
+       -f <f32le|s16le|u16le> -ar <native> -ac <native> -i pipe:a
        -use_wallclock_as_timestamps 1
        -c:v <hw 编码器优先, 否则 libx264> -b:v clamp(w·h·8, 4M, 40M)
        -g 60 -c:a aac -b:a 192k -movflags +faststart out.mp4
 ```
 
 - 参数与原版 `RecordingPolicy` 一致:30fps、Retina 像素(`points × backingScale` 取偶)、AAC 48kHz 双声道 192kbps。
-- 音频编码统一由 ffmpeg AAC 完成(`-c:a aac -b:a 192k`),Rust 侧不做音频转码,只把采集端 PCM(SCK LPCM / WASAPI f32)经管道直送 ffmpeg。
+- 音频编码统一由 ffmpeg AAC 完成(`-c:a aac -b:a 192k`);Rust 把采集端的原生 PCM 格式与采样率准确声明给 ffmpeg,再由 ffmpeg 统一输出为 48kHz 双声道。
 - macOS 编码器:`h264_videotoolbox` / `hevc_videotoolbox`;Windows:`h264_nvenc` → `h264_qsv` → `h264_amf` → `libx264` 降级链。
 - **暂停/恢复**:暂停即优雅终止当前 ffmpeg 段;恢复以相同配置重启,不倒计时;停止时 ffmpeg concat demuxer `-c copy` 合并,失败则重编码合并(等价原版 `RecordingSegmentMerger`)。
 - 音频:macOS 走 SCK `capturesAudio + captureMicrophone + excludesCurrentProcessAudio`(原版同款);Windows 走 WASAPI 回环(系统)+ 麦克风,ffmpeg `amix` 混音。
@@ -86,8 +86,8 @@ ffmpeg -f rawvideo -pix_fmt bgra -s WxH -r 30 -i pipe:v
 
 | 行为 | macOS | Windows |
 | --- | --- | --- |
-| 快捷键 | ⇧⌘A,CGEventTap 吞事件 | Shift+Ctrl+A,RegisterHotKey 独占 |
-| 权限 | 屏幕录制(TCC)、输入监控、麦克风;重启后生效场景给 "Quit Kiri" | 无需捕获权限;麦克风为系统级授权 |
+| 快捷键 | ⇧⌘A,Carbon `RegisterEventHotKey` | Shift+Ctrl+A,`RegisterHotKey` |
+| 权限 | 屏幕录制(TCC)、点击高亮按需输入监控、麦克风;重启后生效场景给 "Quit Kiri" | 无需捕获权限;麦克风为系统级授权 |
 | 焦点归还 | `NSRunningApplication.activate` | `SetForegroundWindow` 目标 HWND |
 | 在访达/资源管理器显示 | `NSWorkspace.activateFileViewerSelecting` | `explorer /select,` |
 | 打开文件 | `NSWorkspace.open` | `ShellExecute`(tauri-plugin-opener) |
@@ -120,7 +120,7 @@ ffmpeg -f rawvideo -pix_fmt bgra -s WxH -r 30 -i pipe:v
 | 风险 | 对策 |
 | --- | --- |
 | Windows 侧行为无法本机实测 | 全部 Windows 特定代码集中在 `cfg(windows)` 模块 + CI 编译验证 + 接口镜像 macOS 路径 |
-| ffmpeg 体积/下载 | ffmpeg-sidecar 按平台打包进 bundle;打包脚本固化下载 |
+| FFmpeg 体积/下载 | 未找到可用本机版本时,首次录屏或明确转换 GIF 时按平台下载到系统缓存;浏览素材库不下载,请求不携带用户数据,失败可恢复 |
 | 音视频同步 | `-use_wallclock_as_timestamps` 同一时钟;SCK 单流天然同步 |
 | 透明窗口点击穿透(Windows) | WS_EX_TRANSPARENT|LAYERED 样式 + `set_ignore_cursor_events` 等价实现 |
 | macOS 权限重启生效 | 沿用原版文案与恢复动作(Quit Kiri / Open Settings) |

@@ -367,14 +367,6 @@ pub fn reveal_asset(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn convert_to_gif(app: AppHandle, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
-    {
-        let state = app.state::<AppState>();
-        let mut converting = state.gif_conversion_ids.lock().unwrap();
-        if converting.contains(&parsed) {
-            return Err("Already converting.".into());
-        }
-        converting.insert(parsed);
-    }
     let (asset, source_path) = {
         let state = app.state::<AppState>();
         let library = state.library.lock().unwrap();
@@ -385,6 +377,14 @@ pub fn convert_to_gif(app: AppHandle, id: String) -> Result<(), String> {
         let source_path = state.asset_file_url(&asset);
         (asset, source_path)
     };
+    {
+        let state = app.state::<AppState>();
+        let mut converting = state.gif_conversion_ids.lock().unwrap();
+        if converting.contains(&parsed) {
+            return Err("Already converting.".into());
+        }
+        converting.insert(parsed);
+    }
     let handle = app.clone();
     std::thread::spawn(move || {
         let result = convert_asset_to_gif(&handle, &asset, &source_path);
@@ -403,21 +403,20 @@ fn convert_asset_to_gif(
     source_path: &std::path::Path,
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let ffmpeg = state
-        .ffmpeg_path
-        .get()
-        .cloned()
-        .ok_or_else(|| "ffmpeg unavailable".to_string())?;
+    // GIF export is an explicit user action, so it may perform the same
+    // pinned, verified first-use installation as recording.
+    let ffmpeg = state.ffmpeg().map_err(|error| error.to_string())?;
     let gif_path = crate::gif::export_gif(
         source_path,
-        None,
         crate::core::policy::RecordingPolicy::MAXIMUM_GIF_LONG_EDGE,
         crate::core::policy::RecordingPolicy::GIF_FRAMES_PER_SECOND,
         &ffmpeg,
     )
     .map_err(|e| e.to_string())?;
-    let mut library = state.library.lock().unwrap();
-    let imported = library
+    let import_result = state
+        .library
+        .lock()
+        .unwrap()
         .import_file(
             &gif_path,
             CaptureKind::Gif,
@@ -427,10 +426,9 @@ fn convert_asset_to_gif(
             asset.duration,
             asset.source_application.clone(),
         )
-        .map_err(|e| e.to_string())?;
-    drop(library);
-    let _ = imported;
+        .map_err(|e| e.to_string());
     let _ = std::fs::remove_file(&gif_path);
+    import_result?;
     emit_library_changed(app);
     emit_notice(app, "GIF Created".into(), "sparkles.rectangle.stack".into());
     Ok(())
@@ -955,7 +953,42 @@ pub struct StartRecordingRequest {
 }
 
 #[tauri::command]
-pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> Result<(), String> {
+pub async fn start_recording_flow(
+    app: AppHandle,
+    request: StartRecordingRequest,
+) -> Result<(), String> {
+    // Do not trigger a privacy prompt for stale/direct IPC without a live
+    // user-initiated capture session.
+    {
+        let state = app.state::<AppState>();
+        if state.capture.lock().unwrap().session.is_none() {
+            return Err("No active capture session.".into());
+        }
+    }
+
+    let mut options = request.options.normalized();
+    #[cfg(target_os = "macos")]
+    if options.captures_microphone {
+        match platform::request_microphone_access() {
+            Ok(platform::MicrophoneAccess::Authorized) => {}
+            Ok(platform::MicrophoneAccess::Unsupported) => {
+                // A stale preference or direct IPC call must not send the
+                // macOS 15-only SCK microphone selector on older systems.
+                options.captures_microphone = false;
+            }
+            Ok(platform::MicrophoneAccess::Denied) | Err(_) => {
+                let message =
+                    "Microphone access is off. Enable Kiri in System Settings to record your microphone.";
+                emit_error(
+                    &app,
+                    message.into(),
+                    Some(RecoveryAction::OpenMicrophoneSettings),
+                );
+                return Err(message.into());
+            }
+        }
+    }
+
     let (display_id, backing_scale, screen_frame, return_pid, was_kiri_frontmost) = {
         let state = app.state::<AppState>();
         let mut capture = state.capture.lock().unwrap();
@@ -985,7 +1018,6 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
         }
     }
 
-    let options = request.options.normalized();
     crate::state::save_recording_options(&app, &options);
 
     {
@@ -1014,7 +1046,7 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
 
     if !options.uses_countdown {
         // No countdown requested: start recording immediately.
-        return begin_recording(app);
+        return begin_recording(app).await;
     }
 
     let label = "countdown".to_string();
@@ -1050,7 +1082,13 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
     .always_on_top(true)
     .skip_taskbar(true)
     .shadow(false);
-    let window = builder.build().map_err(|e| e.to_string())?;
+    let window = match builder.build() {
+        Ok(window) => window,
+        Err(error) => {
+            reset_recording_session(&app);
+            return Err(error.to_string());
+        }
+    };
     platform::set_window_capture_excluded(&app, &label, true);
     // Spec (recording §5.1): the countdown window is level .screenSaver.
     raise_overlay_window(&window);
@@ -1060,21 +1098,99 @@ pub fn start_recording_flow(app: AppHandle, request: StartRecordingRequest) -> R
 
 #[tauri::command]
 pub fn cancel_recording_flow(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("countdown") {
-        let _ = window.close();
-    }
-    {
-        let state = app.state::<AppState>();
-        let monitor = state.click_monitor.lock().unwrap().take();
-        if let Some(monitor) = monitor {
-            monitor.stop();
+    reset_recording_session(&app);
+    Ok(())
+}
+
+fn close_recording_windows(app: &AppHandle) {
+    for label in ["countdown", "control-panel", "ripple"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.close();
         }
     }
+}
+
+fn stop_click_monitor(app: &AppHandle) {
+    let monitor = {
+        let state = app.state::<AppState>();
+        let monitor = state.click_monitor.lock().unwrap().take();
+        monitor
+    };
+    if let Some(monitor) = monitor {
+        monitor.stop();
+    }
+}
+
+fn discard_active_recording(mut active: ActiveRecording) {
+    if let Some(mut recorder) = active.recorder.take() {
+        let _ = recorder.stop();
+    }
+    if let Some(encoder) = active.encoder.take() {
+        encoder.cancel();
+    }
+}
+
+fn cleanup_abandoned_recording(app: &AppHandle, abandoned: RecordingFlow) {
+    stop_click_monitor(app);
+    close_recording_windows(app);
+    if let Some(active) = abandoned.active {
+        discard_active_recording(active);
+    }
+    for path in abandoned.segments {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// Aborts a recording and returns every session-owned resource to idle so no
+/// spinner, overlay, click monitor, encoder, or partial segment survives.
+fn reset_recording_session(app: &AppHandle) {
+    let abandoned = {
+        let state = app.state::<AppState>();
+        let mut recording = state.recording.lock().unwrap();
+        let abandoned = recording.take_and_reset();
+        emit_recording_state(app, &recording);
+        abandoned
+    };
+    cleanup_abandoned_recording(app, abandoned);
+}
+
+/// Resets only the startup task that still owns this session. A late download
+/// failure from a cancelled task must not tear down a replacement recording.
+fn reset_startup_if_current(app: &AppHandle, token: uuid::Uuid) -> bool {
+    let abandoned = {
+        let state = app.state::<AppState>();
+        let mut recording = state.recording.lock().unwrap();
+        let abandoned = recording.take_if_startup_is_current(token);
+        if abandoned.is_some() {
+            emit_recording_state(app, &recording);
+        }
+        abandoned
+    };
+    if let Some(abandoned) = abandoned {
+        cleanup_abandoned_recording(app, abandoned);
+        true
+    } else {
+        false
+    }
+}
+
+fn startup_is_current(app: &AppHandle, token: uuid::Uuid) -> bool {
     let state = app.state::<AppState>();
-    let mut recording = state.recording.lock().unwrap();
-    *recording = RecordingFlow::default();
-    emit_recording_state(&app, &recording);
-    Ok(())
+    let recording = state.recording.lock().unwrap();
+    recording.startup_is_current(token)
+}
+
+fn recover_failed_resume(app: &AppHandle) {
+    let stale_active = {
+        let state = app.state::<AppState>();
+        let mut recording = state.recording.lock().unwrap();
+        let stale_active = recording.recover_failed_resume();
+        emit_recording_state(app, &recording);
+        stale_active
+    };
+    if let Some(active) = stale_active {
+        discard_active_recording(active);
+    }
 }
 
 fn create_control_panel(
@@ -1082,9 +1198,8 @@ fn create_control_panel(
     configuration: &RecordingConfiguration,
 ) -> Result<(), String> {
     let frame = configuration.screen_frame;
-    // Default position: bottom-right, lifted clear of the Dock (64pt from
-    // the bottom). The user can drag the panel; the frontend persists the
-    // chosen position.
+    // Newer product behavior places the draggable panel at the bottom-right;
+    // the frontend persists any position the user chooses afterwards.
     let panel_x = frame.x + frame.width - 296.0 - 24.0;
     let panel_y = frame.y + frame.height - 64.0 - 64.0;
     log::info!(
@@ -1103,10 +1218,6 @@ fn create_control_panel(
     )
     .title("kiri")
     .inner_size(296.0, 64.0)
-    // Spec (recording §6.4): x = screenFrame.midX - 148 (horizontally
-    // centered on the display), y = screenFrame.maxY - 64 - 18 (18pt from
-    // the bottom edge; AppKit coordinates are bottom-left origin, matching
-    // how the overlay window positions itself on screen_frame).
     .position(panel_x, panel_y)
     .decorations(false)
     .transparent(true)
@@ -1150,58 +1261,118 @@ fn create_ripple_window(
     Ok(())
 }
 
+struct StartedRecorder {
+    recorder: Box<dyn crate::capture::PlatformRecorder + Send>,
+    system_audio_spec: Option<crate::record::AudioSpec>,
+    microphone_spec: Option<crate::record::AudioSpec>,
+}
+
+struct RecorderSenders {
+    video: mpsc::Sender<Vec<u8>>,
+    system_audio: Option<mpsc::Sender<Vec<u8>>>,
+    microphone: Option<mpsc::Sender<Vec<u8>>>,
+}
+
+struct EncoderReceivers {
+    video: mpsc::Receiver<Vec<u8>>,
+    system_audio: Option<mpsc::Receiver<Vec<u8>>>,
+    microphone: Option<mpsc::Receiver<Vec<u8>>>,
+}
+
+fn recording_channels(options: RecordingOptions) -> (RecorderSenders, EncoderReceivers) {
+    let (video_tx, video_rx) = mpsc::channel();
+    let (audio_tx, audio_rx) = options
+        .captures_system_audio
+        .then(mpsc::channel)
+        .map(|(tx, rx)| (Some(tx), Some(rx)))
+        .unwrap_or((None, None));
+    let (mic_tx, mic_rx) = options
+        .captures_microphone
+        .then(mpsc::channel)
+        .map(|(tx, rx)| (Some(tx), Some(rx)))
+        .unwrap_or((None, None));
+    (
+        RecorderSenders {
+            video: video_tx,
+            system_audio: audio_tx,
+            microphone: mic_tx,
+        },
+        EncoderReceivers {
+            video: video_rx,
+            system_audio: audio_rx,
+            microphone: mic_rx,
+        },
+    )
+}
+
 fn start_recorder(
     app: &AppHandle,
     configuration: &RecordingConfiguration,
-    video_tx: mpsc::Sender<Vec<u8>>,
-    audio_tx: Option<mpsc::Sender<Vec<u8>>>,
-    mic_tx: Option<mpsc::Sender<Vec<u8>>>,
-) -> Result<Box<dyn crate::capture::PlatformRecorder + Send>, String> {
+    senders: RecorderSenders,
+) -> Result<StartedRecorder, String> {
     #[cfg(target_os = "macos")]
     let ripple_excepted = platform::window_capture_id(app, "ripple")
         .into_iter()
         .collect::<Vec<_>>();
     #[cfg(target_os = "macos")]
     {
-        crate::capture::macos::MacRecordingSession::start(
+        let recorder = crate::capture::macos::MacRecordingSession::start(
             configuration.display_id,
             configuration.region,
             configuration.backing_scale,
             configuration.options,
             &ripple_excepted,
-            video_tx,
-            audio_tx,
-            mic_tx,
+            senders.video,
+            senders.system_audio,
+            senders.microphone,
         )
-        .map(|recorder| Box::new(recorder) as Box<dyn crate::capture::PlatformRecorder + Send>)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+        let float_audio = crate::record::AudioSpec {
+            sample_rate: 48_000,
+            channels: 2,
+            format: crate::record::AudioSampleFormat::F32,
+        };
+        Ok(StartedRecorder {
+            recorder: Box::new(recorder),
+            system_audio_spec: configuration
+                .options
+                .captures_system_audio
+                .then_some(float_audio),
+            microphone_spec: configuration
+                .options
+                .captures_microphone
+                .then_some(float_audio),
+        })
     }
     #[cfg(windows)]
     {
-        crate::capture::windows::WindowsRecorder::start(
+        let recorder = crate::capture::windows::WindowsRecorder::start(
             configuration.display_id,
             configuration.region,
             configuration.backing_scale,
             configuration.options,
-            video_tx,
-            audio_tx,
-            mic_tx,
+            senders.video,
+            senders.system_audio,
+            senders.microphone,
         )
-        .map(|recorder| Box::new(recorder) as Box<dyn crate::capture::PlatformRecorder + Send>)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+        let system_audio_spec = recorder.system_audio_spec();
+        let microphone_spec = recorder.microphone_spec();
+        Ok(StartedRecorder {
+            recorder: Box::new(recorder),
+            system_audio_spec,
+            microphone_spec,
+        })
     }
 }
 
 fn start_encoder(
-    app: &AppHandle,
+    ffmpeg: &std::path::Path,
     configuration: &RecordingConfiguration,
     out_path: PathBuf,
-    video_rx: mpsc::Receiver<Vec<u8>>,
-    audio_rx: Option<mpsc::Receiver<Vec<u8>>>,
-    mic_rx: Option<mpsc::Receiver<Vec<u8>>>,
+    receivers: EncoderReceivers,
+    recorder: &StartedRecorder,
 ) -> Result<crate::record::SegmentEncoder, String> {
-    let state = app.state::<AppState>();
-    let ffmpeg = state.ffmpeg(app).map_err(|e| e.to_string())?;
     let width = crate::core::policy::RecordingPolicy::pixel_dimension(
         configuration.region.width,
         configuration.backing_scale,
@@ -1215,23 +1386,9 @@ fn start_encoder(
         height,
         fps: crate::core::policy::RecordingPolicy::FRAMES_PER_SECOND,
         bitrate: crate::record::bitrate_for(width, height),
-        audio: configuration
-            .options
-            .captures_system_audio
-            .then_some(crate::record::AudioSpec {
-                sample_rate: 48_000,
-                channels: 2,
-                is_float: true,
-            }),
-        mic: configuration
-            .options
-            .captures_microphone
-            .then_some(crate::record::AudioSpec {
-                sample_rate: 48_000,
-                channels: 2,
-                is_float: true,
-            }),
-        video_encoder: crate::record::pick_video_encoder(&ffmpeg),
+        audio: recorder.system_audio_spec,
+        mic: recorder.microphone_spec,
+        video_encoder: crate::record::pick_video_encoder(ffmpeg),
     };
     log::info!(
         "start_encoder: ffmpeg={} video {}x{}@{}, audio={}, mic={}",
@@ -1245,52 +1402,102 @@ fn start_encoder(
     crate::record::SegmentEncoder::start(
         &encoder_config,
         out_path,
-        &ffmpeg,
-        video_rx,
-        audio_rx,
-        mic_rx,
+        ffmpeg,
+        receivers.video,
+        receivers.system_audio,
+        receivers.microphone,
     )
     .map_err(|e| e.to_string())
 }
 
+async fn resolve_ffmpeg(app: AppHandle) -> Result<PathBuf, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        state.ffmpeg().map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("video encoder preparation task failed: {error}"))?
+}
+
 #[tauri::command]
-pub fn begin_recording(app: AppHandle) -> Result<(), String> {
+pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
     log::info!("begin_recording: called");
     if let Some(window) = app.get_webview_window("countdown") {
         let _ = window.close();
     }
 
-    let configuration = {
+    let (startup_token, configuration) = {
         let state = app.state::<AppState>();
-        let recording = state.recording.lock().unwrap();
+        let mut recording = state.recording.lock().unwrap();
         if recording.is_recording || recording.is_paused {
             return Ok(());
         }
         let Some(configuration) = recording.configuration.clone() else {
             return Err("No recording configuration.".into());
         };
-        configuration
+        let Some(token) = recording.claim_startup() else {
+            // Another begin request already owns this session, or the flow is
+            // transitioning/finalizing. Treat duplicate IPC as idempotent.
+            return Ok(());
+        };
+        emit_recording_state(&app, &recording);
+        (token, configuration)
     };
 
-    create_control_panel(&app, &configuration)?;
+    if let Err(error) = create_control_panel(&app, &configuration) {
+        if reset_startup_if_current(&app, startup_token) {
+            return Err(error);
+        }
+        return Ok(());
+    }
     if configuration.options.highlights_clicks {
-        create_ripple_window(&app, &configuration)?;
+        if let Err(error) = create_ripple_window(&app, &configuration) {
+            if reset_startup_if_current(&app, startup_token) {
+                return Err(error);
+            }
+            return Ok(());
+        }
         // The click monitor needs the Input Monitoring permission; install
         // it only while highlighting clicks (avoids a permission prompt at
         // every launch).
         if let Err(error) = crate::ensure_click_monitor(&app) {
-            log::warn!("recording: global click monitor unavailable: {error}");
+            log::error!("recording: global click monitor unavailable: {error}");
+            let message = "Input Monitoring is off. Enable Kiri in System Settings to highlight clicks while recording.";
+            #[cfg(target_os = "macos")]
+            let recovery = Some(RecoveryAction::OpenInputMonitoringSettings);
+            #[cfg(windows)]
+            let recovery = None;
+            if reset_startup_if_current(&app, startup_token) {
+                emit_error(&app, message.into(), recovery);
+                return Err(error.to_string());
+            }
+            return Ok(());
         }
     }
 
-    // Mark the session as starting so the control panel shows a spinner
-    // while the recorder/encoder come up (SCK content resolution and stream
-    // start take a moment).
-    {
-        let state = app.state::<AppState>();
-        let mut recording = state.recording.lock().unwrap();
-        recording.is_starting = true;
-        emit_recording_state(&app, &recording);
+    // Resolve and, on first use, download + verify ffmpeg before channels or
+    // native capture exist. Retina BGRA frames can arrive at hundreds of MB/s;
+    // starting capture first would let the unbounded pipe grow throughout a
+    // network download. spawn_blocking keeps that work off Tauri's event loop.
+    let ffmpeg = match resolve_ffmpeg(app.clone()).await {
+        Ok(path) => path,
+        Err(error) => {
+            log::error!("recording: ffmpeg preparation failed: {error}");
+            if reset_startup_if_current(&app, startup_token) {
+                emit_error(
+                    &app,
+                    "Could not prepare the video encoder. Check your connection and try recording again."
+                        .into(),
+                    None,
+                );
+                return Err(error);
+            }
+            return Ok(());
+        }
+    };
+
+    if !startup_is_current(&app, startup_token) {
+        return Ok(());
     }
 
     let out_path = std::env::temp_dir().join(format!(
@@ -1298,49 +1505,62 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
         uuid::Uuid::new_v4().to_string().to_lowercase()
     ));
 
-    let (video_tx, video_rx) = mpsc::channel::<Vec<u8>>();
-    let (audio_tx, audio_rx) = configuration
-        .options
-        .captures_system_audio
-        .then(mpsc::channel::<Vec<u8>>)
-        .map(|(tx, rx)| (Some(tx), Some(rx)))
-        .unwrap_or((None, None));
-    let (mic_tx, mic_rx) = configuration
-        .options
-        .captures_microphone
-        .then(mpsc::channel::<Vec<u8>>)
-        .map(|(tx, rx)| (Some(tx), Some(rx)))
-        .unwrap_or((None, None));
-
-    let recorder = match start_recorder(&app, &configuration, video_tx, audio_tx, mic_tx) {
-        Ok(recorder) => recorder,
+    let (senders, receivers) = recording_channels(configuration.options);
+    let mut started = match start_recorder(&app, &configuration, senders) {
+        Ok(started) => started,
         Err(error) => {
             log::error!("recording: start_recorder failed: {error}");
-            emit_error(&app, "Could not start screen recording.".into(), None);
-            return Err(error);
+            if reset_startup_if_current(&app, startup_token) {
+                emit_error(&app, "Could not start screen recording.".into(), None);
+                return Err(error);
+            }
+            return Ok(());
         }
     };
-    let encoder = match start_encoder(&app, &configuration, out_path, video_rx, audio_rx, mic_rx) {
+    if !startup_is_current(&app, startup_token) {
+        let _ = started.recorder.stop();
+        let _ = std::fs::remove_file(out_path);
+        return Ok(());
+    }
+    let encoder = match start_encoder(
+        &ffmpeg,
+        &configuration,
+        out_path.clone(),
+        receivers,
+        &started,
+    ) {
         Ok(encoder) => encoder,
         Err(error) => {
             log::error!("recording: start_encoder failed: {error}");
-            emit_error(&app, "Could not start the video encoder.".into(), None);
-            return Err(error);
+            let _ = started.recorder.stop();
+            let _ = std::fs::remove_file(&out_path);
+            if reset_startup_if_current(&app, startup_token) {
+                emit_error(&app, "Could not start the video encoder.".into(), None);
+                return Err(error);
+            }
+            return Ok(());
         }
     };
 
-    {
+    let stale_active = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
-        recording.is_starting = false;
-        recording.is_recording = true;
-        recording.is_paused = false;
-        recording.started_at = Some(std::time::Instant::now());
-        recording.active = Some(ActiveRecording {
+        let active = ActiveRecording {
             encoder: Some(encoder),
-            recorder: Some(recorder),
-        });
-        emit_recording_state(&app, &recording);
+            recorder: Some(started.recorder),
+        };
+        match recording.complete_startup(startup_token, active) {
+            Ok(()) => {
+                emit_recording_state(&app, &recording);
+                None
+            }
+            Err(active) => Some(active),
+        }
+    };
+    if let Some(active) = stale_active {
+        discard_active_recording(active);
+        let _ = std::fs::remove_file(out_path);
+        return Ok(());
     }
 
     // Focus stays on the control panel while recording so the hotkeys work
@@ -1380,7 +1600,7 @@ pub fn begin_recording(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
     log::info!("pause_recording: called");
-    let mut active = {
+    let active = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
         if !recording.is_recording || recording.is_transitioning {
@@ -1389,33 +1609,44 @@ pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
         recording.is_recording = false;
         recording.is_transitioning = true;
         emit_recording_state(&app, &recording);
-        recording.active.take().unwrap()
+        recording.active.take()
+    };
+    let Some(mut active) = active else {
+        let error = "The active recording session is unavailable.".to_string();
+        reset_recording_session(&app);
+        return Err(error);
     };
 
     let mut segment_path = None;
     let mut failure = None;
-    if let Some(mut recorder) = active.recorder.take() {
-        if let Err(error) = recorder.stop() {
-            failure = Some(error.to_string());
-        }
-    }
-    if failure.is_none() {
-        if let Some(encoder) = active.encoder.take() {
-            match encoder.finish() {
-                Ok(path) => segment_path = Some(path),
-                Err(error) => failure = Some(error.to_string()),
+    match active.recorder.take() {
+        Some(mut recorder) => {
+            if let Err(error) = recorder.stop() {
+                failure = Some(error.to_string());
             }
         }
+        None => failure = Some("The native recorder is unavailable.".into()),
+    }
+    if failure.is_none() {
+        match active.encoder.take() {
+            Some(encoder) => match encoder.finish() {
+                Ok(path) => segment_path = Some(path),
+                Err(error) => failure = Some(error.to_string()),
+            },
+            None => failure = Some("The video encoder is unavailable.".into()),
+        }
+    } else if let Some(encoder) = active.encoder.take() {
+        encoder.cancel();
     }
     drop(active);
 
-    let state = app.state::<AppState>();
-    let mut recording = state.recording.lock().unwrap();
     if let Some(error) = failure {
-        *recording = RecordingFlow::default();
-        emit_recording_state(&app, &recording);
+        emit_error(&app, "Could not pause screen recording.".into(), None);
+        reset_recording_session(&app);
         return Err(error);
     }
+    let state = app.state::<AppState>();
+    let mut recording = state.recording.lock().unwrap();
     if let Some(path) = segment_path {
         recording.segments.push(path);
     }
@@ -1430,7 +1661,7 @@ pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn resume_recording(app: AppHandle) -> Result<(), String> {
+pub async fn resume_recording(app: AppHandle) -> Result<(), String> {
     log::info!("resume_recording: called");
     let configuration = {
         let state = app.state::<AppState>();
@@ -1446,38 +1677,48 @@ pub fn resume_recording(app: AppHandle) -> Result<(), String> {
         configuration
     };
 
+    // Resolve the encoder before recreating unbounded capture channels. A
+    // normal resume hits AppState's initialized path immediately; the async
+    // boundary also makes inconsistent/direct IPC fail safely.
+    let ffmpeg = match resolve_ffmpeg(app.clone()).await {
+        Ok(path) => path,
+        Err(error) => {
+            log::error!("recording: resume ffmpeg preparation failed: {error}");
+            emit_error(&app, "Could not prepare the video encoder.".into(), None);
+            recover_failed_resume(&app);
+            return Err(error);
+        }
+    };
+
     let out_path = std::env::temp_dir().join(format!(
         "kiri-recording-{}.mp4",
         uuid::Uuid::new_v4().to_string().to_lowercase()
     ));
 
-    let (video_tx, video_rx) = mpsc::channel::<Vec<u8>>();
-    let (audio_tx, audio_rx) = configuration
-        .options
-        .captures_system_audio
-        .then(mpsc::channel::<Vec<u8>>)
-        .map(|(tx, rx)| (Some(tx), Some(rx)))
-        .unwrap_or((None, None));
-    let (mic_tx, mic_rx) = configuration
-        .options
-        .captures_microphone
-        .then(mpsc::channel::<Vec<u8>>)
-        .map(|(tx, rx)| (Some(tx), Some(rx)))
-        .unwrap_or((None, None));
-
-    let recorder = match start_recorder(&app, &configuration, video_tx, audio_tx, mic_tx) {
-        Ok(recorder) => recorder,
+    let (senders, receivers) = recording_channels(configuration.options);
+    let mut started = match start_recorder(&app, &configuration, senders) {
+        Ok(started) => started,
         Err(error) => {
             log::error!("recording: start_recorder failed: {error}");
             emit_error(&app, "Could not start screen recording.".into(), None);
+            recover_failed_resume(&app);
             return Err(error);
         }
     };
-    let encoder = match start_encoder(&app, &configuration, out_path, video_rx, audio_rx, mic_rx) {
+    let encoder = match start_encoder(
+        &ffmpeg,
+        &configuration,
+        out_path.clone(),
+        receivers,
+        &started,
+    ) {
         Ok(encoder) => encoder,
         Err(error) => {
             log::error!("recording: start_encoder failed: {error}");
+            let _ = started.recorder.stop();
+            let _ = std::fs::remove_file(out_path);
             emit_error(&app, "Could not start the video encoder.".into(), None);
+            recover_failed_resume(&app);
             return Err(error);
         }
     };
@@ -1491,7 +1732,7 @@ pub fn resume_recording(app: AppHandle) -> Result<(), String> {
         recording.started_at = Some(std::time::Instant::now());
         recording.active = Some(ActiveRecording {
             encoder: Some(encoder),
-            recorder: Some(recorder),
+            recorder: Some(started.recorder),
         });
         emit_recording_state(&app, &recording);
     }
@@ -1505,20 +1746,29 @@ pub fn resume_recording(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
     log::info!("stop_recording: called");
-    // Stop the click monitor if it was installed (recording ended).
-    {
+    let abandoned_startup = {
         let state = app.state::<AppState>();
-        let monitor = state.click_monitor.lock().unwrap().take();
-        if let Some(monitor) = monitor {
-            monitor.stop();
+        let mut recording = state.recording.lock().unwrap();
+        if recording.is_starting && !recording.is_recording && !recording.is_paused {
+            let abandoned = recording.take_and_reset();
+            emit_recording_state(&app, &recording);
+            Some(abandoned)
+        } else {
+            None
         }
+    };
+    if let Some(abandoned) = abandoned_startup {
+        cleanup_abandoned_recording(&app, abandoned);
+        return Ok(());
     }
-    let (segments, active, return_pid, was_kiri_frontmost) = {
+
+    let (segments, active, needs_active_segment, return_pid, was_kiri_frontmost) = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
         if !(recording.is_recording || recording.is_paused) || recording.is_transitioning {
             return Ok(());
         }
+        let needs_active_segment = recording.is_recording;
         recording.is_recording = false;
         recording.is_paused = false;
         recording.is_finalizing = true;
@@ -1527,17 +1777,14 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         (
             recording.segments.clone(),
             recording.active.take(),
+            needs_active_segment,
             recording.return_pid,
             recording.was_kiri_frontmost,
         )
     };
 
-    if let Some(window) = app.get_webview_window("control-panel") {
-        let _ = window.close();
-    }
-    if let Some(window) = app.get_webview_window("ripple") {
-        let _ = window.close();
-    }
+    stop_click_monitor(&app);
+    close_recording_windows(&app);
 
     // Entire stop + finalize runs on a background thread: recorder.stop()
     // and encoder.finish() can block on SCK/ffmpeg callbacks, and merging
@@ -1548,30 +1795,43 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         let mut failure = None;
         let mut final_segments = segments;
         if let Some(mut active) = active {
-            if let Some(mut recorder) = active.recorder.take() {
-                if let Err(error) = recorder.stop() {
-                    failure = Some(error.to_string());
-                }
-            }
-            if failure.is_none() {
-                if let Some(encoder) = active.encoder.take() {
-                    match encoder.finish() {
-                        Ok(path) => final_segments.push(path),
-                        Err(error) => failure = Some(error.to_string()),
+            match active.recorder.take() {
+                Some(mut recorder) => {
+                    if let Err(error) = recorder.stop() {
+                        failure = Some(error.to_string());
                     }
                 }
+                None if needs_active_segment => {
+                    failure = Some("The native recorder is unavailable.".into())
+                }
+                None => {}
             }
+            if failure.is_none() {
+                match active.encoder.take() {
+                    Some(encoder) => match encoder.finish() {
+                        Ok(path) => final_segments.push(path),
+                        Err(error) => failure = Some(error.to_string()),
+                    },
+                    None if needs_active_segment => {
+                        failure = Some("The video encoder is unavailable.".into())
+                    }
+                    None => {}
+                }
+            } else if let Some(encoder) = active.encoder.take() {
+                encoder.cancel();
+            }
+        } else if needs_active_segment {
+            failure = Some("The active recording session is unavailable.".into());
         }
         if let Some(error) = failure {
+            for segment in &final_segments {
+                let _ = std::fs::remove_file(segment);
+            }
+            reset_recording_session(&handle);
             emit_error(&handle, error, None);
         } else {
             let result = finalize_recording(&handle, final_segments);
-            {
-                let state = handle.state::<AppState>();
-                let mut recording = state.recording.lock().unwrap();
-                *recording = RecordingFlow::default();
-                emit_recording_state(&handle, &recording);
-            }
+            reset_recording_session(&handle);
             match result {
                 Ok(()) => emit_notice(&handle, "Recording Saved".into(), "video.fill".into()),
                 Err(error) => emit_error(&handle, error, None),
@@ -1597,29 +1857,33 @@ fn finalize_recording(app: &AppHandle, segments: Vec<PathBuf>) -> Result<(), Str
         "kiri-recording-merged-{}.mp4",
         uuid::Uuid::new_v4().to_string().to_lowercase()
     ));
-    crate::record::merge_segments(&segments, &merged_path, &ffmpeg).map_err(|e| e.to_string())?;
-    let (pixel_width, pixel_height, duration) =
-        crate::record::probe_video(&ffmpeg, &merged_path).unwrap_or((0, 0, None));
-    let mut library = state.library.lock().unwrap();
-    let imported = library
-        .import_file(
-            &merged_path,
-            CaptureKind::Video,
-            "mp4",
-            pixel_width,
-            pixel_height,
-            duration,
-            None,
-        )
-        .map_err(|e| e.to_string())?;
-    drop(library);
-    let _ = imported;
+    let result = (|| {
+        crate::record::merge_segments(&segments, &merged_path, &ffmpeg)
+            .map_err(|e| e.to_string())?;
+        let (pixel_width, pixel_height, duration) =
+            crate::record::probe_video(&ffmpeg, &merged_path).unwrap_or((0, 0, None));
+        let mut library = state.library.lock().unwrap();
+        library
+            .import_file(
+                &merged_path,
+                CaptureKind::Video,
+                "mp4",
+                pixel_width,
+                pixel_height,
+                duration,
+                None,
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })();
     for segment in &segments {
         let _ = std::fs::remove_file(segment);
     }
     let _ = std::fs::remove_file(&merged_path);
-    emit_library_changed(app);
-    Ok(())
+    if result.is_ok() {
+        emit_library_changed(app);
+    }
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -1716,11 +1980,7 @@ pub fn get_locale() -> String {
 
 #[tauri::command]
 pub fn get_shortcut_label() -> String {
-    if cfg!(target_os = "macos") {
-        KIRI_CAPTURE.display_label()
-    } else {
-        "Shift+Ctrl+A".into()
-    }
+    KIRI_CAPTURE.display_label()
 }
 
 #[tauri::command]

@@ -600,6 +600,9 @@ impl MacRecordingSession {
         if region.width < 2.0 || region.height < 2.0 {
             bail!("The recording region is too small.");
         }
+        if options.captures_microphone && !crate::platform::mic_supported() {
+            bail!("Microphone recording requires macOS 15 or later.");
+        }
 
         // SCShareableContent is MainThreadOnly: resolve it on the main
         // thread. The recorder may be started from a background thread (the
@@ -660,6 +663,12 @@ impl MacRecordingSession {
                 configuration.setShowsCursor(options.shows_cursor);
                 configuration.setShowMouseClicks(false);
                 configuration.setCapturesAudio(options.captures_system_audio);
+                if options.captures_microphone {
+                    // This selector is available on macOS 15+. The backend
+                    // rejects microphone capture on older systems before the
+                    // stream thread starts, so it is never sent there.
+                    configuration.setCaptureMicrophone(true);
+                }
                 configuration.setExcludesCurrentProcessAudio(true);
                 configuration.setSampleRate(48_000);
                 configuration.setChannelCount(2);

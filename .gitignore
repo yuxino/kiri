@@ -21,7 +21,6 @@ src-tauri/gen/schemas/
 # downloaded binaries (never committed)
 src-tauri/binaries/ffmpeg-*/
 src-tauri/binaries/ffmpeg-current/*
-!src-tauri/binaries/ffmpeg-current/.gitkeep
 
 # tsc -b incremental build artifacts
 *.tsbuildinfo

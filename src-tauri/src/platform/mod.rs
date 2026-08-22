@@ -18,6 +18,13 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MicrophoneAccess {
+    Authorized,
+    Unsupported,
+    Denied,
+}
+
 /// Writes PNG bytes to the system clipboard as an image.
 pub fn write_image_to_clipboard(png: &[u8]) -> Result<()> {
     let image = image::load_from_memory(png).map_err(|error| anyhow::anyhow!(error))?;
@@ -94,6 +101,13 @@ pub fn activate_self() {
 /// True when microphone capture is available (macOS 15+; Windows: always).
 pub fn mic_supported() -> bool {
     current::mic_supported()
+}
+
+/// Requests microphone access when the platform supports recording it.
+/// A denied or restricted grant is reported explicitly so recording never
+/// starts with a silently empty microphone track.
+pub fn request_microphone_access() -> Result<MicrophoneAccess> {
+    current::request_microphone_access()
 }
 
 /// Makes a window click-through so it never blocks the cursor.

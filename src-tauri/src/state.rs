@@ -87,6 +87,7 @@ impl Default for RecordingFlow {
             started_at: None,
             segments: Vec::new(),
             configuration: None,
+            startup_token: None,
             active: None,
         }
     }
@@ -105,7 +106,81 @@ pub struct RecordingFlow {
     pub started_at: Option<Instant>,
     pub segments: Vec<PathBuf>,
     pub configuration: Option<RecordingConfiguration>,
+    /// Identifies the one asynchronous encoder-preparation task allowed to
+    /// attach capture resources to this session. Resetting the flow clears
+    /// the token, so a cancelled or superseded task cannot start recording.
+    pub(crate) startup_token: Option<uuid::Uuid>,
     pub active: Option<ActiveRecording>,
+}
+
+impl RecordingFlow {
+    /// Claims the pending recording session for asynchronous preparation.
+    /// A second begin request is ignored while the first claim is live.
+    pub fn claim_startup(&mut self) -> Option<uuid::Uuid> {
+        if self.configuration.is_none()
+            || self.startup_token.is_some()
+            || self.is_recording
+            || self.is_paused
+            || self.is_transitioning
+            || self.is_finalizing
+        {
+            return None;
+        }
+        let token = uuid::Uuid::new_v4();
+        self.startup_token = Some(token);
+        self.is_starting = true;
+        Some(token)
+    }
+
+    pub fn startup_is_current(&self, token: uuid::Uuid) -> bool {
+        self.startup_token == Some(token)
+    }
+
+    /// Publishes a fully started recorder only if its preparation task still
+    /// owns this session. The caller receives stale resources back to stop.
+    pub fn complete_startup(
+        &mut self,
+        token: uuid::Uuid,
+        active: ActiveRecording,
+    ) -> Result<(), ActiveRecording> {
+        if !self.startup_is_current(token) {
+            return Err(active);
+        }
+        self.startup_token = None;
+        self.is_starting = false;
+        self.is_recording = true;
+        self.is_paused = false;
+        self.started_at = Some(Instant::now());
+        self.active = Some(active);
+        Ok(())
+    }
+
+    /// Resets only when the named asynchronous startup still owns the flow.
+    /// This protects a newer session from a late failure in an older task.
+    pub fn take_if_startup_is_current(&mut self, token: uuid::Uuid) -> Option<RecordingFlow> {
+        self.startup_is_current(token)
+            .then(|| self.take_and_reset())
+    }
+
+    /// Restores the stable paused state after a resume attempt fails. Prior
+    /// segments and configuration remain available so the user can retry or
+    /// stop and save what was already recorded.
+    pub fn recover_failed_resume(&mut self) -> Option<ActiveRecording> {
+        self.is_starting = false;
+        self.is_recording = false;
+        self.is_paused = true;
+        self.is_transitioning = false;
+        self.is_finalizing = false;
+        self.started_at = None;
+        self.active.take()
+    }
+
+    /// Atomically moves every session-owned resource out and leaves an idle
+    /// flow. Callers can then stop native handles and delete temporary files
+    /// without holding the recording mutex.
+    pub fn take_and_reset(&mut self) -> RecordingFlow {
+        std::mem::take(self)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -119,19 +194,10 @@ pub struct RecordingConfiguration {
     pub options: RecordingOptions,
 }
 
+#[derive(Default)]
 pub struct ActiveRecording {
     pub encoder: Option<SegmentEncoder>,
     pub recorder: Option<Box<dyn PlatformRecorder + Send>>,
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for ActiveRecording {
-    fn default() -> Self {
-        Self {
-            encoder: None,
-            recorder: None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -161,9 +227,8 @@ pub struct ErrorDto {
     pub recovery: Option<String>,
 }
 
-// The three *Settings variants are never constructed yet (only OpenSettings /
-// QuitKiri are emitted), but they are part of the serialized contract the
-// frontend already handles (recoveryLabel / openSettings dispatch).
+// Accessibility recovery is retained as part of the serialized frontend
+// contract even when a given platform build does not construct it.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -199,12 +264,11 @@ impl AppState {
         })
     }
 
-    pub fn ffmpeg(&self, app: &AppHandle) -> anyhow::Result<PathBuf> {
+    pub fn ffmpeg(&self) -> anyhow::Result<PathBuf> {
         if let Some(path) = self.ffmpeg_path.get() {
             return Ok(path.clone());
         }
-        let resource_dir = app.path().resource_dir().ok();
-        let path = crate::record::ensure_ffmpeg(resource_dir)?;
+        let path = crate::record::ensure_ffmpeg()?;
         let _ = self.ffmpeg_path.set(path.clone());
         Ok(path)
     }
@@ -602,11 +666,12 @@ pub fn save_language(app: &AppHandle, language: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        mark_error_seen, open_library_for_mode, toast_position, urlencode, CaptureFlow,
-        CaptureSession,
+        mark_error_seen, open_library_for_mode, toast_position, urlencode, ActiveRecording,
+        CaptureFlow, CaptureSession, RecordingConfiguration, RecordingFlow,
     };
     use crate::capture::CapturedDisplay;
     use crate::core::geometry::Rect;
+    use crate::core::policy::RecordingOptions;
 
     #[test]
     fn urlencode_escapes_spaces_and_keeps_words() {
@@ -690,5 +755,122 @@ mod tests {
         let ended = ended.expect("last overlay must consume the session");
         assert_eq!(ended.capture_id, capture_id);
         assert!(flow.session.is_none());
+    }
+
+    #[test]
+    fn failed_resume_restores_paused_session_without_losing_segments() {
+        let segment = std::path::PathBuf::from("existing-segment.mp4");
+        let mut flow = RecordingFlow {
+            is_paused: false,
+            is_transitioning: true,
+            segments: vec![segment.clone()],
+            elapsed_before_segment: 12.5,
+            active: Some(ActiveRecording::default()),
+            configuration: Some(RecordingConfiguration {
+                display_id: 7,
+                region: Rect::new(10.0, 20.0, 640.0, 360.0),
+                screen_frame: Rect::new(0.0, 0.0, 1440.0, 900.0),
+                backing_scale: 2.0,
+                options: RecordingOptions::default(),
+            }),
+            ..Default::default()
+        };
+
+        assert!(flow.recover_failed_resume().is_some());
+        assert!(flow.is_paused);
+        assert!(!flow.is_recording);
+        assert!(!flow.is_transitioning);
+        assert!(!flow.is_finalizing);
+        assert_eq!(flow.segments, vec![segment]);
+        assert_eq!(flow.elapsed_before_segment, 12.5);
+        assert_eq!(flow.configuration.as_ref().unwrap().display_id, 7);
+        assert!(flow.active.is_none());
+    }
+
+    #[test]
+    fn failed_stop_moves_resources_out_and_returns_to_idle() {
+        let segment = std::path::PathBuf::from("partial-segment.mp4");
+        let mut flow = RecordingFlow {
+            is_finalizing: true,
+            segments: vec![segment.clone()],
+            active: Some(ActiveRecording::default()),
+            configuration: Some(RecordingConfiguration {
+                display_id: 9,
+                region: Rect::new(0.0, 0.0, 320.0, 240.0),
+                screen_frame: Rect::new(0.0, 0.0, 320.0, 240.0),
+                backing_scale: 1.0,
+                options: RecordingOptions::default(),
+            }),
+            ..Default::default()
+        };
+
+        let abandoned = flow.take_and_reset();
+        assert!(abandoned.is_finalizing);
+        assert_eq!(abandoned.segments, vec![segment]);
+        assert!(abandoned.active.is_some());
+        assert!(flow.configuration.is_none());
+        assert!(flow.segments.is_empty());
+        assert!(!flow.is_finalizing);
+        assert!(!flow.is_recording);
+        assert!(!flow.is_paused);
+        assert!(flow.active.is_none());
+    }
+
+    #[test]
+    fn cancelled_startup_cannot_attach_to_a_replacement_session() {
+        let configuration = RecordingConfiguration {
+            display_id: 11,
+            region: Rect::new(0.0, 0.0, 640.0, 480.0),
+            screen_frame: Rect::new(0.0, 0.0, 640.0, 480.0),
+            backing_scale: 1.0,
+            options: RecordingOptions::default(),
+        };
+        let mut flow = RecordingFlow {
+            is_starting: true,
+            configuration: Some(configuration.clone()),
+            ..Default::default()
+        };
+
+        let cancelled = flow.claim_startup().expect("startup should be claimed");
+        assert!(flow.claim_startup().is_none(), "duplicate begin is ignored");
+        assert!(flow.take_if_startup_is_current(cancelled).is_some());
+
+        flow.is_starting = true;
+        flow.configuration = Some(configuration);
+        let replacement = flow
+            .claim_startup()
+            .expect("replacement startup should be claimed");
+        assert_ne!(replacement, cancelled);
+        assert!(flow.take_if_startup_is_current(cancelled).is_none());
+        assert!(flow.startup_is_current(replacement));
+    }
+
+    #[test]
+    fn only_current_startup_can_publish_active_resources() {
+        let mut flow = RecordingFlow {
+            is_starting: true,
+            configuration: Some(RecordingConfiguration {
+                display_id: 12,
+                region: Rect::new(0.0, 0.0, 320.0, 240.0),
+                screen_frame: Rect::new(0.0, 0.0, 320.0, 240.0),
+                backing_scale: 2.0,
+                options: RecordingOptions::default(),
+            }),
+            ..Default::default()
+        };
+        let current = flow.claim_startup().unwrap();
+        let stale = uuid::Uuid::new_v4();
+
+        assert!(flow
+            .complete_startup(stale, ActiveRecording::default())
+            .is_err());
+        assert!(flow.startup_is_current(current));
+        assert!(flow
+            .complete_startup(current, ActiveRecording::default())
+            .is_ok());
+        assert!(!flow.is_starting);
+        assert!(flow.is_recording);
+        assert!(!flow.is_paused);
+        assert!(flow.active.is_some());
     }
 }

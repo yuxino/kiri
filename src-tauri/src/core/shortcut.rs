@@ -1,24 +1,24 @@
-//! CaptureShortcut — port of Sources/KiriCore/CaptureShortcut.swift.
-//! The capture shortcut is exclusively Shift-Command-A on macOS and its
-//! equivalent Shift-Control-A on Windows.
+//! Platform-specific capture shortcut model.
 
-// `Control`/`Option` are never constructed today (only Shift/Command are
-// used), but they mirror the Swift allCases order used by `glyph()`.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortcutModifier {
+    #[cfg(windows)]
     Control,
-    Option,
     Shift,
+    #[cfg(target_os = "macos")]
     Command,
 }
 
 impl ShortcutModifier {
-    pub fn glyph(self) -> &'static str {
+    fn display_token(self) -> &'static str {
         match self {
-            ShortcutModifier::Control => "⌃",
-            ShortcutModifier::Option => "⌥",
+            #[cfg(windows)]
+            ShortcutModifier::Control => "Ctrl",
+            #[cfg(target_os = "macos")]
             ShortcutModifier::Shift => "⇧",
+            #[cfg(windows)]
+            ShortcutModifier::Shift => "Shift",
+            #[cfg(target_os = "macos")]
             ShortcutModifier::Command => "⌘",
         }
     }
@@ -30,9 +30,16 @@ pub struct CaptureShortcut {
     pub modifiers: &'static [ShortcutModifier],
 }
 
+#[cfg(target_os = "macos")]
 pub const KIRI_CAPTURE: CaptureShortcut = CaptureShortcut {
     key: 'a',
     modifiers: &[ShortcutModifier::Shift, ShortcutModifier::Command],
+};
+
+#[cfg(windows)]
+pub const KIRI_CAPTURE: CaptureShortcut = CaptureShortcut {
+    key: 'a',
+    modifiers: &[ShortcutModifier::Shift, ShortcutModifier::Control],
 };
 
 impl CaptureShortcut {
@@ -40,10 +47,15 @@ impl CaptureShortcut {
         let prefix: String = self
             .modifiers
             .iter()
-            .map(|m| m.glyph())
+            .map(|m| m.display_token())
             .collect::<Vec<_>>()
-            .join("");
-        format!("{prefix}{}", self.key.to_ascii_uppercase())
+            .join(if cfg!(windows) { "+" } else { "" });
+        let separator = if cfg!(windows) && !prefix.is_empty() {
+            "+"
+        } else {
+            ""
+        };
+        format!("{prefix}{separator}{}", self.key.to_ascii_uppercase())
     }
 }
 
@@ -52,6 +64,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn kiri_shortcut_is_shift_command_a() {
         assert_eq!(KIRI_CAPTURE.key, 'a');
         assert_eq!(
@@ -61,8 +74,19 @@ mod tests {
     }
 
     #[test]
-    fn display_label_matches_swift_glyph_order() {
-        // Swift iterates allCases: control, option, shift, command.
+    #[cfg(target_os = "macos")]
+    fn macos_display_label_uses_platform_glyphs() {
         assert_eq!(KIRI_CAPTURE.display_label(), "⇧⌘A");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn kiri_shortcut_is_shift_control_a() {
+        assert_eq!(KIRI_CAPTURE.key, 'a');
+        assert_eq!(
+            KIRI_CAPTURE.modifiers,
+            &[ShortcutModifier::Shift, ShortcutModifier::Control]
+        );
+        assert_eq!(KIRI_CAPTURE.display_label(), "Shift+Ctrl+A");
     }
 }

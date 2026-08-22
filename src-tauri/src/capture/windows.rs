@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, bail, Result};
-use windows_capture::capture::{Context, CaptureControl, GraphicsCaptureApiHandler};
+use windows_capture::capture::{CaptureControl, Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
 use windows_capture::monitor::Monitor;
@@ -15,6 +15,7 @@ use windows_capture::settings::{
 };
 
 use crate::core::geometry::Rect;
+use crate::record::{AudioSampleFormat, AudioSpec};
 
 use super::{CapturedDisplay, PlatformRecorder};
 
@@ -30,12 +31,9 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
     let monitor = monitors
         .iter()
         .find(|monitor| {
-            let (Ok(mx), Ok(my), Ok(mw), Ok(mh)) = (
-                monitor.x(),
-                monitor.y(),
-                monitor.width(),
-                monitor.height(),
-            ) else {
+            let (Ok(mx), Ok(my), Ok(mw), Ok(mh)) =
+                (monitor.x(), monitor.y(), monitor.width(), monitor.height())
+            else {
                 return false;
             };
             cursor_x >= mx
@@ -78,12 +76,9 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         let y = y as f64;
         let w = w as f64;
         let h = h as f64;
-        let (Ok(mx), Ok(my), Ok(mw), Ok(mh)) = (
-            monitor.x(),
-            monitor.y(),
-            monitor.width(),
-            monitor.height(),
-        ) else {
+        let (Ok(mx), Ok(my), Ok(mw), Ok(mh)) =
+            (monitor.x(), monitor.y(), monitor.width(), monitor.height())
+        else {
             continue;
         };
         let mx = mx as f64;
@@ -119,8 +114,8 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
 }
 
 fn cursor_position() -> Result<(i32, i32)> {
-    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     let mut point = POINT { x: 0, y: 0 };
     unsafe { GetCursorPos(&mut point) }.map_err(|e| anyhow!("GetCursorPos failed: {e}"))?;
     Ok((point.x, point.y))
@@ -144,23 +139,27 @@ fn monitor_index(monitor: &xcap::Monitor) -> Result<u32> {
 
 struct WinHandlerState {
     video_tx: Option<mpsc::Sender<Vec<u8>>>,
-    region_px: Rect,
+    region_px: PixelRegion,
+}
+
+#[derive(Clone, Copy)]
+struct PixelRegion {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
 }
 
 struct WinCaptureHandler {
     slot: Arc<Mutex<WinHandlerState>>,
-    _audio_streams: Vec<cpal::Stream>,
 }
 
 impl GraphicsCaptureApiHandler for WinCaptureHandler {
-    type Flags = (Arc<Mutex<WinHandlerState>>, u32);
+    type Flags = Arc<Mutex<WinHandlerState>>;
     type Error = Box<dyn std::error::Error + Send + Sync>;
 
     fn new(ctx: Context<Self::Flags>) -> std::result::Result<Self, Self::Error> {
-        Ok(Self {
-            slot: ctx.flags.0,
-            _audio_streams: Vec::new(),
-        })
+        Ok(Self { slot: ctx.flags })
     }
 
     fn on_frame_arrived(
@@ -176,26 +175,7 @@ impl GraphicsCaptureApiHandler for WinCaptureHandler {
         let raw = frame.buffer()?.as_nopadding_buffer(&mut buffer).to_vec();
         let width = frame.width() as usize;
         let height = frame.height() as usize;
-        let region = state.region_px;
-        let region_w = region.width as usize;
-        let region_h = region.height as usize;
-        let mut out = Vec::with_capacity(region_w * region_h * 4);
-        for row in 0..region_h {
-            let src_row = row + region.y as usize;
-            if src_row >= height {
-                break;
-            }
-            let src_start = (src_row * width + region.x as usize) * 4;
-            let row_bytes = region_w * 4;
-            let end = src_start.saturating_add(row_bytes).min(raw.len());
-            if src_start >= raw.len() {
-                break;
-            }
-            let src = &raw[src_start..end];
-            for pixel in src.chunks_exact(4) {
-                out.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
-            }
-        }
+        let out = crop_rgba_to_bgra(&raw, width, height, state.region_px);
         let _ = tx.send(out);
         Ok(())
     }
@@ -205,8 +185,48 @@ impl GraphicsCaptureApiHandler for WinCaptureHandler {
     }
 }
 
+fn crop_rgba_to_bgra(
+    raw: &[u8],
+    frame_width: usize,
+    frame_height: usize,
+    region: PixelRegion,
+) -> Vec<u8> {
+    // Always return one complete encoder frame. A display-size transition or
+    // an edge-rounding pixel must not shift every subsequent rawvideo frame.
+    let mut out = vec![0; region.width.saturating_mul(region.height).saturating_mul(4)];
+    if region.x >= frame_width || region.y >= frame_height {
+        return out;
+    }
+
+    let copy_width = region.width.min(frame_width - region.x);
+    let copy_height = region.height.min(frame_height - region.y);
+    for row in 0..copy_height {
+        let source_start = ((region.y + row) * frame_width + region.x).saturating_mul(4);
+        if source_start >= raw.len() {
+            break;
+        }
+        let available_pixels = (raw.len() - source_start) / 4;
+        let row_pixels = copy_width.min(available_pixels);
+        let destination_start = row * region.width * 4;
+        for column in 0..row_pixels {
+            let source = source_start + column * 4;
+            let destination = destination_start + column * 4;
+            out[destination..destination + 4].copy_from_slice(&[
+                raw[source + 2],
+                raw[source + 1],
+                raw[source],
+                raw[source + 3],
+            ]);
+        }
+    }
+    out
+}
+
 pub struct WindowsRecorder {
     control: Option<CaptureControl<WinCaptureHandler, Box<dyn std::error::Error + Send + Sync>>>,
+    _audio_streams: Vec<cpal::Stream>,
+    system_audio_spec: Option<AudioSpec>,
+    microphone_spec: Option<AudioSpec>,
 }
 
 impl WindowsRecorder {
@@ -222,27 +242,23 @@ impl WindowsRecorder {
         if region.width < 2.0 || region.height < 2.0 {
             bail!("The recording region is too small.");
         }
-        let monitor = Monitor::from_index(display_id as usize)
-            .map_err(|e| anyhow!("{e}"))?;
-        let monitor_width = monitor.width()?;
-        let monitor_height = monitor.height()?;
-        let _ = monitor_height;
+        let monitor = Monitor::from_index(display_id as usize).map_err(|e| anyhow!("{e}"))?;
 
-        let region_px = Rect::new(
-            region.x * backing_scale,
-            region.y * backing_scale,
-            region.width * backing_scale,
-            region.height * backing_scale,
-        );
-
-        let cursor = if options.shows_cursor {
-            CursorCaptureSettings::Default
-        } else {
-            CursorCaptureSettings::WithoutCursor
+        let region_px = PixelRegion {
+            x: (region.x * backing_scale).round().max(0.0) as usize,
+            y: (region.y * backing_scale).round().max(0.0) as usize,
+            width: crate::core::policy::RecordingPolicy::pixel_dimension(
+                region.width,
+                backing_scale,
+            ) as usize,
+            height: crate::core::policy::RecordingPolicy::pixel_dimension(
+                region.height,
+                backing_scale,
+            ) as usize,
         };
 
         // Start audio capture (system loopback + microphone) when requested.
-        let _audio_streams = start_audio(options, audio_tx, mic_tx);
+        let audio = start_audio(options, audio_tx, mic_tx)?;
 
         let cursor = if options.shows_cursor {
             CursorCaptureSettings::Default
@@ -250,11 +266,10 @@ impl WindowsRecorder {
             CursorCaptureSettings::WithoutCursor
         };
 
-        let slot = Arc::new(Mutex::new(WinHandlerState {
+        let state_slot = Arc::new(Mutex::new(WinHandlerState {
             video_tx: Some(video_tx),
             region_px,
         }));
-        let state_slot = slot.clone();
 
         let settings = Settings::new(
             monitor,
@@ -264,16 +279,26 @@ impl WindowsRecorder {
             MinimumUpdateIntervalSettings::Default,
             DirtyRegionSettings::Default,
             ColorFormat::Rgba8,
-            (state_slot, monitor_width),
+            state_slot,
         );
 
-        let control = WinCaptureHandler::start_free_threaded(settings)
-            .map_err(|e| anyhow!("{e}"))?;
-        let _ = slot;
+        let control =
+            WinCaptureHandler::start_free_threaded(settings).map_err(|e| anyhow!("{e}"))?;
 
         Ok(WindowsRecorder {
             control: Some(control),
+            _audio_streams: audio.streams,
+            system_audio_spec: audio.system_audio_spec,
+            microphone_spec: audio.microphone_spec,
         })
+    }
+
+    pub fn system_audio_spec(&self) -> Option<AudioSpec> {
+        self.system_audio_spec
+    }
+
+    pub fn microphone_spec(&self) -> Option<AudioSpec> {
+        self.microphone_spec
     }
 }
 
@@ -292,125 +317,201 @@ fn start_audio(
     options: crate::core::policy::RecordingOptions,
     audio_tx: Option<mpsc::Sender<Vec<u8>>>,
     mic_tx: Option<mpsc::Sender<Vec<u8>>>,
-) -> Vec<cpal::Stream> {
+) -> Result<StartedAudio> {
     let mut streams = Vec::new();
-    let Some(tx) = audio_tx else {
-        return streams;
-    };
+    let mut system_audio_spec = None;
+    let mut microphone_spec = None;
     let host = cpal::default_host();
+
     if options.captures_system_audio {
-        if let Some(device) = host.default_output_device() {
-            // Prefer 48 kHz stereo f32 to match the ffmpeg pipe contract.
-            let chosen = device
-                .supported_input_configs()
-                .ok()
-                .and_then(|configs| {
-                    configs
-                        .filter(|c| c.channels() == 2)
-                        .map(|c| c.with_sample_rate(48_000))
-                        .find(|c| c.sample_format() == cpal::SampleFormat::F32)
-                })
-                .or_else(|| device.default_input_config().ok());
-            if let Some(config) = chosen {
-                let tx_clone = tx.clone();
-                match config.sample_format() {
-                    cpal::SampleFormat::F32 => {
-                        if let Ok(stream) = device.build_input_stream(
-                            config.into(),
-                            move |data: &[f32], _| {
-                                let _ = tx_clone.send(to_bytes(data));
-                            },
-                            |_| {},
-                            None,
-                        ) {
-                            let _ = stream.play();
-                            streams.push(stream);
-                        }
-                    }
-                    cpal::SampleFormat::I16 | cpal::SampleFormat::U16 => {
-                        if let Ok(stream) = device.build_input_stream(
-                            config.into(),
-                            move |data: &[i16], _| {
-                                let _ = tx_clone.send(to_bytes_i16(data));
-                            },
-                            |_| {},
-                            None,
-                        ) {
-                            let _ = stream.play();
-                            streams.push(stream);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+        let tx = audio_tx.ok_or_else(|| anyhow!("The system-audio pipe is unavailable."))?;
+        let device = host
+            .default_output_device()
+            .ok_or_else(|| anyhow!("No system-audio output device is available."))?;
+        let (stream, spec) = build_audio_stream(&device, AudioDeviceKind::Loopback, tx)?;
+        streams.push(stream);
+        system_audio_spec = Some(spec);
     }
+
     if options.captures_microphone {
-        if let Some(tx) = mic_tx {
-            if let Some(device) = host.default_input_device() {
-                // Prefer a 48 kHz stereo f32 stream so the ffmpeg pipe
-                // contract (48k/2ch/f32) always matches; fall back to the
-                // device default config otherwise.
-                let chosen = device
-                    .supported_input_configs()
-                    .ok()
-                    .and_then(|configs| {
-                        configs
-                            .filter(|c| c.channels() == 2)
-                            .map(|c| c.with_sample_rate(48_000))
-                            .find(|c| c.sample_format() == cpal::SampleFormat::F32)
-                    })
-                    .or_else(|| device.default_input_config().ok());
-                if let Some(config) = chosen {
-                    match config.sample_format() {
-                        cpal::SampleFormat::F32 => {
-                            if let Ok(stream) = device.build_input_stream(
-                                config.into(),
-                                move |data: &[f32], _| {
-                                    let _ = tx.send(to_bytes(data));
-                                },
-                                |_| {},
-                                None,
-                            ) {
-                                let _ = stream.play();
-                                streams.push(stream);
-                            }
-                        }
-                        cpal::SampleFormat::I16 | cpal::SampleFormat::U16 => {
-                            if let Ok(stream) = device.build_input_stream(
-                                config.into(),
-                                move |data: &[i16], _| {
-                                    let _ = tx.send(to_bytes_i16(data));
-                                },
-                                |_| {},
-                                None,
-                            ) {
-                                let _ = stream.play();
-                                streams.push(stream);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
+        let tx = mic_tx.ok_or_else(|| anyhow!("The microphone pipe is unavailable."))?;
+        let device = host
+            .default_input_device()
+            .ok_or_else(|| anyhow!("No microphone input device is available."))?;
+        let (stream, spec) = build_audio_stream(&device, AudioDeviceKind::Microphone, tx)?;
+        streams.push(stream);
+        microphone_spec = Some(spec);
     }
-    streams
+
+    Ok(StartedAudio {
+        streams,
+        system_audio_spec,
+        microphone_spec,
+    })
 }
 
-fn to_bytes(samples: &[f32]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(samples.len() * 4);
-    for sample in samples {
-        out.extend_from_slice(&sample.to_le_bytes());
-    }
-    out
+struct StartedAudio {
+    streams: Vec<cpal::Stream>,
+    system_audio_spec: Option<AudioSpec>,
+    microphone_spec: Option<AudioSpec>,
 }
 
-fn to_bytes_i16(samples: &[i16]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(samples.len() * 2);
-    for sample in samples {
-        out.extend_from_slice(&sample.to_le_bytes());
-    }
-    out
+#[derive(Clone, Copy)]
+enum AudioDeviceKind {
+    Loopback,
+    Microphone,
 }
 
+fn build_audio_stream(
+    device: &cpal::Device,
+    kind: AudioDeviceKind,
+    tx: mpsc::Sender<Vec<u8>>,
+) -> Result<(cpal::Stream, AudioSpec)> {
+    let config = preferred_audio_config(device, kind)?;
+    let format = match config.sample_format() {
+        cpal::SampleFormat::F32 => AudioSampleFormat::F32,
+        cpal::SampleFormat::I16 => AudioSampleFormat::I16,
+        cpal::SampleFormat::U16 => AudioSampleFormat::U16,
+        other => bail!("Unsupported audio sample format: {other}"),
+    };
+    let spec = AudioSpec {
+        sample_rate: config.sample_rate(),
+        channels: u32::from(config.channels()),
+        format,
+    };
+    let stream = device
+        .build_input_stream_raw(
+            config.config(),
+            config.sample_format(),
+            move |data, _| {
+                let _ = tx.send(data.bytes().to_vec());
+            },
+            |_| {},
+            None,
+        )
+        .map_err(|error| anyhow!("Could not start the audio input stream: {error}"))?;
+    stream
+        .play()
+        .map_err(|error| anyhow!("Could not activate the audio input stream: {error}"))?;
+    Ok((stream, spec))
+}
+
+fn preferred_audio_config(
+    device: &cpal::Device,
+    kind: AudioDeviceKind,
+) -> Result<cpal::SupportedStreamConfig> {
+    let ranges = match kind {
+        AudioDeviceKind::Loopback => device
+            .supported_output_configs()
+            .map(|configs| configs.collect::<Vec<_>>()),
+        AudioDeviceKind::Microphone => device
+            .supported_input_configs()
+            .map(|configs| configs.collect::<Vec<_>>()),
+    };
+    let selected = ranges.ok().and_then(|ranges| {
+        ranges
+            .into_iter()
+            .filter(|range| supported_sample_format(range.sample_format()))
+            .map(|range| {
+                let sample_rate = 48_000.clamp(range.min_sample_rate(), range.max_sample_rate());
+                range.with_sample_rate(sample_rate)
+            })
+            .min_by_key(audio_config_rank)
+    });
+    if let Some(config) = selected {
+        return Ok(config);
+    }
+
+    let fallback = match kind {
+        AudioDeviceKind::Loopback => device.default_output_config(),
+        AudioDeviceKind::Microphone => device.default_input_config(),
+    }
+    .map_err(|error| anyhow!("Could not query the audio device format: {error}"))?;
+    if !supported_sample_format(fallback.sample_format()) {
+        bail!(
+            "Unsupported audio sample format: {}",
+            fallback.sample_format()
+        );
+    }
+    Ok(fallback)
+}
+
+fn supported_sample_format(format: cpal::SampleFormat) -> bool {
+    matches!(
+        format,
+        cpal::SampleFormat::F32 | cpal::SampleFormat::I16 | cpal::SampleFormat::U16
+    )
+}
+
+fn audio_config_rank(config: &cpal::SupportedStreamConfig) -> (u8, u8, u32) {
+    let channels = match config.channels() {
+        2 => 0,
+        1 => 1,
+        channels => 2u8.saturating_add(channels.min(u8::MAX as u16) as u8),
+    };
+    let format = match config.sample_format() {
+        cpal::SampleFormat::F32 => 0,
+        cpal::SampleFormat::I16 => 1,
+        cpal::SampleFormat::U16 => 2,
+        _ => u8::MAX,
+    };
+    (channels, format, config.sample_rate().abs_diff(48_000))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_config_rank_prefers_stereo_float_at_48khz() {
+        let ideal = cpal::SupportedStreamConfig::new(
+            2,
+            48_000,
+            cpal::SupportedBufferSize::Unknown,
+            cpal::SampleFormat::F32,
+        );
+        let mono = cpal::SupportedStreamConfig::new(
+            1,
+            48_000,
+            cpal::SupportedBufferSize::Unknown,
+            cpal::SampleFormat::F32,
+        );
+        let integer = cpal::SupportedStreamConfig::new(
+            2,
+            48_000,
+            cpal::SupportedBufferSize::Unknown,
+            cpal::SampleFormat::I16,
+        );
+        let wrong_rate = cpal::SupportedStreamConfig::new(
+            2,
+            44_100,
+            cpal::SupportedBufferSize::Unknown,
+            cpal::SampleFormat::F32,
+        );
+
+        assert!(audio_config_rank(&ideal) < audio_config_rank(&mono));
+        assert!(audio_config_rank(&ideal) < audio_config_rank(&integer));
+        assert!(audio_config_rank(&ideal) < audio_config_rank(&wrong_rate));
+    }
+
+    #[test]
+    fn crop_produces_exact_bgra_frame_and_pads_display_edges() {
+        let rgba = [
+            1, 2, 3, 255, 4, 5, 6, 255, // row 0
+            7, 8, 9, 255, 10, 11, 12, 255, // row 1
+        ];
+        let region = PixelRegion {
+            x: 1,
+            y: 0,
+            width: 2,
+            height: 2,
+        };
+
+        let cropped = crop_rgba_to_bgra(&rgba, 2, 2, region);
+        assert_eq!(cropped.len(), 2 * 2 * 4);
+        assert_eq!(&cropped[0..4], &[6, 5, 4, 255]);
+        assert_eq!(&cropped[4..8], &[0, 0, 0, 0]);
+        assert_eq!(&cropped[8..12], &[12, 11, 10, 255]);
+        assert_eq!(&cropped[12..16], &[0, 0, 0, 0]);
+    }
+}

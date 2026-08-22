@@ -1,8 +1,8 @@
 name: release
 
 # Builds macOS (dmg) and Windows (nsis) installers on GitHub Actions and
-# publishes them as a GitHub Release when a v* tag is pushed. No local
-# packaging needed — `git push origin v0.3.0` is the whole release flow.
+# publishes them as a draft GitHub Release when a v* tag is pushed. No local
+# packaging is needed; publish the draft after both platform jobs succeed.
 
 on:
   push:
@@ -13,9 +13,28 @@ permissions:
   contents: write
 
 jobs:
+  verify-version:
+    name: Verify release version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/release-version.mjs "$GITHUB_REF_NAME"
+
   build-macos:
-    name: Build macOS app
-    runs-on: macos-latest
+    name: Build macOS app (${{ matrix.arch }})
+    needs: verify-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -26,10 +45,15 @@ jobs:
         with:
           node-version: 22
       - run: npm install -g pnpm@10
-      - run: pnpm install --frozen-lockfile || pnpm install
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:release-tools
+      - run: pnpm icons:verify
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No Developer ID secret is available yet. Explicit ad-hoc signing
+          # still seals the complete bundle and passes codesign verification.
+          APPLE_SIGNING_IDENTITY: "-"
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Kiri ${{ github.ref_name }}
@@ -38,6 +62,7 @@ jobs:
 
   build-windows:
     name: Build Windows app
+    needs: verify-version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +74,9 @@ jobs:
         with:
           node-version: 22
       - run: npm install -g pnpm@10
-      - run: pnpm install --frozen-lockfile || pnpm install
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:release-tools
+      - run: pnpm icons:verify
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

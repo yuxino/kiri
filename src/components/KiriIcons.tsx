@@ -138,17 +138,14 @@ const ICONS: Record<IconName, React.ComponentType<Record<string, unknown>>> = {
 export function KiriIcon(props: {
   name: IconName;
   size?: number;
-  className?: string;
-  strokeWidth?: number;
   style?: React.CSSProperties;
 }) {
-  const { name, size = 16, className, strokeWidth, style } = props;
+  const { name, size = 16, style } = props;
   const Glyph = ICONS[name];
   return (
     <Glyph
       size={size}
-      className={className}
-      strokeWidth={strokeWidth ?? 2}
+      strokeWidth={2}
       style={style}
       aria-hidden="true"
     />

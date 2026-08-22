@@ -113,7 +113,7 @@ export interface SaveOcrProviderProfileRequest {
   apiKey?: string;
 }
 
-export interface PreparedOcrProfileDto {
+interface PreparedOcrProfileDto {
   id: string;
   revision: number;
   name: string;

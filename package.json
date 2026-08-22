@@ -1,14 +1,17 @@
 {
   "name": "kiri",
   "private": true,
-  "version": "1.3.0",
+  "version": "1.4.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "dev": "pnpm icons:verify && vite",
+    "build": "pnpm icons:verify && tsc && vite build",
     "preview": "vite preview",
     "tauri": "node scripts/tauri-cli.mjs",
-    "test:dev-signing": "node --test scripts/tauri-cli.test.mjs"
+    "icons:generate": "node scripts/app-icons.mjs generate",
+    "icons:verify": "node scripts/app-icons.mjs verify",
+    "test:dev-signing": "node --test scripts/tauri-cli.test.mjs",
+    "test:release-tools": "node --test scripts/tauri-cli.test.mjs scripts/release-version.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

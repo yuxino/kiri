@@ -13,7 +13,7 @@ use objc2_app_kit::{NSEvent, NSEventMask, NSRunningApplication, NSWindow, NSWork
 use objc2_core_foundation::kCFRunLoopDefaultMode;
 use objc2_foundation::{NSArray, NSString, NSURL};
 
-use super::ClickMonitorHandle;
+use super::{ClickMonitorHandle, MicrophoneAccess};
 
 pub fn activate_application(pid: u32) {
     if let Some(application) =
@@ -49,6 +49,38 @@ pub fn mic_supported() -> bool {
     use objc2_foundation::NSProcessInfo;
     let version = NSProcessInfo::processInfo().operatingSystemVersion();
     version.majorVersion >= 15
+}
+
+pub fn request_microphone_access() -> Result<MicrophoneAccess> {
+    use objc2_av_foundation::{AVAuthorizationStatus, AVCaptureDevice, AVMediaTypeAudio};
+
+    if !mic_supported() {
+        return Ok(MicrophoneAccess::Unsupported);
+    }
+    let media_type = unsafe { AVMediaTypeAudio }
+        .ok_or_else(|| anyhow::anyhow!("AVFoundation audio media type is unavailable"))?;
+    let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(media_type) };
+    match status {
+        AVAuthorizationStatus::Authorized => Ok(MicrophoneAccess::Authorized),
+        AVAuthorizationStatus::Denied | AVAuthorizationStatus::Restricted => {
+            Ok(MicrophoneAccess::Denied)
+        }
+        AVAuthorizationStatus::NotDetermined => {
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            let block = RcBlock::new(move |granted: objc2::runtime::Bool| {
+                let _ = tx.send(granted.as_bool());
+            });
+            unsafe {
+                AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &block)
+            };
+            Ok(if rx.recv().unwrap_or(false) {
+                MicrophoneAccess::Authorized
+            } else {
+                MicrophoneAccess::Denied
+            })
+        }
+        _ => Ok(MicrophoneAccess::Denied),
+    }
 }
 
 pub fn set_window_click_through(app: &tauri::AppHandle, label: &str) {
@@ -109,6 +141,19 @@ impl Drop for ClickMonitor {
 pub fn start_click_monitor(
     callback: Arc<dyn Fn(f64, f64) + Send + Sync>,
 ) -> Result<Box<dyn ClickMonitorHandle + Send>> {
+    static INPUT_MONITORING_AUTHORIZED: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    if !INPUT_MONITORING_AUTHORIZED.load(std::sync::atomic::Ordering::Acquire) {
+        use objc2_core_graphics::{CGPreflightListenEventAccess, CGRequestListenEventAccess};
+        let authorized = CGPreflightListenEventAccess() || CGRequestListenEventAccess();
+        if !authorized {
+            return Err(anyhow::anyhow!(
+                "macOS Input Monitoring permission is required for click highlights"
+            ));
+        }
+        INPUT_MONITORING_AUTHORIZED.store(true, std::sync::atomic::Ordering::Release);
+    }
+
     let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flag = stop_flag.clone();
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);

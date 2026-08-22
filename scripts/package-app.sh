@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
-# Packages Kiri with tauri. Bundles ffmpeg and uses the stable signing
-# identity from KIRI_SIGNING_IDENTITY when provided (never silent ad-hoc).
+# Packages Kiri with Tauri. macOS builds require a stable signing identity;
+# ad-hoc signing is available only when explicitly requested for disposable QA.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-node scripts/ensure-ffmpeg.mjs
-
-# Bundle the platform ffmpeg binary into the app resources.
-TRIPLE="$(rustc -vV | sed -n 's/host: //p')"
-FFMPEG_SRC="src-tauri/binaries/ffmpeg-$TRIPLE/ffmpeg"
-if [ ! -f "$FFMPEG_SRC" ]; then
-  echo "missing $FFMPEG_SRC — run: node scripts/ensure-ffmpeg.mjs" >&2
-  exit 1
-fi
-
-if [ -n "${KIRI_SIGNING_IDENTITY:-}" ]; then
-  export APPLE_SIGNING_IDENTITY="$KIRI_SIGNING_IDENTITY"
+if [ "$(uname -s)" = "Darwin" ]; then
+  if [ -n "${KIRI_SIGNING_IDENTITY:-}" ]; then
+    export APPLE_SIGNING_IDENTITY="$KIRI_SIGNING_IDENTITY"
+  elif [ "${KIRI_ALLOW_ADHOC_SIGNING:-0}" = "1" ]; then
+    export APPLE_SIGNING_IDENTITY="-"
+    echo "package-app: using explicitly requested ad-hoc signing" >&2
+  else
+    echo "package-app: no stable signing identity; set KIRI_SIGNING_IDENTITY" >&2
+    echo "package-app: disposable QA may explicitly set KIRI_ALLOW_ADHOC_SIGNING=1" >&2
+    exit 1
+  fi
 fi
 
 pnpm tauri build "$@"

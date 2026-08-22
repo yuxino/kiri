@@ -18,8 +18,16 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   build-macos:
-    name: Build macOS app
-    runs-on: macos-latest
+    name: Build macOS app (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -30,16 +38,22 @@ jobs:
         with:
           node-version: 22
       - run: npm install -g pnpm@10
-      - run: pnpm install --frozen-lockfile || pnpm install
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:release-tools
+      - run: pnpm icons:verify
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No Developer ID secret is available yet. Make the fallback
+          # explicit so Tauri seals the whole app bundle instead of leaving
+          # a linker-signed executable inside an unsigned bundle.
+          APPLE_SIGNING_IDENTITY: "-"
         with:
           args: --bundles dmg
       - name: Upload macOS bundle
         uses: actions/upload-artifact@v4
         with:
-          name: kiri-macos
+          name: kiri-macos-${{ matrix.arch }}
           path: src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
@@ -56,7 +70,9 @@ jobs:
         with:
           node-version: 22
       - run: npm install -g pnpm@10
-      - run: pnpm install --frozen-lockfile || pnpm install
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:release-tools
+      - run: pnpm icons:verify
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

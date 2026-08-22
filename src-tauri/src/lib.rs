@@ -60,6 +60,11 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 app.set_activation_policy(tauri::ActivationPolicy::Regular);
+                // Tauri installs this icon itself in dev. Release builds also
+                // set it at runtime so the Dock and bare --no-bundle binaries
+                // cannot fall back to a stale or generic icon.
+                #[cfg(not(debug_assertions))]
+                install_macos_app_icon()?;
                 log::info!("[app] activation policy = Regular (Dock icon enabled)");
             }
             let state = AppState::new(app.handle())?;
@@ -178,6 +183,23 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
         });
+}
+
+#[cfg(all(target_os = "macos", not(debug_assertions)))]
+fn install_macos_app_icon() -> std::io::Result<()> {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    const APP_ICON: &[u8] = include_bytes!("../icons/icon.icns");
+    let main_thread = MainThreadMarker::new()
+        .ok_or_else(|| std::io::Error::other("app icon must be installed on the main thread"))?;
+    let data = NSData::with_bytes(APP_ICON);
+    let icon = NSImage::initWithData(NSImage::alloc(), &data)
+        .ok_or_else(|| std::io::Error::other("embedded app icon is invalid"))?;
+    let application = NSApplication::sharedApplication(main_thread);
+    unsafe { application.setApplicationIconImage(Some(&icon)) };
+    Ok(())
 }
 
 fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {

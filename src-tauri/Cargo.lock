@@ -2840,7 +2840,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
 name = "kiri"
-version = "1.3.0"
+version = "1.4.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2857,6 +2857,7 @@ dependencies = [
  "log",
  "objc2",
  "objc2-app-kit",
+ "objc2-av-foundation",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-core-media",
@@ -2870,6 +2871,7 @@ dependencies = [
  "secrecy",
  "serde",
  "serde_json",
+ "sha2",
  "sys-locale",
  "tauri",
  "tauri-build",

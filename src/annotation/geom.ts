@@ -13,7 +13,7 @@ export interface Point {
   y: number;
 }
 
-export type SelectionHandle =
+type SelectionHandle =
   | "topLeft"
   | "top"
   | "topRight"
@@ -53,7 +53,7 @@ export function maxY(r: Rect): number {
 export function midX(r: Rect): number {
   return r.x + r.width / 2;
 }
-export function midY(r: Rect): number {
+function midY(r: Rect): number {
   return r.y + r.height / 2;
 }
 

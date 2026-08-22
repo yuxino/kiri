@@ -2,6 +2,12 @@
 
 Kiri 采用本地优先设计。截屏、录屏、标注、OCR 结果与素材库默认只留在设备上；只有你主动导出，或明确把当前 OCR 选区发送给已配置的远程服务时，数据才会离开设备。Kiri 没有账号系统、分析、广告或遥测。
 
+## 录屏依赖
+
+Kiri 使用 FFmpeg 在本机完成录屏与 GIF 编码。如果系统与缓存中都没有可用版本，Kiri 会在你第一次开始录屏或明确把视频转换为 GIF 时下载一次可执行文件，并保存到操作系统缓存；浏览素材库不会触发下载。这个依赖请求不会携带截屏、录屏、文件名、素材库信息、凭据或账号标识；媒体编码始终在本机完成。
+
+macOS 自动下载连接 `ffmpeg.martin-riedl.de`；Windows 连接 `github.com` 上的 `GyanD/codexffmpeg` Release。
+
 ## 本地 OCR
 
 Kiri 默认使用 macOS Vision 或 Windows.Media.Ocr 进行本地文字识别。它不需要 API Key 或网络连接，图片像素不会离开设备。

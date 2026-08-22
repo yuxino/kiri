@@ -19,21 +19,23 @@ import { ConfirmWindow } from "./windows/ConfirmWindow";
 // back to the real system locale via get_locale (the WebView's
 // navigator.language is fixed to en in Tauri, so it cannot be trusted).
 // The choice is shared across all windows and survives relaunches.
+function applySystemLanguage(): Promise<void> {
+  return invoke<string>("get_locale")
+    .then((locale) => {
+      if (locale === "zh-Hans" || locale === "ja") setLanguage(locale);
+    })
+    .catch(() => {});
+}
+
 void invoke<string>("get_language")
   .then((saved) => {
     if (saved) {
       setLanguage(saved as "en" | "zh-Hans" | "ja");
       return;
     }
-    invoke<string>("get_locale").then((locale) => {
-      if (locale === "zh-Hans" || locale === "ja") setLanguage(locale);
-    }).catch(() => {});
+    return applySystemLanguage();
   })
-  .catch(() => {
-    invoke<string>("get_locale").then((locale) => {
-      if (locale === "zh-Hans" || locale === "ja") setLanguage(locale);
-    }).catch(() => {});
-  });
+  .catch(() => applySystemLanguage());
 
 // Surface runtime errors as a compact bottom banner (never blocks the UI),
 // and forward the message to the Rust log for diagnosis.

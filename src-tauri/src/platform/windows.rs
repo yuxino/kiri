@@ -12,11 +12,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, EnumWindows, GetForegroundWindow, GetMessageW,
     GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
     SetForegroundWindow, SetWindowDisplayAffinity, SetWindowsHookExW, ShowWindow, TranslateMessage,
-    MSG, MSLLHOOKSTRUCT, SW_RESTORE, WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
-    WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+    MSG, MSLLHOOKSTRUCT, SW_RESTORE, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WH_MOUSE_LL, WM_LBUTTONDOWN,
+    WM_RBUTTONDOWN,
 };
 
-use super::ClickMonitorHandle;
+use super::{ClickMonitorHandle, MicrophoneAccess};
 
 // ---------------------------------------------------------------------------
 // Focus / reveal
@@ -97,6 +97,10 @@ pub fn mic_supported() -> bool {
     true
 }
 
+pub fn request_microphone_access() -> Result<MicrophoneAccess> {
+    Ok(MicrophoneAccess::Authorized)
+}
+
 pub fn set_window_click_through(app: &tauri::AppHandle, label: &str) {
     use windows::Win32::UI::WindowsAndMessaging::{
         GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT,
@@ -110,7 +114,11 @@ pub fn set_window_click_through(app: &tauri::AppHandle, label: &str) {
     unsafe {
         let hwnd = HWND(hwnd.0 as *mut _);
         let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        let _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED.0 as isize | WS_EX_TRANSPARENT.0 as isize);
+        let _ = SetWindowLongPtrW(
+            hwnd,
+            GWL_EXSTYLE,
+            style | WS_EX_LAYERED.0 as isize | WS_EX_TRANSPARENT.0 as isize,
+        );
     }
 }
 
@@ -122,7 +130,11 @@ pub fn set_window_capture_excluded(app: &tauri::AppHandle, label: &str, excluded
         return;
     };
     unsafe {
-        let affinity = if excluded { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
+        let affinity = if excluded {
+            WDA_EXCLUDEFROMCAPTURE
+        } else {
+            WDA_NONE
+        };
         let _ = SetWindowDisplayAffinity(HWND(hwnd.0 as *mut _), affinity);
     }
 }

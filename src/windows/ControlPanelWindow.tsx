@@ -1,7 +1,7 @@
 // ControlPanelWindow — recording controls (RecordingControlPanelController).
-// 296×64 HUD per spec §6.4/§5.2: regular material, radius 18, outer padding
-// 4; always visible; excluded from the recording by the backend; a
-// non-activating panel that never steals focus.
+// Draggable 296×64 recording HUD. The backend keeps it above other windows
+// and excludes it from the exported recording; the frontend remembers the
+// user's preferred position.
 
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
@@ -11,12 +11,16 @@ import { KiriIcon, type IconName } from "../components/KiriIcons";
 
 const ACCENT = "rgba(125, 105, 245, 1)"; // #7D69F5
 const RED = "#FF3B30"; // system red (spec: Color.red)
+const CORAL = "#FF80A8";
 
 export function ControlPanelWindow() {
   const [state, setState] = useState<RecordingState | null>(null);
 
   useEffect(() => {
-    void onRecordingState(setState);
+    const unlisten = onRecordingState(setState);
+    return () => {
+      void unlisten.then((dispose) => dispose()).catch(() => {});
+    };
   }, []);
 
   // Apply the user's saved panel position on mount (default: bottom-right).
@@ -41,14 +45,28 @@ export function ControlPanelWindow() {
     void getCurrentWindow().startDragging().catch(() => {});
   };
 
-  // Recording hotkey: Esc stops. (Pause/resume was removed — not needed
-  // for now; Space is left alone so it does not fight the OS.)
+  // Recording hotkeys stay scoped to the focused control panel: Space
+  // pauses/resumes and Esc stops, matching the original native controller.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const s = stateRef.current;
       if (!s) return;
       if (e.key === "Escape") {
-        if (s.isRecording) void api.stopRecording().catch(() => {});
+        e.preventDefault();
+        if (
+          (s.isStarting || s.isRecording || s.isPaused) &&
+          !s.isTransitioning &&
+          !s.isFinalizing
+        ) {
+          void api.stopRecording().catch(() => {});
+        }
+        return;
+      }
+      if (e.code === "Space" && !e.repeat) {
+        e.preventDefault();
+        if (s.isStarting || s.isTransitioning || s.isFinalizing) return;
+        if (s.isPaused) void api.resumeRecording().catch(() => {});
+        else if (s.isRecording) void api.pauseRecording().catch(() => {});
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -57,27 +75,32 @@ export function ControlPanelWindow() {
 
   // Remember the panel position after it moves (drag or otherwise).
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
     const win = getCurrentWindow();
-    void win.onMoved(() => {
-      void Promise.all([win.outerPosition(), win.scaleFactor()]).then(([pos, scale]) => {
-        const logical = pos.toLogical(scale);
-        localStorage.setItem(
-          "kiri-panel-pos",
-          JSON.stringify({ x: logical.x, y: logical.y }),
-        );
-      });
-    }).then((fn) => {
-      unlisten = fn;
+    const unlisten = win.onMoved(() => {
+      void Promise.all([win.outerPosition(), win.scaleFactor()])
+        .then(([pos, scale]) => {
+          const logical = pos.toLogical(scale);
+          localStorage.setItem(
+            "kiri-panel-pos",
+            JSON.stringify({ x: logical.x, y: logical.y }),
+          );
+        })
+        .catch(() => {});
     });
-    return () => unlisten?.();
+    return () => {
+      void unlisten.then((dispose) => dispose()).catch(() => {});
+    };
   }, []);
 
   const stateRef = useRef<RecordingState | null>(null);
   stateRef.current = state;
 
-  const busy =
-    state?.isStarting || state?.isTransitioning || state?.isFinalizing;
+  const busy = Boolean(
+    state?.isStarting || state?.isTransitioning || state?.isFinalizing,
+  );
+  const paused = Boolean(state?.isPaused);
+  const hasSession = Boolean(state?.isRecording || state?.isPaused);
+  const canStop = Boolean(state?.isStarting || hasSession);
 
   // All text is white on the dark material panel (spec: white foreground).
   const textStyle: React.CSSProperties = { color: "#fff" };
@@ -113,40 +136,58 @@ export function ControlPanelWindow() {
           boxSizing: "border-box",
         }}
       >
-        {busy ? (
-          <Spinner />
-        ) : state?.isRecording ? (
-          <>
-            <span
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: "50%",
-                background: RED,
-              }}
-            />
-            <span
-              style={{
-                ...textStyle,
-                fontSize: 12,
-                fontVariantNumeric: "tabular-nums",
-                minWidth: 58,
-                textAlign: "right",
-              }}
-            >
-              {state.elapsedLabel}
-            </span>
-          </>
-        ) : (
-          <span style={{ ...textStyle, fontSize: 12, opacity: 0.8 }}>
-            {t("Preparing recording")}
-          </span>
-        )}
+        <span
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: "50%",
+            background: paused ? CORAL : RED,
+            boxShadow:
+              !paused && hasSession && !busy
+                ? "0 0 0 4px rgba(255,59,48,0.22)"
+                : "none",
+            flexShrink: 0,
+          }}
+        />
+        <span
+          style={{
+            ...textStyle,
+            color: paused ? CORAL : textStyle.color,
+            fontSize: 12,
+            fontWeight: 600,
+            fontVariantNumeric: "tabular-nums",
+            minWidth: 58,
+            textAlign: "left",
+          }}
+        >
+          {paused
+            ? t("Paused")
+            : state?.elapsedLabel ?? t("Preparing recording")}
+        </span>
         <div style={{ width: 1, height: 22, background: "rgba(255,255,255,0.16)" }} />
+        {busy ? (
+          <div
+            title={t("Preparing recording")}
+            style={{ width: 28, height: 28, display: "grid", placeItems: "center" }}
+          >
+            <Spinner />
+          </div>
+        ) : (
+          <ControlButton
+            icon={paused ? "play.fill" : "pause.fill"}
+            title={paused ? t("Resume Recording") : t("Pause Recording")}
+            disabled={!hasSession}
+            onClick={() => {
+              if (paused) void api.resumeRecording().catch(() => {});
+              else void api.pauseRecording().catch(() => {});
+            }}
+          />
+        )}
         <ControlButton
           icon="stop.fill"
-          title={t("Stop and Save Recording")}
+          title={state?.isStarting ? t("Cancel") : t("Stop and Save Recording")}
           danger
+          disabled={Boolean(state?.isTransitioning || state?.isFinalizing || !canStop)}
           onClick={() => void api.stopRecording().catch(() => {})}
         />
       </div>
@@ -158,11 +199,14 @@ function ControlButton(props: {
   icon: IconName;
   title: string;
   danger?: boolean;
+  disabled?: boolean;
   onClick(): void;
 }) {
   return (
     <button
       title={props.title}
+      aria-label={props.title}
+      disabled={props.disabled}
       onClick={props.onClick}
       style={{
         width: 28,
@@ -174,7 +218,8 @@ function ControlButton(props: {
           : "rgba(125,105,245,0.14)",
         color: props.danger ? "#fff" : ACCENT,
         fontSize: 13,
-        cursor: "pointer",
+        cursor: props.disabled ? "default" : "pointer",
+        opacity: props.disabled ? 0.46 : 1,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",

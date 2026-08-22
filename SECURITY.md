@@ -12,6 +12,17 @@ kiri is local-first and does not upload captures automatically. A change that
 transfers capture contents or other user data must make the destination and
 user action explicit.
 
+Recording or explicit GIF conversion may download the FFmpeg executable once
+when no usable local copy is available. This dependency request contains no
+capture contents, filenames, library metadata, credentials, or account
+identifier. The executable is cached locally and all media encoding remains on
+the device. Automatic downloads use
+platform-specific, version-pinned archives; Kiri verifies the archive SHA-256
+before extraction and validates the executable before use.
+
+- macOS: FFmpeg 9.0 from `ffmpeg.martin-riedl.de`
+- Windows x64: FFmpeg 9.0.1 from the `GyanD/codexffmpeg` release repository on `github.com`
+
 Optional remote OCR follows that rule per image. The app prepares only the
 selected region locally, discloses the configured provider origin, model, and
 image size, and sends it only after the user activates a visible Send or Retry
