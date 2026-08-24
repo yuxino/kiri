@@ -129,10 +129,25 @@ function validateAlpha({ width, height, alpha }, label) {
   let transparent = 0;
   let translucent = 0;
   let opaque = 0;
-  for (const value of alpha) {
-    if (value <= 8) transparent += 1;
-    else if (value === 255) opaque += 1;
-    else translucent += 1;
+  let visibleMinX = width;
+  let visibleMinY = height;
+  let visibleMaxX = -1;
+  let visibleMaxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const value = alpha[y * width + x];
+      if (value <= 8) {
+        transparent += 1;
+        continue;
+      }
+
+      visibleMinX = Math.min(visibleMinX, x);
+      visibleMinY = Math.min(visibleMinY, y);
+      visibleMaxX = Math.max(visibleMaxX, x);
+      visibleMaxY = Math.max(visibleMaxY, y);
+      if (value === 255) opaque += 1;
+      else translucent += 1;
+    }
   }
   const pixels = alpha.length;
   if (transparent / pixels < 0.05) {
@@ -140,6 +155,23 @@ function validateAlpha({ width, height, alpha }, label) {
   }
   if (opaque / pixels < 0.4) fail(`${label}: visible icon content is unexpectedly sparse`);
   if (translucent === 0) fail(`${label}: rounded edge is missing anti-aliasing`);
+
+  const visibleWidth = visibleMaxX - visibleMinX + 1;
+  const visibleHeight = visibleMaxY - visibleMinY + 1;
+  const [minimumVisibleRatio, maximumVisibleRatio] =
+    width >= 64 ? [0.78, 0.84] : width >= 32 ? [0.75, 0.86] : [0.7, 0.9];
+  for (const [axis, visibleSize, canvasSize] of [
+    ["width", visibleWidth, width],
+    ["height", visibleHeight, height],
+  ]) {
+    const ratio = visibleSize / canvasSize;
+    if (ratio < minimumVisibleRatio || ratio > maximumVisibleRatio) {
+      fail(
+        `${label}: visible ${axis} must occupy ${Math.round(minimumVisibleRatio * 100)}-` +
+          `${Math.round(maximumVisibleRatio * 100)}% of the canvas, got ${Math.round(ratio * 100)}%`,
+      );
+    }
+  }
 
   const center = Math.floor(height / 2) * width + Math.floor(width / 2);
   if (alpha[center] < 250) fail(`${label}: center must remain visible`);
@@ -176,10 +208,10 @@ function validateAlpha({ width, height, alpha }, label) {
     [0.03, 0.5],
   ];
   const innerEdges = [
-    [0.5, 0.08],
-    [0.92, 0.5],
-    [0.5, 0.92],
-    [0.08, 0.5],
+    [0.5, 0.12],
+    [0.88, 0.5],
+    [0.5, 0.88],
+    [0.12, 0.5],
   ];
   const roundedCorners = [
     [0.08, 0.08],
@@ -188,10 +220,10 @@ function validateAlpha({ width, height, alpha }, label) {
     [0.08, 0.92],
   ];
   const innerCorners = [
-    [0.15, 0.15],
-    [0.85, 0.15],
-    [0.85, 0.85],
-    [0.15, 0.85],
+    [0.18, 0.18],
+    [0.82, 0.18],
+    [0.82, 0.82],
+    [0.18, 0.82],
   ];
   const outerEdgeLimit = width < 32 ? 224 : 128;
   if (outerEdges.some(([x, y]) => sample(x, y) > outerEdgeLimit)) {
@@ -317,7 +349,9 @@ function verifyIcons() {
     }
   }
 
-  console.log("App icon verification passed: transparent corners are present in PNG, ICNS, and ICO assets.");
+  console.log(
+    "App icon verification passed: transparent corners and visual-safe sizing are present in PNG, ICNS, and ICO assets.",
+  );
 }
 
 function generateIcons() {
