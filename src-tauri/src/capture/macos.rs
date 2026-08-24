@@ -32,8 +32,9 @@ use objc2_screen_capture_kit::{
 
 use crate::core::geometry::Rect;
 use crate::core::policy::RecordingOptions;
+use crate::record::{AudioChunkSender, AudioQueueSendError, AudioSampleFormat, AudioSpec};
 
-use super::CapturedDisplay;
+use super::{CaptureHealth, CapturedDisplay};
 
 // ---------------------------------------------------------------------------
 // Permissions
@@ -547,7 +548,7 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
 
     let (png_data, pixel_width, pixel_height) = cgimage_to_png(&image)?;
     Ok(CapturedDisplay {
-        png_data,
+        png_data: png_data.into(),
         pixel_width,
         pixel_height,
         screen_frame: screen.frame,
@@ -569,13 +570,14 @@ pub struct AudioFormat {
 }
 
 struct DelegateSenders {
-    video_tx: mpsc::Sender<Vec<u8>>,
-    audio_tx: Option<mpsc::Sender<Vec<u8>>>,
-    mic_tx: Option<mpsc::Sender<Vec<u8>>>,
+    video_tx: super::VideoFrameSender,
+    audio_tx: Option<AudioChunkSender>,
+    mic_tx: Option<AudioChunkSender>,
 }
 
 struct DelegateState {
     senders: Weak<DelegateSenders>,
+    capture_health: Arc<CaptureHealth>,
     audio_format: OnceLock<AudioFormat>,
     mic_format: OnceLock<AudioFormat>,
     /// Set before the stream stops so late frame callbacks (already queued
@@ -584,6 +586,10 @@ struct DelegateState {
     stopped: std::sync::atomic::AtomicBool,
     /// Total frames forwarded to the encoder (debug counter).
     frames: std::sync::atomic::AtomicU64,
+    /// Frames discarded because the bounded encoder queue was full.
+    dropped_frames: std::sync::atomic::AtomicU64,
+    dropped_audio_chunks: std::sync::atomic::AtomicU64,
+    dropped_mic_chunks: std::sync::atomic::AtomicU64,
 }
 
 /// A recording session running the SCK stream on a dedicated thread.
@@ -594,6 +600,7 @@ pub struct MacRecordingSession {
     /// Receives the stream-thread's completion notification after a stop.
     stop_done_rx: mpsc::Receiver<std::result::Result<(), String>>,
     thread: Option<std::thread::JoinHandle<()>>,
+    capture_health: Arc<CaptureHealth>,
 }
 
 impl MacRecordingSession {
@@ -604,15 +611,27 @@ impl MacRecordingSession {
         backing_scale: f64,
         options: RecordingOptions,
         excepted_window_ids: &[u32],
-        video_tx: mpsc::Sender<Vec<u8>>,
-        audio_tx: Option<mpsc::Sender<Vec<u8>>>,
-        mic_tx: Option<mpsc::Sender<Vec<u8>>>,
+        video_tx: super::VideoFrameSender,
+        audio_tx: Option<AudioChunkSender>,
+        mic_tx: Option<AudioChunkSender>,
     ) -> Result<MacRecordingSession> {
         if region.width < 2.0 || region.height < 2.0 {
             bail!("The recording region is too small.");
         }
         if options.captures_microphone && !crate::platform::mic_supported() {
             bail!("Microphone recording requires macOS 15 or later.");
+        }
+
+        let audio_spec = AudioSpec {
+            sample_rate: 48_000,
+            channels: 2,
+            format: AudioSampleFormat::F32,
+        };
+        if let Some(tx) = &audio_tx {
+            tx.configure(audio_spec)?;
+        }
+        if let Some(tx) = &mic_tx {
+            tx.configure(audio_spec)?;
         }
 
         // SCShareableContent and the objects obtained from it are
@@ -632,6 +651,8 @@ impl MacRecordingSession {
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let (result_tx, result_rx) = mpsc::channel::<Result<()>>();
         let (stop_done_tx, stop_done_rx) = mpsc::channel::<std::result::Result<(), String>>();
+        let capture_health = Arc::new(CaptureHealth::default());
+        let stream_capture_health = Arc::clone(&capture_health);
         log::info!("MacRecordingSession: spawning stream thread");
         let thread = std::thread::spawn(move || {
             log::info!("MacRecordingSession: stream thread running");
@@ -657,7 +678,12 @@ impl MacRecordingSession {
                     flags: objc2_core_media::CMTimeFlags(1),
                     epoch: 0,
                 });
-                configuration.setQueueDepth(6);
+                // Three IOSurfaces absorb short ScreenCaptureKit scheduling
+                // jitter without retaining six full 4K frames. The Rust hand-
+                // off is independently bounded to two frames and drops on
+                // encoder backpressure, so a deeper native queue only adds
+                // memory and latency rather than useful resilience.
+                configuration.setQueueDepth(3);
                 configuration.setPixelFormat(0x4247_5241); // kCVPixelFormatType_32BGRA
                 configuration
                     .setCaptureResolution(objc2_screen_capture_kit::SCCaptureResolutionType::Best);
@@ -684,10 +710,14 @@ impl MacRecordingSession {
             });
             let state = Arc::new(DelegateState {
                 senders: Arc::downgrade(&senders),
+                capture_health: stream_capture_health,
                 audio_format: OnceLock::new(),
                 mic_format: OnceLock::new(),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 frames: std::sync::atomic::AtomicU64::new(0),
+                dropped_frames: std::sync::atomic::AtomicU64::new(0),
+                dropped_audio_chunks: std::sync::atomic::AtomicU64::new(0),
+                dropped_mic_chunks: std::sync::atomic::AtomicU64::new(0),
             });
 
             let delegate = KiriStreamDelegate::with_state(state);
@@ -763,8 +793,11 @@ impl MacRecordingSession {
                 .stopped
                 .store(true, std::sync::atomic::Ordering::Release);
             log::info!(
-                "MacRecordingSession: stopping after {} frames",
-                state.frames.load(std::sync::atomic::Ordering::Relaxed)
+                "MacRecordingSession: stopping after {} frames ({} dropped by backpressure)",
+                state.frames.load(std::sync::atomic::Ordering::Relaxed),
+                state
+                    .dropped_frames
+                    .load(std::sync::atomic::Ordering::Relaxed)
             );
             // Removing outputs prevents new sample delivery; the empty
             // synchronous task is then a FIFO drain barrier on the serial
@@ -801,6 +834,7 @@ impl MacRecordingSession {
             stop_tx,
             stop_done_rx,
             thread: Some(thread),
+            capture_health,
         })
     }
 
@@ -809,6 +843,10 @@ impl MacRecordingSession {
             return Ok(());
         }
         log::info!("MacRecordingSession: request_stop sending…");
+        // Mark user-initiated shutdown before signaling the stream thread so
+        // a synchronous didStopWithError callback cannot race into the
+        // unexpected-failure slot during normal teardown.
+        self.capture_health.begin_expected_stop();
         let _ = self.stop_tx.send(());
         // The result_rx is a one-shot used at start; the stop completion is
         // delivered on stop_done_rx. Waiting on result_rx here would
@@ -841,6 +879,9 @@ impl MacRecordingSession {
         // Drop would retry a consumed one-shot and detach the cleanup thread.
         join_result?;
         stop_result?;
+        if let Some(error) = self.capture_health.unexpected_failure() {
+            bail!("Screen capture stopped unexpectedly: {error}");
+        }
         log::info!("MacRecordingSession: request_stop done");
         Ok(())
     }
@@ -965,6 +1006,25 @@ fn deinterleave_f32(planar: &[u8], channels: u32, _format: AudioFormat) -> Vec<u
     interleaved
 }
 
+fn forward_audio_chunk(
+    tx: &AudioChunkSender,
+    payload: Vec<u8>,
+    dropped_chunks: &std::sync::atomic::AtomicU64,
+    source: &str,
+) {
+    match tx.try_send(payload) {
+        Ok(()) | Err(AudioQueueSendError::Closed) => {}
+        Err(error @ (AudioQueueSendError::Unconfigured | AudioQueueSendError::Overloaded)) => {
+            let dropped = dropped_chunks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if dropped == 1 || dropped.is_multiple_of(100) {
+                log::warn!(
+                    "MacRecordingSession: {source} queue rejected {dropped} chunks ({error:?})"
+                );
+            }
+        }
+    }
+}
+
 pub struct KiriStreamDelegateIvars {
     state: Arc<DelegateState>,
 }
@@ -1004,19 +1064,36 @@ objc2::define_class!(
                         .frames
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                         + 1;
-                    if count % 30 == 0 {
+                    if count.is_multiple_of(30) {
                         log::info!("MacRecordingSession: {count} frames captured");
                     }
-                    let _ = senders.video_tx.send(frame);
+                    if let Err(mpsc::TrySendError::Full(_)) = senders.video_tx.try_send(frame) {
+                        let dropped = state
+                            .dropped_frames
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                            + 1;
+                        if dropped == 1 || dropped.is_multiple_of(30) {
+                            log::warn!(
+                                "MacRecordingSession: encoder backpressure dropped {dropped} frames"
+                            );
+                        }
+                    }
                 }
             } else if of_type == SCStreamOutputType::Microphone {
                 if let Some(tx) = &senders.mic_tx {
                     let format = state.mic_format.get_or_init(|| {
-                        audio_format_from(buffer).unwrap_or(AudioFormat {
+                        let format = audio_format_from(buffer).unwrap_or(AudioFormat {
                             channels: 2,
                             is_float: true,
                             is_non_interleaved: false,
-                        })
+                        });
+                        log::info!(
+                            "MacRecordingSession: microphone format ch={} float={} non_interleaved={}",
+                            format.channels,
+                            format.is_float,
+                            format.is_non_interleaved,
+                        );
+                        format
                     });
                     if let Some(bytes) = copy_audio_buffer(buffer) {
                         let payload = if format.is_float && format.is_non_interleaved {
@@ -1024,31 +1101,31 @@ objc2::define_class!(
                         } else {
                             bytes
                         };
-                        let _ = tx.send(payload);
+                        forward_audio_chunk(tx, payload, &state.dropped_mic_chunks, "microphone");
                     }
                 }
             } else if let Some(tx) = &senders.audio_tx {
                 let format = state.audio_format.get_or_init(|| {
-                    audio_format_from(buffer).unwrap_or(AudioFormat {
+                    let format = audio_format_from(buffer).unwrap_or(AudioFormat {
                         channels: 2,
                         is_float: true,
                         is_non_interleaved: false,
-                    })
-                });
-                if let Some(bytes) = copy_audio_buffer(buffer) {
+                    });
                     log::info!(
-                        "MacRecordingSession: audio {} bytes, format ch={} float={} non_interleaved={}",
-                        bytes.len(),
+                        "MacRecordingSession: system audio format ch={} float={} non_interleaved={}",
                         format.channels,
                         format.is_float,
                         format.is_non_interleaved,
                     );
+                    format
+                });
+                if let Some(bytes) = copy_audio_buffer(buffer) {
                     let payload = if format.is_float && format.is_non_interleaved {
                         deinterleave_f32(&bytes, format.channels, *format)
                     } else {
                         bytes
                     };
-                    let _ = tx.send(payload);
+                    forward_audio_chunk(tx, payload, &state.dropped_audio_chunks, "system audio");
                 }
             }
         }
@@ -1056,8 +1133,18 @@ objc2::define_class!(
 
     unsafe impl SCStreamDelegate for KiriStreamDelegate {
         #[unsafe(method(stream:didStopWithError:))]
-        fn stream_didStopWithError(&self, _stream: &SCStream, _error: &NSError) {
-            // Stop is initiated by us; failures surface through stop().
+        fn stream_didStopWithError(&self, _stream: &SCStream, error: &NSError) {
+            let message = error.localizedDescription().to_string();
+            if self
+                .ivars()
+                .state
+                .capture_health
+                .report_unexpected_stop(message.clone())
+            {
+                log::error!(
+                    "MacRecordingSession: ScreenCaptureKit stopped unexpectedly: {message}"
+                );
+            }
         }
     }
 );
@@ -1075,7 +1162,7 @@ mod recording_lifetime_tests {
 
     #[test]
     fn native_delegate_owns_callback_state_and_frame_senders() {
-        let (video_tx, video_rx) = mpsc::channel();
+        let (video_tx, video_rx) = mpsc::sync_channel(crate::capture::VIDEO_FRAME_QUEUE_CAPACITY);
         let senders = Arc::new(DelegateSenders {
             video_tx,
             audio_tx: None,
@@ -1083,10 +1170,14 @@ mod recording_lifetime_tests {
         });
         let state = Arc::new(DelegateState {
             senders: Arc::downgrade(&senders),
+            capture_health: Arc::new(CaptureHealth::default()),
             audio_format: OnceLock::new(),
             mic_format: OnceLock::new(),
             stopped: std::sync::atomic::AtomicBool::new(false),
             frames: std::sync::atomic::AtomicU64::new(0),
+            dropped_frames: std::sync::atomic::AtomicU64::new(0),
+            dropped_audio_chunks: std::sync::atomic::AtomicU64::new(0),
+            dropped_mic_chunks: std::sync::atomic::AtomicU64::new(0),
         });
         let weak_state = Arc::downgrade(&state);
         let delegate = KiriStreamDelegate::with_state(state.clone());

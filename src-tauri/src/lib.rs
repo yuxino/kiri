@@ -85,6 +85,12 @@ pub fn run() {
             match event {
                 tauri::WindowEvent::CloseRequested { .. } => {}
                 tauri::WindowEvent::Destroyed => {
+                    if let Some(store) = window
+                        .app_handle()
+                        .try_state::<crate::protocol::ProtocolStore>()
+                    {
+                        crate::protocol::clear_pin_image_for_window_label(&store, window.label());
+                    }
                     if let Some(state) = window.app_handle().try_state::<AppState>() {
                         let label = window.label();
                         let destroyed_overlay = {
@@ -189,7 +195,10 @@ fn install_macos_app_icon() -> std::io::Result<()> {
     use objc2_app_kit::{NSApplication, NSImage};
     use objc2_foundation::NSData;
 
-    const APP_ICON: &[u8] = include_bytes!("../icons/icon.icns");
+    // The app bundle still carries the full multi-resolution ICNS. The bare
+    // release binary only needs a crisp 256 px Dock image at runtime, so avoid
+    // embedding the much larger ICNS a second time here.
+    const APP_ICON: &[u8] = include_bytes!("../icons/128x128@2x.png");
     let main_thread = MainThreadMarker::new()
         .ok_or_else(|| std::io::Error::other("app icon must be installed on the main thread"))?;
     let data = NSData::with_bytes(APP_ICON);

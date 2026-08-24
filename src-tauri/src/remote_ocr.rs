@@ -29,6 +29,8 @@ pub struct RemoteOcrClient {
 
 impl RemoteOcrClient {
     pub fn new() -> Result<Self, RemoteOcrError> {
+        ensure_ring_crypto_provider()?;
+
         let common = || {
             Client::builder()
                 .redirect(Policy::none())
@@ -109,6 +111,20 @@ impl RemoteOcrClient {
 
         parse_response(&bytes)
     }
+}
+
+/// Ensures reqwest's provider-neutral rustls backend has a process-wide provider.
+///
+/// Multiple callers may race during startup. Only one provider can win the global install, so a
+/// failed installation is harmless when another caller has already installed one.
+fn ensure_ring_crypto_provider() -> Result<(), RemoteOcrError> {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+
+    rustls::crypto::CryptoProvider::get_default()
+        .map(|_| ())
+        .ok_or(RemoteOcrError::ClientInitialization)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -283,11 +299,41 @@ pub enum RemoteOcrError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
 
     fn png_fixture() -> Vec<u8> {
         let mut png = PNG_SIGNATURE.to_vec();
         png.extend_from_slice(b"fixture");
         png
+    }
+
+    #[test]
+    fn client_initialization_installs_a_crypto_provider() {
+        let client = RemoteOcrClient::new();
+
+        assert!(client.is_ok());
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+    }
+
+    #[test]
+    fn client_initialization_is_idempotent_across_threads() {
+        const THREADS: usize = 8;
+        let barrier = Arc::new(Barrier::new(THREADS));
+        let handles = (0..THREADS)
+            .map(|_| {
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    RemoteOcrClient::new()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            assert!(handle.join().expect("client initializer panicked").is_ok());
+        }
+        assert!(rustls::crypto::CryptoProvider::get_default().is_some());
     }
 
     #[test]

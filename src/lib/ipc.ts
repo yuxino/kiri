@@ -170,8 +170,10 @@ export const api = {
 
   startCapture: () => invoke<CaptureContextDto>("start_capture"),
   cancelCapture: () => invoke<void>("cancel_capture"),
-  confirmCapture: (png: number[], action: string) =>
-    invoke<void>("confirm_capture", { request: { png, action } }),
+  confirmCapture: (png: Uint8Array, action: string) =>
+    invoke<void>("confirm_capture", png, {
+      headers: { "x-kiri-capture-action": action },
+    }),
   copyText: (text: string) => invoke<void>("copy_text", { text }),
   getOcrProviderSettings: () =>
     invoke<OcrProviderSettingsDto>("get_ocr_provider_settings"),
@@ -219,8 +221,20 @@ export const api = {
 
   saveFileDialog: (defaultName: string) =>
     invoke<string | null>("save_file_dialog", { defaultName }),
-  updateAsset: (id: string, request: { png: number[]; copyToClipboard: boolean; savePath: string | null }) =>
-    invoke<void>("update_asset", { id, request }),
+  updateAsset: (
+    id: string,
+    png: Uint8Array,
+    options: { copyToClipboard: boolean; savePath: string | null },
+  ) =>
+    invoke<void>("update_asset", png, {
+      headers: {
+        "x-kiri-asset-id": id,
+        "x-kiri-copy-to-clipboard": options.copyToClipboard ? "1" : "0",
+        ...(options.savePath
+          ? { "x-kiri-save-path": encodeURIComponent(options.savePath) }
+          : {}),
+      },
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -237,6 +251,10 @@ export function onError(handler: (error: ErrorDto) => void): Promise<UnlistenFn>
 
 export function onLibraryChanged(handler: () => void): Promise<UnlistenFn> {
   return listen("library-changed", handler);
+}
+
+export function onAssetContentChanged(handler: (assetId: string) => void): Promise<UnlistenFn> {
+  return listen<string>("asset-content-changed", (event) => handler(event.payload));
 }
 
 export function onRecordingState(

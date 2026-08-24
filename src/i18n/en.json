@@ -237,5 +237,11 @@
   "Send to %@": "Send to %@",
   "Some OCR credentials could not be read from system storage.": "Some OCR credentials could not be read from system storage.",
   "An old OCR credential could not be removed from system storage.": "An old OCR credential could not be removed from system storage.",
-  "Remote OCR settings are unavailable. Local OCR remains enabled.": "Remote OCR settings are unavailable. Local OCR remains enabled."
+  "Remote OCR settings are unavailable. Local OCR remains enabled.": "Remote OCR settings are unavailable. Local OCR remains enabled.",
+  "The current recording section failed. Earlier completed sections were saved as a partial recording.": "The current recording section failed. Earlier completed sections were saved as a partial recording.",
+  "Could not pause screen recording.": "Could not pause screen recording.",
+  "Could not pause screen recording. Kiri kept the completed sections so they are not lost.": "Could not pause screen recording. Kiri kept the completed sections so they are not lost.",
+  "Screen recording stopped unexpectedly. Earlier completed sections were saved as a partial recording.": "Screen recording stopped unexpectedly. Earlier completed sections were saved as a partial recording.",
+  "Could not save the recording.": "Could not save the recording.",
+  "Could not save the recording. Kiri kept the completed sections so they are not lost.": "Could not save the recording. Kiri kept the completed sections so they are not lost."
 }

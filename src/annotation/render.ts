@@ -29,7 +29,9 @@ function backgroundValue(style: TextBackgroundStyle): string | null {
 export interface RenderContext {
   ctx: CanvasRenderingContext2D;
   /** Full-resolution source image. */
-  sourceImage: HTMLCanvasElement;
+  sourceImage: CanvasImageSource;
+  sourceWidth: number;
+  sourceHeight: number;
   /** Display-local offset of the region top-left (points). */
   sourceOffset: Point;
   /** Display size of the region (points). */
@@ -281,8 +283,8 @@ function drawMosaicMark(
     width: Math.ceil(viewRect.width * r.scaleX),
     height: Math.ceil(viewRect.height * r.scaleY),
   };
-  const sourceW = r.sourceImage.width;
-  const sourceH = r.sourceImage.height;
+  const sourceW = r.sourceWidth;
+  const sourceH = r.sourceHeight;
   const cx = Math.max(0, Math.min(crop.x, sourceW));
   const cy = Math.max(0, Math.min(crop.y, sourceH));
   const cw = Math.max(1, Math.min(crop.width, sourceW - cx));

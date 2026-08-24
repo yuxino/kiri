@@ -3,7 +3,16 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { api, onError, onLibraryChanged, onNotice, type AssetDto, type ErrorDto, type NoticeDto } from "../lib/ipc";
+import {
+  api,
+  onAssetContentChanged,
+  onError,
+  onLibraryChanged,
+  onNotice,
+  type AssetDto,
+  type ErrorDto,
+  type NoticeDto,
+} from "../lib/ipc";
 import { t, fmt } from "../i18n";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import brandIcon from "../../src-tauri/icons/128x128.png";
@@ -13,8 +22,8 @@ import { SettingsView } from "../settings/SettingsView";
 type Section = "library" | "trash";
 type Destination = "captures" | "settings";
 
-function assetUrl(id: string): string {
-  return `kiri://asset/${id}`;
+function thumbnailUrl(id: string, revision: number): string {
+  return `kiri://thumbnail/${id}?v=${revision}`;
 }
 
 /** Groups assets by calendar day, newest group first. */
@@ -55,6 +64,7 @@ export function LibraryWindow() {
   const [destination, setDestination] = useState<Destination>("captures");
   const [query, setQuery] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [thumbnailRevisions, setThumbnailRevisions] = useState<Record<string, number>>({});
   const [notice, setNotice] = useState<NoticeDto | null>(null);
   const [error, setError] = useState<ErrorDto | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -265,7 +275,15 @@ export function LibraryWindow() {
 
   useEffect(() => {
     const subscriptions = [
-      onLibraryChanged(() => void refresh().catch(() => {})),
+      onLibraryChanged(() => {
+        void refresh().catch(() => {});
+      }),
+      onAssetContentChanged((assetId) => {
+        setThumbnailRevisions((revisions) => ({
+          ...revisions,
+          [assetId]: (revisions[assetId] ?? 0) + 1,
+        }));
+      }),
       onNotice((n) => {
         setNotice(n);
         setTimeout(() => {
@@ -764,6 +782,7 @@ export function LibraryWindow() {
                   <AssetCard
                     key={asset.id}
                     asset={asset}
+                    thumbnailRevision={thumbnailRevisions[asset.id] ?? 0}
                     menuOpen={menuFor === asset.id}
                     onMenu={(x, y) => openMenu(asset.id, x, y)}
                     menu={itemMenu(asset)}
@@ -920,6 +939,7 @@ function recoveryLabel(recovery: string): string {
 
 function AssetCard(props: {
   asset: AssetDto;
+  thumbnailRevision: number;
   menuOpen: boolean;
   onMenu(x: number, y: number): void;
   menu: React.ReactNode;
@@ -932,6 +952,7 @@ function AssetCard(props: {
 }) {
   const {
     asset,
+    thumbnailRevision,
     menuOpen,
     onMenu,
     menu,
@@ -944,6 +965,25 @@ function AssetCard(props: {
   } = props;
   const [hovered, setHovered] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const [previewVisible, setPreviewVisible] = useState(false);
+
+  // Keep only previews near the viewport mounted. Native lazy-loading delays
+  // the first decode, but does not release images after the user scrolls past
+  // them; unmounting does, while the fixed-height card preserves layout.
+  useEffect(() => {
+    const preview = previewRef.current;
+    if (!preview || typeof IntersectionObserver === "undefined") {
+      setPreviewVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => setPreviewVisible(entry.isIntersecting),
+      { rootMargin: "400px 0px" },
+    );
+    observer.observe(preview);
+    return () => observer.disconnect();
+  }, []);
   // Single-click toggles selection; a double-click opens instead. Delay the
   // toggle ~220ms and cancel it when a second click arrives (dblclick).
   const clickTimer = useRef<number | null>(null);
@@ -1049,6 +1089,7 @@ function AssetCard(props: {
         </div>
       )}
       <div
+        ref={previewRef}
         style={{
           height: 184,
           borderRadius: 14,
@@ -1059,11 +1100,13 @@ function AssetCard(props: {
           justifyContent: "center",
         }}
       >
-        {asset.kind === "image" ? (
+        {previewVisible && (asset.kind === "image" ? (
           <img
-            src={assetUrl(asset.id)}
+            src={thumbnailUrl(asset.id, thumbnailRevision)}
             alt=""
             draggable={false}
+            loading="lazy"
+            decoding="async"
             // Spec: scaledToFit + 5pt padding — the whole image is visible,
             // never cropped.
             style={{ width: "100%", height: "100%", objectFit: "contain", padding: 5, boxSizing: "border-box" }}
@@ -1071,9 +1114,11 @@ function AssetCard(props: {
         ) : asset.kind === "video" ? (
           <div style={{ position: "relative", width: "100%", height: "100%" }}>
             <img
-              src={assetUrl(asset.id)}
+              src={thumbnailUrl(asset.id, thumbnailRevision)}
               alt=""
               draggable={false}
+              loading="lazy"
+              decoding="async"
               style={{ width: "100%", height: "100%", objectFit: "contain", padding: 5, boxSizing: "border-box" }}
             />
             <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1086,16 +1131,18 @@ function AssetCard(props: {
         ) : (
           <div style={{ position: "relative", width: "100%", height: "100%" }}>
             <img
-              src={assetUrl(asset.id)}
+              src={thumbnailUrl(asset.id, thumbnailRevision)}
               alt=""
               draggable={false}
+              loading="lazy"
+              decoding="async"
               style={{ width: "100%", height: "100%", objectFit: "contain", padding: 5, boxSizing: "border-box" }}
             />
             <div style={{ position: "absolute", left: 8, bottom: 8, background: "rgba(0,0,0,0.6)", color: "#fff", borderRadius: 6, padding: "2px 6px", fontSize: 10, fontWeight: 600 }}>
               GIF
             </div>
           </div>
-        )}
+        ))}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, position: "relative" }}>
         {editingTitle ? (

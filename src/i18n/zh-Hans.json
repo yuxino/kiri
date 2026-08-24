@@ -237,5 +237,11 @@
   "Send to %@": "发送到 %@",
   "Some OCR credentials could not be read from system storage.": "无法从系统安全存储读取部分 OCR 凭据。",
   "An old OCR credential could not be removed from system storage.": "无法从系统安全存储移除旧的 OCR 凭据。",
-  "Remote OCR settings are unavailable. Local OCR remains enabled.": "远程 OCR 设置当前不可用，本地 OCR 仍保持启用。"
+  "Remote OCR settings are unavailable. Local OCR remains enabled.": "远程 OCR 设置当前不可用，本地 OCR 仍保持启用。",
+  "The current recording section failed. Earlier completed sections were saved as a partial recording.": "当前录制片段出现问题，之前完成的片段已另存为一段部分录制。",
+  "Could not pause screen recording.": "无法暂停屏幕录制。",
+  "Could not pause screen recording. Kiri kept the completed sections so they are not lost.": "无法暂停屏幕录制。Kiri 已保留之前完成的片段，以免丢失。",
+  "Screen recording stopped unexpectedly. Earlier completed sections were saved as a partial recording.": "屏幕录制意外停止，之前完成的片段已另存为一段部分录制。",
+  "Could not save the recording.": "无法保存录制。",
+  "Could not save the recording. Kiri kept the completed sections so they are not lost.": "无法保存录制。Kiri 已保留之前完成的片段，以免丢失。"
 }

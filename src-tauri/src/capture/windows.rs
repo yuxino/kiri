@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{anyhow, bail, Result};
 use windows_capture::capture::{CaptureControl, Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
-use windows_capture::graphics_capture_api::InternalCaptureControl;
+use windows_capture::graphics_capture_api::{GraphicsCaptureApi, InternalCaptureControl};
 use windows_capture::monitor::Monitor;
 use windows_capture::settings::{
     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
@@ -15,9 +15,9 @@ use windows_capture::settings::{
 };
 
 use crate::core::geometry::Rect;
-use crate::record::{AudioSampleFormat, AudioSpec};
+use crate::record::{AudioChunkSender, AudioQueueSendError, AudioSampleFormat, AudioSpec};
 
-use super::{CapturedDisplay, PlatformRecorder};
+use super::{CaptureHealth, CapturedDisplay, PlatformRecorder};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -103,7 +103,7 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
     }
 
     Ok(CapturedDisplay {
-        png_data: png_bytes,
+        png_data: png_bytes.into(),
         pixel_width: width,
         pixel_height: height,
         screen_frame: Rect::new(0.0, 0.0, width as f64 / scale, height as f64 / scale),
@@ -138,8 +138,10 @@ fn monitor_index(monitor: &xcap::Monitor) -> Result<u32> {
 // ---------------------------------------------------------------------------
 
 struct WinHandlerState {
-    video_tx: Option<mpsc::Sender<Vec<u8>>>,
+    video_tx: Option<super::VideoFrameSender>,
     region_px: PixelRegion,
+    dropped_frames: u64,
+    capture_health: Arc<CaptureHealth>,
 }
 
 #[derive(Clone, Copy)]
@@ -167,20 +169,39 @@ impl GraphicsCaptureApiHandler for WinCaptureHandler {
         frame: &mut Frame,
         _capture_control: InternalCaptureControl,
     ) -> std::result::Result<(), Self::Error> {
-        let state = self.slot.lock().unwrap();
+        let mut state = self.slot.lock().unwrap();
         let Some(tx) = state.video_tx.as_ref() else {
             return Ok(());
         };
-        let mut buffer = Vec::new();
-        let raw = frame.buffer()?.as_nopadding_buffer(&mut buffer).to_vec();
         let width = frame.width() as usize;
         let height = frame.height() as usize;
-        let out = crop_rgba_to_bgra(&raw, width, height, state.region_px);
-        let _ = tx.send(out);
+        let mut frame_buffer = frame.buffer()?;
+        let row_pitch = frame_buffer.row_pitch() as usize;
+        let out = crop_rgba_to_bgra(
+            frame_buffer.as_raw_buffer(),
+            width,
+            height,
+            row_pitch,
+            state.region_px,
+        );
+        drop(frame_buffer);
+        if let Err(mpsc::TrySendError::Full(_)) = tx.try_send(out) {
+            state.dropped_frames += 1;
+            if state.dropped_frames == 1 || state.dropped_frames.is_multiple_of(30) {
+                log::warn!(
+                    "WindowsRecorder: encoder backpressure dropped {} frames",
+                    state.dropped_frames
+                );
+            }
+        }
         Ok(())
     }
 
     fn on_closed(&mut self) -> std::result::Result<(), Self::Error> {
+        let health = Arc::clone(&self.slot.lock().unwrap().capture_health);
+        if health.report_unexpected_stop("Windows Graphics Capture closed the session.".into()) {
+            log::error!("WindowsRecorder: graphics capture closed unexpectedly");
+        }
         Ok(())
     }
 }
@@ -189,37 +210,69 @@ fn crop_rgba_to_bgra(
     raw: &[u8],
     frame_width: usize,
     frame_height: usize,
+    row_pitch: usize,
     region: PixelRegion,
 ) -> Vec<u8> {
     // Always return one complete encoder frame. A display-size transition or
     // an edge-rounding pixel must not shift every subsequent rawvideo frame.
-    let mut out = vec![0; region.width.saturating_mul(region.height).saturating_mul(4)];
-    if region.x >= frame_width || region.y >= frame_height {
+    let Some(output_len) = region
+        .width
+        .checked_mul(region.height)
+        .and_then(|pixels| pixels.checked_mul(4))
+    else {
+        return Vec::new();
+    };
+    let mut out = vec![0; output_len];
+    let Some(source_x) = region.x.checked_mul(4) else {
+        return out;
+    };
+    let Some(logical_row_bytes) = frame_width.checked_mul(4) else {
+        return out;
+    };
+    if region.x >= frame_width || region.y >= frame_height || row_pitch == 0 {
         return out;
     }
 
     let copy_width = region.width.min(frame_width - region.x);
     let copy_height = region.height.min(frame_height - region.y);
     for row in 0..copy_height {
-        let source_start = ((region.y + row) * frame_width + region.x).saturating_mul(4);
-        if source_start >= raw.len() {
+        let Some(source_row) = (region.y + row).checked_mul(row_pitch) else {
             break;
+        };
+        let Some(source_start) = source_row.checked_add(source_x) else {
+            break;
+        };
+        let source_end = source_row
+            .saturating_add(logical_row_bytes.min(row_pitch))
+            .min(raw.len());
+        if source_start >= source_end {
+            continue;
         }
-        let available_pixels = (raw.len() - source_start) / 4;
+        let available_pixels = (source_end - source_start) / 4;
         let row_pixels = copy_width.min(available_pixels);
         let destination_start = row * region.width * 4;
-        for column in 0..row_pixels {
-            let source = source_start + column * 4;
-            let destination = destination_start + column * 4;
-            out[destination..destination + 4].copy_from_slice(&[
-                raw[source + 2],
-                raw[source + 1],
-                raw[source],
-                raw[source + 3],
-            ]);
+        let source = &raw[source_start..source_start + row_pixels * 4];
+        let destination = &mut out[destination_start..destination_start + row_pixels * 4];
+        for (rgba, bgra) in source.chunks_exact(4).zip(destination.chunks_exact_mut(4)) {
+            bgra.copy_from_slice(&[rgba[2], rgba[1], rgba[0], rgba[3]]);
         }
     }
     out
+}
+
+fn recording_minimum_update_interval() -> MinimumUpdateIntervalSettings {
+    match GraphicsCaptureApi::is_minimum_update_interval_supported() {
+        Ok(true) => MinimumUpdateIntervalSettings::Custom(std::time::Duration::from_secs_f64(
+            1.0 / f64::from(crate::core::policy::RecordingPolicy::FRAMES_PER_SECOND),
+        )),
+        Ok(false) => MinimumUpdateIntervalSettings::Default,
+        Err(error) => {
+            log::warn!(
+                "WindowsRecorder: could not query capture frame-rate throttling support: {error}"
+            );
+            MinimumUpdateIntervalSettings::Default
+        }
+    }
 }
 
 pub struct WindowsRecorder {
@@ -227,6 +280,7 @@ pub struct WindowsRecorder {
     _audio_streams: Vec<cpal::Stream>,
     system_audio_spec: Option<AudioSpec>,
     microphone_spec: Option<AudioSpec>,
+    capture_health: Arc<CaptureHealth>,
 }
 
 impl WindowsRecorder {
@@ -235,9 +289,9 @@ impl WindowsRecorder {
         region: Rect,
         backing_scale: f64,
         options: crate::core::policy::RecordingOptions,
-        video_tx: mpsc::Sender<Vec<u8>>,
-        audio_tx: Option<mpsc::Sender<Vec<u8>>>,
-        mic_tx: Option<mpsc::Sender<Vec<u8>>>,
+        video_tx: super::VideoFrameSender,
+        audio_tx: Option<AudioChunkSender>,
+        mic_tx: Option<AudioChunkSender>,
     ) -> Result<WindowsRecorder> {
         if region.width < 2.0 || region.height < 2.0 {
             bail!("The recording region is too small.");
@@ -266,9 +320,12 @@ impl WindowsRecorder {
             CursorCaptureSettings::WithoutCursor
         };
 
+        let capture_health = Arc::new(CaptureHealth::default());
         let state_slot = Arc::new(Mutex::new(WinHandlerState {
             video_tx: Some(video_tx),
             region_px,
+            dropped_frames: 0,
+            capture_health: Arc::clone(&capture_health),
         }));
 
         let settings = Settings::new(
@@ -276,7 +333,7 @@ impl WindowsRecorder {
             cursor,
             DrawBorderSettings::WithoutBorder,
             SecondaryWindowSettings::Default,
-            MinimumUpdateIntervalSettings::Default,
+            recording_minimum_update_interval(),
             DirtyRegionSettings::Default,
             ColorFormat::Rgba8,
             state_slot,
@@ -290,6 +347,7 @@ impl WindowsRecorder {
             _audio_streams: audio.streams,
             system_audio_spec: audio.system_audio_spec,
             microphone_spec: audio.microphone_spec,
+            capture_health,
         })
     }
 
@@ -306,8 +364,12 @@ impl PlatformRecorder for WindowsRecorder {
     fn stop(&mut self) -> Result<()> {
         // `CaptureControl::stop` consumes itself, so take it out of the slot
         // and drop it after the capture thread has been joined.
+        self.capture_health.begin_expected_stop();
         if let Some(control) = self.control.take() {
             control.stop().map_err(|e| anyhow!("{e}"))?;
+        }
+        if let Some(error) = self.capture_health.unexpected_failure() {
+            bail!("Screen capture stopped unexpectedly: {error}");
         }
         Ok(())
     }
@@ -315,8 +377,8 @@ impl PlatformRecorder for WindowsRecorder {
 
 fn start_audio(
     options: crate::core::policy::RecordingOptions,
-    audio_tx: Option<mpsc::Sender<Vec<u8>>>,
-    mic_tx: Option<mpsc::Sender<Vec<u8>>>,
+    audio_tx: Option<AudioChunkSender>,
+    mic_tx: Option<AudioChunkSender>,
 ) -> Result<StartedAudio> {
     let mut streams = Vec::new();
     let mut system_audio_spec = None;
@@ -365,7 +427,7 @@ enum AudioDeviceKind {
 fn build_audio_stream(
     device: &cpal::Device,
     kind: AudioDeviceKind,
-    tx: mpsc::Sender<Vec<u8>>,
+    tx: AudioChunkSender,
 ) -> Result<(cpal::Stream, AudioSpec)> {
     let config = preferred_audio_config(device, kind)?;
     let format = match config.sample_format() {
@@ -379,14 +441,31 @@ fn build_audio_stream(
         channels: u32::from(config.channels()),
         format,
     };
+    tx.configure(spec)?;
+    let dropped_chunks = std::sync::atomic::AtomicU64::new(0);
+    let error_tx = tx.clone();
     let stream = device
         .build_input_stream_raw(
             config.config(),
             config.sample_format(),
-            move |data, _| {
-                let _ = tx.send(data.bytes().to_vec());
+            move |data, _| match tx.try_send(data.bytes().to_vec()) {
+                Ok(()) | Err(AudioQueueSendError::Closed) => {}
+                Err(
+                    error @ (AudioQueueSendError::Unconfigured | AudioQueueSendError::Overloaded),
+                ) => {
+                    let dropped =
+                        dropped_chunks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if dropped == 1 || dropped.is_multiple_of(100) {
+                        log::warn!(
+                            "WindowsRecorder: audio queue rejected {dropped} chunks ({error:?})"
+                        );
+                    }
+                }
             },
-            |_| {},
+            move |error| {
+                log::error!("WindowsRecorder: audio input stream failed: {error}");
+                error_tx.report_capture_failure();
+            },
             None,
         )
         .map_err(|error| anyhow!("Could not start the audio input stream: {error}"))?;
@@ -495,23 +574,42 @@ mod tests {
     }
 
     #[test]
-    fn crop_produces_exact_bgra_frame_and_pads_display_edges() {
+    fn crop_honors_row_padding_and_swaps_rgba_to_bgra() {
+        let rgba = [
+            1, 2, 3, 4, 5, 6, 7, 8, 99, 99, 99, 99, // row 0 + padding
+            9, 10, 11, 12, 13, 14, 15, 16, 88, 88, 88, 88, // row 1 + padding
+        ];
+        let region = PixelRegion {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+        };
+
+        let cropped = crop_rgba_to_bgra(&rgba, 2, 2, 12, region);
+        assert_eq!(cropped.len(), 2 * 2 * 4);
+        assert_eq!(
+            cropped,
+            [3, 2, 1, 4, 7, 6, 5, 8, 11, 10, 9, 12, 15, 14, 13, 16]
+        );
+    }
+
+    #[test]
+    fn crop_produces_exact_frame_and_pads_out_of_bounds_pixels() {
         let rgba = [
             1, 2, 3, 255, 4, 5, 6, 255, // row 0
             7, 8, 9, 255, 10, 11, 12, 255, // row 1
         ];
         let region = PixelRegion {
             x: 1,
-            y: 0,
+            y: 1,
             width: 2,
             height: 2,
         };
 
-        let cropped = crop_rgba_to_bgra(&rgba, 2, 2, region);
+        let cropped = crop_rgba_to_bgra(&rgba, 2, 2, 8, region);
         assert_eq!(cropped.len(), 2 * 2 * 4);
-        assert_eq!(&cropped[0..4], &[6, 5, 4, 255]);
-        assert_eq!(&cropped[4..8], &[0, 0, 0, 0]);
-        assert_eq!(&cropped[8..12], &[12, 11, 10, 255]);
-        assert_eq!(&cropped[12..16], &[0, 0, 0, 0]);
+        assert_eq!(&cropped[0..4], &[12, 11, 10, 255]);
+        assert!(cropped[4..].iter().all(|byte| *byte == 0));
     }
 }

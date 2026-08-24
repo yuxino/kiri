@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::commands::RectDto;
@@ -173,7 +175,7 @@ pub async fn recognize_prepared_ocr_remote(
         (
             state.ocr_requests.clone(),
             state.ocr_providers.clone(),
-            state.remote_ocr.clone(),
+            state.remote_ocr(),
         )
     };
     let lease = requests
@@ -295,7 +297,7 @@ fn require_active_overlay(
 }
 
 struct FrozenPngSource {
-    png: Vec<u8>,
+    png: Arc<[u8]>,
     declared_width: i64,
     declared_height: i64,
     display_width: f64,
@@ -332,7 +334,7 @@ fn crop_frozen_png(source: FrozenPngSource, selection: RectDto) -> Result<Croppe
     {
         return Err("The OCR selection is invalid.".into());
     }
-    let image = image::load_from_memory_with_format(&source.png, image::ImageFormat::Png)
+    let image = image::load_from_memory_with_format(source.png.as_ref(), image::ImageFormat::Png)
         .map_err(|_| "The frozen capture image is invalid.".to_string())?;
     let actual_width = image.width();
     let actual_height = image.height();
@@ -378,7 +380,7 @@ mod tests {
             .write_to(&mut png, image::ImageFormat::Png)
             .unwrap();
         FrozenPngSource {
-            png: png.into_inner(),
+            png: png.into_inner().into(),
             declared_width: 8,
             declared_height: 6,
             display_width: 4.0,

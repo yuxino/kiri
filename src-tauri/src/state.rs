@@ -29,7 +29,7 @@ pub struct AppState {
         std::sync::Mutex<Option<Box<dyn crate::platform::ClickMonitorHandle + Send>>>,
     pub ocr_providers: Arc<crate::ocr_controller::OcrProviderManager>,
     pub ocr_requests: Arc<crate::ocr_controller::OcrRequestController>,
-    pub remote_ocr: Option<crate::remote_ocr::RemoteOcrClient>,
+    remote_ocr: std::sync::OnceLock<Option<crate::remote_ocr::RemoteOcrClient>>,
 }
 
 #[derive(Default)]
@@ -172,6 +172,14 @@ impl RecordingFlow {
         self.active.take()
     }
 
+    /// Transfers finalized segment files to the caller before a failed live
+    /// segment resets the session. Keeping these paths out of the abandoned
+    /// flow prevents generic cleanup from deleting already-valid recording
+    /// data while it is being imported as a partial recording.
+    pub fn take_completed_segments(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.segments)
+    }
+
     /// Atomically moves every session-owned resource out and leaves an idle
     /// flow. Callers can then stop native handles and delete temporary files
     /// without holding the recording mutex.
@@ -252,7 +260,7 @@ impl AppState {
             click_monitor: std::sync::Mutex::new(None),
             ocr_providers,
             ocr_requests: Arc::new(crate::ocr_controller::OcrRequestController::default()),
-            remote_ocr: crate::remote_ocr::RemoteOcrClient::new().ok(),
+            remote_ocr: std::sync::OnceLock::new(),
         })
     }
 
@@ -267,6 +275,15 @@ impl AppState {
 
     pub fn asset_file_url(&self, asset: &CaptureAsset) -> PathBuf {
         self.library_root.join("Assets").join(&asset.filename)
+    }
+
+    /// Remote OCR is opt-in, so avoid constructing TLS/proxy connection pools
+    /// for the common local-only path. A failed initialization is cached too,
+    /// preventing repeated setup work during one app session.
+    pub fn remote_ocr(&self) -> Option<crate::remote_ocr::RemoteOcrClient> {
+        self.remote_ocr
+            .get_or_init(|| crate::remote_ocr::RemoteOcrClient::new().ok())
+            .clone()
     }
 }
 
@@ -565,6 +582,10 @@ pub fn emit_library_changed(app: &AppHandle) {
     let _ = app.emit("library-changed", ());
 }
 
+pub fn emit_asset_content_changed(app: &AppHandle, asset_id: &uuid::Uuid) {
+    let _ = app.emit("asset-content-changed", asset_id.to_string());
+}
+
 pub fn recording_state(state: &RecordingFlow) -> RecordingStateDto {
     let elapsed = state.elapsed_before_segment
         + state
@@ -698,7 +719,7 @@ mod tests {
             session: Some(CaptureSession {
                 capture_id,
                 display: CapturedDisplay {
-                    png_data: vec![1],
+                    png_data: vec![1].into(),
                     pixel_width: 1,
                     pixel_height: 1,
                     screen_frame: Rect::new(0.0, 0.0, 1.0, 1.0),
@@ -781,6 +802,25 @@ mod tests {
         assert!(!flow.is_recording);
         assert!(!flow.is_paused);
         assert!(flow.active.is_none());
+    }
+
+    #[test]
+    fn completed_segments_can_be_transferred_before_failure_cleanup() {
+        let first = std::path::PathBuf::from("completed-1.mp4");
+        let second = std::path::PathBuf::from("completed-2.mp4");
+        let mut flow = RecordingFlow {
+            is_transitioning: true,
+            segments: vec![first.clone(), second.clone()],
+            active: Some(ActiveRecording::default()),
+            ..Default::default()
+        };
+
+        let recoverable = flow.take_completed_segments();
+        let abandoned = flow.take_and_reset();
+
+        assert_eq!(recoverable, vec![first, second]);
+        assert!(abandoned.segments.is_empty());
+        assert!(abandoned.active.is_some());
     }
 
     #[test]

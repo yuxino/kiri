@@ -34,7 +34,7 @@ export function ViewerWindow(props: { id: string }) {
     void getCurrentWindow().close();
   };
 
-  const isVideo = asset?.kind === "video" || asset?.kind === "gif";
+  const isVideo = asset?.kind === "video";
 
   return (
     <div
@@ -58,6 +58,8 @@ export function ViewerWindow(props: { id: string }) {
           src={mediaUrl(props.id)}
           controls
           autoPlay
+          preload="metadata"
+          onError={() => setFailed(true)}
           style={{ maxWidth: "100%", maxHeight: "100%" }}
         />
       ) : (
@@ -66,6 +68,7 @@ export function ViewerWindow(props: { id: string }) {
           src={mediaUrl(props.id)}
           alt=""
           draggable={false}
+          onError={() => setFailed(true)}
           style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
         />
       )}

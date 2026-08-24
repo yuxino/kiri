@@ -237,5 +237,11 @@
   "Send to %@": "%@ に送信",
   "Some OCR credentials could not be read from system storage.": "一部の OCR 資格情報をシステムストレージから読み取れませんでした。",
   "An old OCR credential could not be removed from system storage.": "古い OCR 資格情報をシステムストレージから削除できませんでした。",
-  "Remote OCR settings are unavailable. Local OCR remains enabled.": "リモート OCR 設定は現在使用できません。ローカル OCR は引き続き有効です。"
+  "Remote OCR settings are unavailable. Local OCR remains enabled.": "リモート OCR 設定は現在使用できません。ローカル OCR は引き続き有効です。",
+  "The current recording section failed. Earlier completed sections were saved as a partial recording.": "現在の録画セクションで問題が発生しました。先に完了したセクションは部分録画として保存されました。",
+  "Could not pause screen recording.": "画面収録を一時停止できませんでした。",
+  "Could not pause screen recording. Kiri kept the completed sections so they are not lost.": "画面収録を一時停止できませんでした。完了済みのセクションは失われないよう Kiri が保持しています。",
+  "Screen recording stopped unexpectedly. Earlier completed sections were saved as a partial recording.": "画面収録が予期せず停止しました。先に完了したセクションは部分録画として保存されました。",
+  "Could not save the recording.": "録画を保存できませんでした。",
+  "Could not save the recording. Kiri kept the completed sections so they are not lost.": "録画を保存できませんでした。完了済みのセクションは失われないよう Kiri が保持しています。"
 }

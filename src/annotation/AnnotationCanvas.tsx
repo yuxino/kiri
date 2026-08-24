@@ -120,23 +120,13 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       brushCursorRef.current = brushCursor;
     }, [editing, brushCursor]);
 
-    // Convert the HTMLImageElement to a canvas for pixel access. Built lazily
-    // once the image is fully decoded (drawImage on a loading image yields a
-    // blank canvas that would corrupt the export).
-    const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
-    const ensureSourceCanvas = useCallback((): HTMLCanvasElement | null => {
+    // Canvas drawImage can crop directly from the decoded HTMLImageElement.
+    // Keeping a second full-resolution source canvas would duplicate the
+    // image's RGBA surface for the whole annotation session.
+    const getSourceImage = useCallback((): HTMLImageElement | null => {
       const img = imageRef.current;
       if (!img || !img.complete || img.naturalWidth === 0) return null;
-      const cached = sourceCanvasRef.current;
-      if (cached && cached.width === img.naturalWidth && cached.height === img.naturalHeight) {
-        return cached;
-      }
-      const c = document.createElement("canvas");
-      c.width = img.naturalWidth;
-      c.height = img.naturalHeight;
-      c.getContext("2d")!.drawImage(img, 0, 0);
-      sourceCanvasRef.current = c;
-      return c;
+      return img;
     }, []);
 
     const view = useMemo(() => {
@@ -157,16 +147,18 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      const sourceCanvas = ensureSourceCanvas();
-      if (!sourceCanvas) return;
+      const sourceImage = getSourceImage();
+      if (!sourceImage) return;
       ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
       const context: RenderContext = {
         ctx,
-        sourceImage: sourceCanvas,
+        sourceImage,
+        sourceWidth: sourceImage.naturalWidth,
+        sourceHeight: sourceImage.naturalHeight,
         sourceOffset: { x: region.x, y: region.y },
         regionSize: { x: 0, y: 0, width: region.width, height: region.height },
-        scaleX: sourceCanvas.width / (displaySize?.width ?? region.width),
-        scaleY: sourceCanvas.height / (displaySize?.height ?? region.height),
+        scaleX: sourceImage.naturalWidth / (displaySize?.width ?? region.width),
+        scaleY: sourceImage.naturalHeight / (displaySize?.height ?? region.height),
         exporting: false,
       };
       renderAll(context, marks, {
@@ -176,7 +168,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         selectedIndex: editing ? null : selectedIndex,
         editingIndex: editing ? editing.index : null,
       });
-    }, [marks, draft, brushCursor, selectedIndex, editing, region, ensureSourceCanvas]);
+    }, [marks, draft, brushCursor, selectedIndex, editing, region, displaySize, getSourceImage]);
 
     useEffect(() => {
       redraw();
@@ -702,17 +694,19 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
               return null;
             }
           }
-          const sourceCanvas = ensureSourceCanvas();
-          if (!sourceCanvas) return null;
+          const sourceImage = getSourceImage();
+          if (!sourceImage) return null;
           const out = document.createElement("canvas");
-          const scaleX = sourceCanvas.width / (displaySize?.width ?? region.width);
-          const scaleY = sourceCanvas.height / (displaySize?.height ?? region.height);
+          const scaleX = sourceImage.naturalWidth / (displaySize?.width ?? region.width);
+          const scaleY = sourceImage.naturalHeight / (displaySize?.height ?? region.height);
           out.width = Math.round(region.width * scaleX);
           out.height = Math.round(region.height * scaleY);
           const ctx = out.getContext("2d")!;
           const context: RenderContext = {
             ctx,
-            sourceImage: sourceCanvas,
+            sourceImage,
+            sourceWidth: sourceImage.naturalWidth,
+            sourceHeight: sourceImage.naturalHeight,
             sourceOffset: { x: region.x, y: region.y },
             regionSize: { x: 0, y: 0, width: region.width, height: region.height },
             scaleX,
@@ -723,14 +717,23 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           const blob = await new Promise<Blob | null>((resolve) =>
             out.toBlob(resolve, "image/png"),
           );
-          if (!blob) return null;
-          return new Uint8Array(await blob.arrayBuffer());
+          if (!blob) {
+            out.width = 0;
+            out.height = 0;
+            return null;
+          }
+          const bytes = new Uint8Array(await blob.arrayBuffer());
+          // Release the large export backing store immediately instead of
+          // waiting for a later garbage-collection cycle.
+          out.width = 0;
+          out.height = 0;
+          return bytes;
         },
         beginTextFontSizeAdjustment: () => beginFontAdjustRef.current(),
         setTextFontSizeLive: (value: number) => setFontLiveRef.current(value),
         endTextFontSizeAdjustment: () => endFontAdjustRef.current(),
       }),
-      [commitText, region, displaySize, ensureSourceCanvas, syncMarks],
+      [commitText, region, displaySize, getSourceImage, syncMarks],
     );
 
     return (

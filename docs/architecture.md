@@ -24,8 +24,10 @@ outside the Tauri CLI.
 
 ## Window model
 
-All windows share the Vite bundle and select their React root through the
-`?window=` query parameter.
+All windows share the Vite entry point and select their React root through the
+`?window=` query parameter. Each root is loaded as its own dynamic chunk, so a
+small utility window does not parse and retain the library, overlay, and editor
+modules.
 
 | Label | Purpose |
 | --- | --- |
@@ -50,12 +52,15 @@ unrestricted filesystem path.
    the previously focused application.
 2. macOS freezes the active display with ScreenCaptureKit. Windows uses the
    Windows Graphics Capture path exposed through `xcap`.
-3. Rust keeps the full frozen PNG in session memory and gives the overlay a
-   capture-scoped, unguessable `kiri://` URL. The image is not written to disk.
+3. Rust keeps one reference-counted allocation for the full frozen PNG and
+   shares it with the session, OCR preparation, and custom protocol. The
+   overlay receives a capture-scoped, unguessable `kiri://` URL. The image is
+   not written to disk.
 4. The overlay performs window hit testing, region selection, and annotation.
 5. Screenshot confirmation sends only the rendered selected PNG to Rust. Rust
-   imports it into the local library, copies it to the clipboard, tears down the
-   session, and restores focus.
+   validates its header and decodes it under capture-sized allocation limits,
+   then imports it into the local library, copies it to the clipboard, tears
+   down the session, and restores focus.
 
 Escape cancels the active session and releases its frozen image. There is no
 runtime synthetic-desktop or temporary-library mode in development or
@@ -87,10 +92,29 @@ ScreenCaptureKit. Windows uses Windows Graphics Capture plus WASAPI through
 30 fps H.264/HEVC MP4 with AAC audio. Hardware encoding is probed first and
 falls back to `libx264`.
 
+The native-to-encoder video handoff has a hard two-frame capacity. On macOS,
+ScreenCaptureKit's native IOSurface queue is independently limited to three
+frames. On Windows, WGC delivery is throttled to the 30 fps recording policy
+when the OS supports it, and the selected region is copied directly from the
+mapped row-stride buffer without first duplicating the full display. Capture
+callbacks never grow an unbounded queue of raw Retina/DPI frames: when FFmpeg
+cannot keep up, a frame is dropped and the event is sampled in the log. FFmpeg
+resolution and hardware-encoder probing finish before native capture starts.
+
+Each audio input has an independent byte-bounded queue sized to roughly 250 ms
+of its native PCM format, plus a 128-chunk ceiling. Encoder attachment discards
+the short startup pre-roll atomically. A dropped chunk, native device fault,
+audio-pipe failure, or post-attachment handoff longer than 150 ms invalidates
+and removes the segment instead of saving a recording with silent A/V drift.
+
 Pause closes the current segment; resume starts a compatible segment; stop
-merges the segments into one library asset. Kiri control windows are excluded
-from exported frames, while an enabled click-ripple window is intentionally
-included.
+merges the segments into one library asset. If a live segment loses integrity,
+previously completed segments are moved out of cleanup ownership and imported
+as a partial recording. FFmpeg probes and segment finalization have hard
+deadlines; long merges use an output-progress watchdog so legitimate long
+re-encodes are not constrained by a short total timeout. Kiri control windows
+are excluded from exported frames, while an enabled click-ripple window is
+intentionally included.
 
 Kiri does not bundle FFmpeg. A recording or explicit GIF conversion resolves a
 validated local copy first, otherwise downloads a version-pinned archive,
@@ -107,6 +131,14 @@ and thumbnail generation never trigger that download.
   never appear in that JSON, IPC responses, or logs.
 - Credential replacement and deletion use a non-secret journal so interrupted
   Keychain/Credential Manager updates can be reconciled on startup.
+- Video playback requires a valid single byte range and reads at most 1 MiB
+  per protocol response; missing or malformed ranges are rejected instead of
+  materializing an entire recording. The library mounts only near-viewport,
+  640-pixel previews; image thumbnails downsample through ImageIO on macOS and
+  WIC on Windows before PNG encoding. Generated thumbnails use a 32 MiB/256-
+  entry LRU cache with a 15-second decoder deadline. Edited assets invalidate
+  only their own browser preview, permanently deleted assets are evicted
+  immediately, and a pinned image is released when its window is destroyed.
 
 Tests must use temporary directories and fake transports. They must never read,
 write, or delete the user's capture library.

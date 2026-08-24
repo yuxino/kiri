@@ -3,16 +3,39 @@ import ReactDOM from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import "./styles/design-system.css";
 import { onLanguageChange, setLanguage } from "./i18n";
-import { OverlayWindow } from "./windows/OverlayWindow";
-import { LibraryWindow } from "./windows/LibraryWindow";
-import { CountdownWindow } from "./windows/CountdownWindow";
-import { ControlPanelWindow } from "./windows/ControlPanelWindow";
-import { RippleWindow } from "./windows/RippleWindow";
-import { PinWindow } from "./windows/PinWindow";
-import { EditorWindow } from "./windows/EditorWindow";
-import { ViewerWindow } from "./windows/ViewerWindow";
-import { ToastWindow } from "./windows/ToastWindow";
-import { ConfirmWindow } from "./windows/ConfirmWindow";
+
+const OverlayWindow = React.lazy(() =>
+  import("./windows/OverlayWindow").then((module) => ({ default: module.OverlayWindow })),
+);
+const LibraryWindow = React.lazy(() =>
+  import("./windows/LibraryWindow").then((module) => ({ default: module.LibraryWindow })),
+);
+const CountdownWindow = React.lazy(() =>
+  import("./windows/CountdownWindow").then((module) => ({ default: module.CountdownWindow })),
+);
+const ControlPanelWindow = React.lazy(() =>
+  import("./windows/ControlPanelWindow").then((module) => ({
+    default: module.ControlPanelWindow,
+  })),
+);
+const RippleWindow = React.lazy(() =>
+  import("./windows/RippleWindow").then((module) => ({ default: module.RippleWindow })),
+);
+const PinWindow = React.lazy(() =>
+  import("./windows/PinWindow").then((module) => ({ default: module.PinWindow })),
+);
+const EditorWindow = React.lazy(() =>
+  import("./windows/EditorWindow").then((module) => ({ default: module.EditorWindow })),
+);
+const ViewerWindow = React.lazy(() =>
+  import("./windows/ViewerWindow").then((module) => ({ default: module.ViewerWindow })),
+);
+const ToastWindow = React.lazy(() =>
+  import("./windows/ToastWindow").then((module) => ({ default: module.ToastWindow })),
+);
+const ConfirmWindow = React.lazy(() =>
+  import("./windows/ConfirmWindow").then((module) => ({ default: module.ConfirmWindow })),
+);
 
 // Resolve the UI language at startup: a manually chosen language persisted
 // by the backend (language.json in the app config dir) wins; otherwise fall
@@ -105,6 +128,8 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <React.Suspense fallback={null}>
+      <App />
+    </React.Suspense>
   </React.StrictMode>,
 );

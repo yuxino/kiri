@@ -1,11 +1,14 @@
 //! Recording encoder — pipes raw video/audio frames into FFmpeg and produces
 //! the application's H.264/HEVC + AAC MP4 output.
 
-use std::io::Write;
+use std::collections::VecDeque;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::{mpsc, Mutex, OnceLock};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Condvar, Mutex, OnceLock};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use once_cell::sync::OnceCell;
@@ -32,6 +35,14 @@ impl AudioSampleFormat {
             Self::U16 => "u16le",
         }
     }
+
+    fn bytes_per_sample(self) -> u64 {
+        match self {
+            Self::F32 => 4,
+            #[cfg(windows)]
+            Self::I16 | Self::U16 => 2,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +56,386 @@ impl AudioSpec {
     fn ffmpeg_format(&self) -> &'static str {
         self.format.ffmpeg_format()
     }
+
+    fn queue_byte_budget(self, latency: Duration) -> Result<usize> {
+        if self.sample_rate == 0 || self.channels == 0 {
+            bail!("Audio capture reported an invalid stream format.");
+        }
+        let bytes_per_second = u128::from(self.sample_rate)
+            .checked_mul(u128::from(self.channels))
+            .and_then(|value| value.checked_mul(u128::from(self.format.bytes_per_sample())))
+            .context("audio stream format is too large")?;
+        let byte_nanos = bytes_per_second
+            .checked_mul(latency.as_nanos())
+            .context("audio queue budget is too large")?;
+        let bytes = byte_nanos.div_ceil(1_000_000_000).max(1);
+        usize::try_from(bytes).context("audio queue budget does not fit this platform")
+    }
+}
+
+/// Native audio callbacks must never wait for FFmpeg: doing so can stall the
+/// OS capture queue (and, on macOS, video delivery on the same serial queue).
+/// Keep at most a short slice of PCM per input. If this queue ever overflows,
+/// the segment is rejected at finalization instead of silently saving audio
+/// whose content timeline may no longer match the video.
+pub const AUDIO_QUEUE_MAX_LATENCY: Duration = Duration::from_millis(250);
+/// Queue + pipe hand-off older than this is no longer safe to timestamp as
+/// current audio. It is deliberately below the storage bound so a segment is
+/// rejected before a near-full 250 ms backlog can be saved as audible drift.
+pub const AUDIO_QUEUE_MAX_RESIDENCE: Duration = Duration::from_millis(150);
+const AUDIO_QUEUE_MAX_CHUNKS: usize = 128;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioQueueSendError {
+    Closed,
+    Unconfigured,
+    Overloaded,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct AudioQueueSnapshot {
+    queued_bytes: usize,
+    dropped_chunks: u64,
+    dropped_bytes: u64,
+    late_chunks: u64,
+    max_residence: Duration,
+    capture_failed: bool,
+    writer_failed: bool,
+}
+
+struct QueuedAudioChunk {
+    bytes: Vec<u8>,
+    enqueued_at: Option<Instant>,
+}
+
+struct AudioQueueState {
+    chunks: VecDeque<QueuedAudioChunk>,
+    queued_bytes: usize,
+    max_queued_bytes: Option<usize>,
+    max_chunks: usize,
+    sender_count: usize,
+    receiver_open: bool,
+    consumer_attached: bool,
+    dropped_chunks: u64,
+    dropped_bytes: u64,
+    late_chunks: u64,
+    max_residence: Duration,
+    capture_failed: bool,
+    writer_failed: bool,
+}
+
+struct AudioQueueShared {
+    state: Mutex<AudioQueueState>,
+    ready: Condvar,
+}
+
+#[derive(Clone)]
+struct AudioQueueStatus {
+    shared: Arc<AudioQueueShared>,
+}
+
+impl AudioQueueStatus {
+    fn snapshot(&self) -> AudioQueueSnapshot {
+        let state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        AudioQueueSnapshot {
+            queued_bytes: state.queued_bytes,
+            dropped_chunks: state.dropped_chunks,
+            dropped_bytes: state.dropped_bytes,
+            late_chunks: state.late_chunks,
+            max_residence: state.max_residence,
+            capture_failed: state.capture_failed,
+            writer_failed: state.writer_failed,
+        }
+    }
+}
+
+pub struct AudioChunkSender {
+    shared: Arc<AudioQueueShared>,
+}
+
+impl Clone for AudioChunkSender {
+    fn clone(&self) -> Self {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.sender_count += 1;
+        drop(state);
+        Self {
+            shared: Arc::clone(&self.shared),
+        }
+    }
+}
+
+impl AudioChunkSender {
+    /// Configures the byte bound from the native PCM format before callbacks
+    /// begin. Repeating the same configuration is harmless; changing it after
+    /// data has arrived is rejected.
+    pub fn configure(&self, spec: AudioSpec) -> Result<()> {
+        let byte_budget = spec.queue_byte_budget(AUDIO_QUEUE_MAX_LATENCY)?;
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        match state.max_queued_bytes {
+            Some(existing) if existing != byte_budget => {
+                bail!("Audio capture changed format after its queue was configured.")
+            }
+            Some(_) => {}
+            None if state.chunks.is_empty() => state.max_queued_bytes = Some(byte_budget),
+            None => bail!("Audio data arrived before its queue was configured."),
+        }
+        Ok(())
+    }
+
+    /// Non-blocking send for real-time/native callbacks.
+    pub fn try_send(&self, chunk: Vec<u8>) -> std::result::Result<(), AudioQueueSendError> {
+        if chunk.is_empty() {
+            return Ok(());
+        }
+        let payload_bytes = chunk.len();
+        // Native producers allocate exact-sized chunks in normal operation.
+        // Accounting capacity makes an accidentally over-allocated Vec unable
+        // to bypass the memory budget.
+        let allocated_bytes = chunk.capacity().max(payload_bytes);
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.receiver_open {
+            return Err(AudioQueueSendError::Closed);
+        }
+        let Some(max_queued_bytes) = state.max_queued_bytes else {
+            record_audio_drop(&mut state, payload_bytes);
+            return Err(AudioQueueSendError::Unconfigured);
+        };
+        let exceeds_bytes = allocated_bytes > max_queued_bytes.saturating_sub(state.queued_bytes);
+        if exceeds_bytes || state.chunks.len() >= state.max_chunks {
+            record_audio_drop(&mut state, payload_bytes);
+            return Err(AudioQueueSendError::Overloaded);
+        }
+        state.queued_bytes += allocated_bytes;
+        let enqueued_at = state.consumer_attached.then(Instant::now);
+        state.chunks.push_back(QueuedAudioChunk {
+            bytes: chunk,
+            enqueued_at,
+        });
+        self.shared.ready.notify_one();
+        Ok(())
+    }
+
+    /// Records a native-device failure without allocating or retaining the
+    /// platform error text on a real-time callback.
+    #[cfg(any(windows, test))]
+    pub fn report_capture_failure(&self) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.capture_failed = true;
+    }
+}
+
+impl Drop for AudioChunkSender {
+    fn drop(&mut self) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.sender_count = state.sender_count.saturating_sub(1);
+        if state.sender_count == 0 {
+            self.shared.ready.notify_all();
+        }
+    }
+}
+
+pub struct AudioChunkReceiver {
+    shared: Arc<AudioQueueShared>,
+}
+
+enum AudioQueueReceive {
+    Chunk(QueuedAudioChunk),
+    Closed,
+    TimedOut,
+}
+
+impl AudioChunkReceiver {
+    fn recv_queued(&self) -> Option<QueuedAudioChunk> {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            if let Some(chunk) = state.chunks.pop_front() {
+                state.queued_bytes = state.queued_bytes.saturating_sub(chunk.bytes.capacity());
+                return Some(chunk);
+            }
+            if state.sender_count == 0 {
+                return None;
+            }
+            state = self
+                .shared
+                .ready
+                .wait(state)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+
+    fn recv(&self) -> Option<Vec<u8>> {
+        self.recv_queued().map(|chunk| chunk.bytes)
+    }
+
+    fn recv_queued_timeout(&self, timeout: Duration) -> AudioQueueReceive {
+        let deadline = Instant::now() + timeout;
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            if let Some(chunk) = state.chunks.pop_front() {
+                state.queued_bytes = state.queued_bytes.saturating_sub(chunk.bytes.capacity());
+                return AudioQueueReceive::Chunk(chunk);
+            }
+            if state.sender_count == 0 {
+                return AudioQueueReceive::Closed;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return AudioQueueReceive::TimedOut;
+            }
+            let (next_state, wait_result) = self
+                .shared
+                .ready
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state = next_state;
+            if wait_result.timed_out() && state.chunks.is_empty() {
+                return AudioQueueReceive::TimedOut;
+            }
+        }
+    }
+
+    /// Makes the encoder hand-off the recording timeline boundary. Native
+    /// streams start first so their format can configure FFmpeg; discard that
+    /// short pre-roll and its capacity counters atomically so it cannot create
+    /// either startup drift or a false overload failure.
+    fn attach_consumer(&self) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.consumer_attached {
+            return;
+        }
+        state.chunks.clear();
+        state.queued_bytes = 0;
+        state.dropped_chunks = 0;
+        state.dropped_bytes = 0;
+        state.consumer_attached = true;
+    }
+
+    fn report_handoff_residence(&self, residence: Duration) {
+        if residence <= AUDIO_QUEUE_MAX_RESIDENCE {
+            return;
+        }
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.late_chunks = state.late_chunks.saturating_add(1);
+        state.max_residence = state.max_residence.max(residence);
+    }
+
+    fn report_writer_failure(&self) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.writer_failed = true;
+    }
+
+    fn status(&self) -> AudioQueueStatus {
+        AudioQueueStatus {
+            shared: Arc::clone(&self.shared),
+        }
+    }
+}
+
+impl Iterator for AudioChunkReceiver {
+    type Item = Vec<u8>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.recv()
+    }
+}
+
+impl Drop for AudioChunkReceiver {
+    fn drop(&mut self) {
+        let mut state = self
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.receiver_open = false;
+        state.chunks.clear();
+        state.queued_bytes = 0;
+        self.shared.ready.notify_all();
+    }
+}
+
+pub fn bounded_audio_channel() -> (AudioChunkSender, AudioChunkReceiver) {
+    audio_channel_with_limits(None, AUDIO_QUEUE_MAX_CHUNKS)
+}
+
+fn audio_channel_with_limits(
+    max_queued_bytes: Option<usize>,
+    max_chunks: usize,
+) -> (AudioChunkSender, AudioChunkReceiver) {
+    let shared = Arc::new(AudioQueueShared {
+        state: Mutex::new(AudioQueueState {
+            chunks: VecDeque::new(),
+            queued_bytes: 0,
+            max_queued_bytes,
+            max_chunks,
+            sender_count: 1,
+            receiver_open: true,
+            consumer_attached: false,
+            dropped_chunks: 0,
+            dropped_bytes: 0,
+            late_chunks: 0,
+            max_residence: Duration::ZERO,
+            capture_failed: false,
+            writer_failed: false,
+        }),
+        ready: Condvar::new(),
+    });
+    (
+        AudioChunkSender {
+            shared: Arc::clone(&shared),
+        },
+        AudioChunkReceiver { shared },
+    )
+}
+
+fn record_audio_drop(state: &mut AudioQueueState, bytes: usize) {
+    state.dropped_chunks = state.dropped_chunks.saturating_add(1);
+    state.dropped_bytes = state
+        .dropped_bytes
+        .saturating_add(u64::try_from(bytes).unwrap_or(u64::MAX));
 }
 
 #[derive(Debug, Clone)]
@@ -222,15 +613,158 @@ fn cleanup_unpack_directory(cache_dir: &Path) {
     }
 }
 
+const ENCODER_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(20);
+const PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const MERGE_STALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+#[derive(Debug)]
+enum TimedChildExit {
+    Exited(ExitStatus),
+    TimedOut,
+}
+
+fn terminate_and_reap(child: &mut Child) -> Result<()> {
+    match child.kill() {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {}
+        Err(error) => return Err(error).context("could not terminate child process"),
+    }
+    child.wait().context("could not reap child process")?;
+    Ok(())
+}
+
+/// Waits without giving an encoder process an unlimited opportunity to hang.
+/// Timeout always reaps the child, so callers never leave a zombie or an
+/// encoder process holding pipe handles after returning an error.
+fn wait_for_child_with_timeout(child: &mut Child, timeout: Duration) -> Result<TimedChildExit> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().context("could not poll child process")? {
+            return Ok(TimedChildExit::Exited(status));
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            terminate_and_reap(child).context("could not stop timed-out process")?;
+            return Ok(TimedChildExit::TimedOut);
+        }
+        std::thread::sleep(CHILD_POLL_INTERVAL.min(remaining));
+    }
+}
+
+/// Long recording merges have no useful fixed total deadline: re-encoding a
+/// multi-hour capture can legitimately take hours. Instead, require the output
+/// file to keep making byte-level progress. Ten minutes without any size
+/// change is treated as a wedged encoder, which is then killed and reaped.
+fn wait_for_child_with_output_progress(
+    child: &mut Child,
+    output_path: &Path,
+    stall_timeout: Duration,
+) -> Result<TimedChildExit> {
+    let mut observed_size = std::fs::metadata(output_path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let mut last_progress = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().context("could not poll FFmpeg merge")? {
+            return Ok(TimedChildExit::Exited(status));
+        }
+        let current_size = std::fs::metadata(output_path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        if current_size != observed_size {
+            observed_size = current_size;
+            last_progress = Instant::now();
+        } else if last_progress.elapsed() >= stall_timeout {
+            terminate_and_reap(child).context("could not stop stalled FFmpeg merge")?;
+            return Ok(TimedChildExit::TimedOut);
+        }
+        std::thread::sleep(PROGRESS_POLL_INTERVAL.min(stall_timeout));
+    }
+}
+
+fn run_command_with_output_progress(
+    command: &mut Command,
+    output_path: &Path,
+    stall_timeout: Duration,
+) -> Result<ExitStatus> {
+    let mut child = command.spawn().context("could not start FFmpeg merge")?;
+    let outcome = wait_for_child_with_output_progress(&mut child, output_path, stall_timeout);
+    if outcome.is_err() {
+        let _ = terminate_and_reap(&mut child);
+    }
+    match outcome? {
+        TimedChildExit::Exited(status) => Ok(status),
+        TimedChildExit::TimedOut => bail!(
+            "FFmpeg produced no merge output for {} seconds and was terminated.",
+            stall_timeout.as_secs()
+        ),
+    }
+}
+
+fn join_output_reader(reader: Option<JoinHandle<std::io::Result<Vec<u8>>>>) -> Result<Vec<u8>> {
+    match reader {
+        Some(reader) => reader
+            .join()
+            .map_err(|_| anyhow::anyhow!("child output reader panicked"))?
+            .context("could not read child process output"),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn spawn_output_reader<R>(mut reader: Option<R>) -> Option<JoinHandle<std::io::Result<Vec<u8>>>>
+where
+    R: Read + Send + 'static,
+{
+    reader.take().map(|mut reader| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            reader.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        })
+    })
+}
+
+/// Runs a short-lived FFmpeg/helper command with captured output and a hard
+/// deadline. Shared with thumbnail generation so one malformed media file
+/// cannot hold its global generation lock forever.
+pub(crate) fn run_command_with_timeout(command: &mut Command, timeout: Duration) -> Result<Output> {
+    let mut child = command.spawn().context("could not start child process")?;
+    let stdout = spawn_output_reader(child.stdout.take());
+    let stderr = spawn_output_reader(child.stderr.take());
+    let outcome = wait_for_child_with_timeout(&mut child, timeout);
+    if outcome.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let stdout = join_output_reader(stdout)?;
+    let stderr = join_output_reader(stderr)?;
+    match outcome? {
+        TimedChildExit::Exited(status) => Ok(Output {
+            status,
+            stdout,
+            stderr,
+        }),
+        TimedChildExit::TimedOut => {
+            bail!(
+                "child process timed out after {} seconds",
+                timeout.as_secs_f64()
+            )
+        }
+    }
+}
+
 fn validate_ffmpeg(path: &Path) -> Result<()> {
-    let status = Command::new(path)
-        .arg("-version")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .context("the video encoder could not be started")?;
-    if !status.success() {
+    let output = run_command_with_timeout(
+        Command::new(path)
+            .arg("-version")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+        ENCODER_PROBE_TIMEOUT,
+    )
+    .context("the video encoder could not be started")?;
+    if !output.status.success() {
         bail!("the video encoder failed its version check");
     }
     Ok(())
@@ -258,74 +792,107 @@ fn ffmpeg_command(binary: &Path) -> Command {
     command
 }
 
-static ENCODERS: OnceCell<String> = OnceCell::new();
 static VIDEO_ENCODER: OnceCell<String> = OnceCell::new();
 
-fn encoder_list(binary: &Path) -> &str {
-    ENCODERS.get_or_init(|| {
+fn encoder_list(binary: &Path) -> Result<String> {
+    let output = run_command_with_timeout(
         Command::new(binary)
             .arg("-hide_banner")
             .arg("-encoders")
-            .output()
-            .map(|output| String::from_utf8_lossy(&output.stdout).to_string())
-            .unwrap_or_default()
-    })
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()),
+        ENCODER_PROBE_TIMEOUT,
+    )
+    .context("could not inspect FFmpeg video encoders")?;
+    if !output.status.success() {
+        bail!("FFmpeg failed while listing video encoders.");
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn select_video_encoder<F>(
+    encoders: &str,
+    hardware_candidates: &[&str],
+    mut probe: F,
+) -> Result<String>
+where
+    F: FnMut(&str) -> Result<bool>,
+{
+    for candidate in hardware_candidates {
+        let is_listed = encoders
+            .lines()
+            .any(|line| line.split_whitespace().any(|token| token == *candidate));
+        if !is_listed {
+            continue;
+        }
+        match probe(candidate) {
+            Ok(true) => return Ok((*candidate).to_string()),
+            Ok(false) => log::warn!("record: listed hardware encoder {candidate} is unusable"),
+            Err(error) => log::warn!("record: hardware encoder {candidate} probe failed: {error}"),
+        }
+    }
+
+    match probe("libx264") {
+        Ok(true) => Ok("libx264".to_string()),
+        Ok(false) => bail!(
+            "FFmpeg does not provide a usable H.264 encoder (hardware probes and libx264 failed)."
+        ),
+        Err(error) => Err(error).context("the libx264 fallback probe did not complete"),
+    }
 }
 
 /// Picks a hardware H.264 encoder where available:
 /// macOS: h264_videotoolbox; Windows: h264_nvenc → h264_qsv → h264_amf;
 /// fallback: libx264.
-pub fn pick_video_encoder(binary: &Path) -> String {
-    VIDEO_ENCODER
-        .get_or_init(|| {
-            let encoders = encoder_list(binary);
-            let candidates: &[&str] = if cfg!(target_os = "macos") {
-                &["h264_videotoolbox"]
-            } else if cfg!(windows) {
-                &["h264_nvenc", "h264_qsv", "h264_amf"]
-            } else {
-                &["h264_vaapi", "h264_nvenc"]
-            };
-            for candidate in candidates {
-                let is_listed = encoders
-                    .lines()
-                    .any(|line| line.split_whitespace().any(|token| token == *candidate));
-                // Static Windows builds list NVENC/QSV/AMF even on machines
-                // without that hardware. Probe one synthetic frame so Kiri
-                // falls back to libx264 before a real recording can be lost.
-                if is_listed && video_encoder_is_usable(binary, candidate) {
-                    return candidate.to_string();
-                }
-            }
-            "libx264".to_string()
+pub fn pick_video_encoder(binary: &Path) -> Result<String> {
+    let encoder = VIDEO_ENCODER.get_or_try_init(|| {
+        let encoders = encoder_list(binary)?;
+        let candidates: &[&str] = if cfg!(target_os = "macos") {
+            &["h264_videotoolbox"]
+        } else if cfg!(windows) {
+            &["h264_nvenc", "h264_qsv", "h264_amf"]
+        } else {
+            &["h264_vaapi", "h264_nvenc"]
+        };
+        // Static Windows builds list NVENC/QSV/AMF even on machines
+        // without that hardware. Probe one synthetic frame so Kiri
+        // falls back before a real recording can be lost. The software
+        // fallback is probed too: its mere presence in a build is not
+        // sufficient evidence that it can initialize successfully.
+        select_video_encoder(&encoders, candidates, |encoder| {
+            video_encoder_is_usable(binary, encoder)
         })
-        .clone()
+    })?;
+    Ok(encoder.clone())
 }
 
-fn video_encoder_is_usable(binary: &Path, encoder: &str) -> bool {
-    Command::new(binary)
-        .args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "color=c=black:s=64x64:r=1",
-            "-frames:v",
-            "1",
-            "-an",
-            "-c:v",
-            encoder,
-            "-f",
-            "null",
-            "-",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+fn video_encoder_is_usable(binary: &Path, encoder: &str) -> Result<bool> {
+    let output = run_command_with_timeout(
+        Command::new(binary)
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=64x64:r=1",
+                "-frames:v",
+                "1",
+                "-an",
+                "-c:v",
+                encoder,
+                "-f",
+                "null",
+                "-",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+        ENCODER_PROBE_TIMEOUT,
+    )?;
+    Ok(output.status.success())
 }
 
 pub fn bitrate_for(width: i64, height: i64) -> i64 {
@@ -341,6 +908,123 @@ pub struct SegmentEncoder {
     child: Child,
     out_path: PathBuf,
     writers: Vec<JoinHandle<()>>,
+    audio_statuses: Vec<AudioQueueStatus>,
+    writer_shutdown: Arc<AtomicBool>,
+}
+
+const PIPE_WRITER_POLL_INTERVAL: Duration = Duration::from_millis(25);
+const FFMPEG_FINALIZE_MIN_TIMEOUT: Duration = Duration::from_secs(30);
+const FFMPEG_FINALIZE_MAX_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const FFMPEG_FINALIZE_BYTES_PER_SECOND: u64 = 16 * 1024 * 1024;
+
+fn segment_finalize_timeout(out_path: &Path) -> Duration {
+    let bytes = std::fs::metadata(out_path)
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    segment_finalize_timeout_for_bytes(bytes)
+}
+
+fn segment_finalize_timeout_for_bytes(bytes: u64) -> Duration {
+    let copy_seconds = bytes.div_ceil(FFMPEG_FINALIZE_BYTES_PER_SECOND);
+    FFMPEG_FINALIZE_MIN_TIMEOUT
+        .saturating_add(Duration::from_secs(copy_seconds))
+        .min(FFMPEG_FINALIZE_MAX_TIMEOUT)
+}
+
+fn spawn_video_pipe_writer(
+    receiver: mpsc::Receiver<Vec<u8>>,
+    mut writer: os_pipe::PipeWriter,
+    shutdown: Arc<AtomicBool>,
+) -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut total = 0usize;
+        let mut chunk_count = 0usize;
+        loop {
+            if shutdown.load(Ordering::Acquire) {
+                break;
+            }
+            let chunk = match receiver.recv_timeout(PIPE_WRITER_POLL_INTERVAL) {
+                Ok(chunk) => chunk,
+                Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            };
+            if writer.write_all(&chunk).is_err() {
+                break;
+            }
+            total += chunk.len();
+            chunk_count += 1;
+        }
+        log::info!("record: pipe writer flushed {total} bytes in {chunk_count} chunks");
+        let _ = writer.flush();
+        // writer dropped → EOF for ffmpeg
+    })
+}
+
+fn spawn_audio_pipe_writer(
+    receiver: AudioChunkReceiver,
+    mut writer: os_pipe::PipeWriter,
+    shutdown: Arc<AtomicBool>,
+) -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut total = 0usize;
+        let mut chunk_count = 0usize;
+        loop {
+            if shutdown.load(Ordering::Acquire) {
+                break;
+            }
+            let chunk = match receiver.recv_queued_timeout(PIPE_WRITER_POLL_INTERVAL) {
+                AudioQueueReceive::Chunk(chunk) => chunk,
+                AudioQueueReceive::Closed => break,
+                AudioQueueReceive::TimedOut => continue,
+            };
+            let bytes = chunk.bytes.len();
+            if writer.write_all(&chunk.bytes).is_err() {
+                receiver.report_writer_failure();
+                break;
+            }
+            if let Some(enqueued_at) = chunk.enqueued_at {
+                receiver.report_handoff_residence(enqueued_at.elapsed());
+            }
+            total += bytes;
+            chunk_count += 1;
+        }
+        if writer.flush().is_err() {
+            receiver.report_writer_failure();
+        }
+        log::info!("record: audio pipe writer flushed {total} bytes in {chunk_count} chunks");
+        // writer dropped → EOF for ffmpeg
+    })
+}
+
+fn ensure_audio_queues_healthy(statuses: &[AudioQueueStatus]) -> Result<()> {
+    let dropped = statuses
+        .iter()
+        .fold(AudioQueueSnapshot::default(), |mut total, status| {
+            let snapshot = status.snapshot();
+            total.dropped_chunks = total.dropped_chunks.saturating_add(snapshot.dropped_chunks);
+            total.dropped_bytes = total.dropped_bytes.saturating_add(snapshot.dropped_bytes);
+            total.late_chunks = total.late_chunks.saturating_add(snapshot.late_chunks);
+            total.max_residence = total.max_residence.max(snapshot.max_residence);
+            total.capture_failed |= snapshot.capture_failed;
+            total.writer_failed |= snapshot.writer_failed;
+            total
+        });
+    if dropped.dropped_chunks > 0
+        || dropped.late_chunks > 0
+        || dropped.capture_failed
+        || dropped.writer_failed
+    {
+        bail!(
+            "Audio capture lost integrity ({} dropped chunks / {} bytes, {} delayed chunks, max hand-off {} ms, capture fault={}, pipe fault={}); the recording was not saved to avoid A/V desynchronization.",
+            dropped.dropped_chunks,
+            dropped.dropped_bytes,
+            dropped.late_chunks,
+            dropped.max_residence.as_millis(),
+            dropped.capture_failed,
+            dropped.writer_failed,
+        );
+    }
+    Ok(())
 }
 
 impl SegmentEncoder {
@@ -350,8 +1034,8 @@ impl SegmentEncoder {
         out_path: PathBuf,
         ffmpeg: &Path,
         video_rx: mpsc::Receiver<Vec<u8>>,
-        audio_rx: Option<mpsc::Receiver<Vec<u8>>>,
-        mic_rx: Option<mpsc::Receiver<Vec<u8>>>,
+        audio_rx: Option<AudioChunkReceiver>,
+        mic_rx: Option<AudioChunkReceiver>,
     ) -> Result<SegmentEncoder> {
         let mut command = ffmpeg_command(ffmpeg);
 
@@ -489,58 +1173,98 @@ impl SegmentEncoder {
 
         let child = command.spawn().context("failed to start ffmpeg")?;
         let mut writers = Vec::new();
+        let mut audio_statuses = Vec::new();
+        let writer_shutdown = Arc::new(AtomicBool::new(false));
 
-        let spawn_writer = |rx: mpsc::Receiver<Vec<u8>>, mut writer: os_pipe::PipeWriter| {
-            std::thread::spawn(move || {
-                let mut total = 0usize;
-                let mut chunks = 0usize;
-                for frame in rx {
-                    if writer.write_all(&frame).is_err() {
-                        break;
-                    }
-                    total += frame.len();
-                    chunks += 1;
-                }
-                log::info!("record: pipe writer flushed {total} bytes in {chunks} chunks");
-                let _ = writer.flush();
-                // writer dropped → EOF for ffmpeg
-            })
-        };
-
-        writers.push(spawn_writer(video_rx, video_tx_pipe));
+        writers.push(spawn_video_pipe_writer(
+            video_rx,
+            video_tx_pipe,
+            Arc::clone(&writer_shutdown),
+        ));
         if let (Some(writer), Some(rx)) = (audio_writer, audio_rx) {
-            writers.push(spawn_writer(rx, writer));
+            rx.attach_consumer();
+            audio_statuses.push(rx.status());
+            writers.push(spawn_audio_pipe_writer(
+                rx,
+                writer,
+                Arc::clone(&writer_shutdown),
+            ));
         }
         if let (Some(writer), Some(rx)) = (mic_writer, mic_rx) {
-            writers.push(spawn_writer(rx, writer));
+            rx.attach_consumer();
+            audio_statuses.push(rx.status());
+            writers.push(spawn_audio_pipe_writer(
+                rx,
+                writer,
+                Arc::clone(&writer_shutdown),
+            ));
         }
 
         Ok(SegmentEncoder {
             child,
             out_path,
             writers,
+            audio_statuses,
+            writer_shutdown,
         })
+    }
+
+    fn stop_pipe_writers(&mut self) {
+        self.writer_shutdown.store(true, Ordering::Release);
+        for status in &self.audio_statuses {
+            status.shared.ready.notify_all();
+        }
+        for writer in self.writers.drain(..) {
+            if writer.join().is_err() {
+                log::error!("record: pipe writer thread panicked during shutdown");
+            }
+        }
     }
 
     /// Closes the pipes, waits for ffmpeg, and returns the finished file.
     pub fn finish(mut self) -> Result<PathBuf> {
-        for writer in self.writers.drain(..) {
-            let _ = writer.join();
+        // Writers stream concurrently while ffmpeg drains its inputs. Waiting
+        // on them first can deadlock forever if ffmpeg stops reading a full
+        // pipe; polling the child first gives the whole finalization one hard
+        // deadline. On timeout, killing the child closes every pipe reader,
+        // then the cooperative receiver polls let all writer threads exit.
+        let finalize_timeout = segment_finalize_timeout(&self.out_path);
+        let child_exit = wait_for_child_with_timeout(&mut self.child, finalize_timeout);
+        if child_exit.is_err() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
         }
-        let status = self.child.wait().context("ffmpeg did not exit")?;
+        self.stop_pipe_writers();
+        let child_exit = child_exit.context("ffmpeg could not be finalized")?;
+        let status = match child_exit {
+            TimedChildExit::Exited(status) => status,
+            TimedChildExit::TimedOut => {
+                let _ = std::fs::remove_file(&self.out_path);
+                bail!("The MP4 encoder timed out while finalizing and was terminated.");
+            }
+        };
         if !status.success() {
             let _ = std::fs::remove_file(&self.out_path);
             bail!("The MP4 could not be finalized.")
+        }
+        if let Err(error) = ensure_audio_queues_healthy(&self.audio_statuses) {
+            let _ = std::fs::remove_file(&self.out_path);
+            return Err(error);
         }
         Ok(self.out_path)
     }
 
     /// Aborts a segment that cannot be finalized after another recording
-    /// component failed. Killing ffmpeg closes its pipe readers; detached
-    /// writer threads then exit as their writes fail or their inputs close.
+    /// component failed. Killing ffmpeg closes its pipe readers; cooperative
+    /// receiver polling then lets every writer thread exit before returning.
     pub fn cancel(mut self) {
+        self.writer_shutdown.store(true, Ordering::Release);
+        for status in &self.audio_statuses {
+            status.shared.ready.notify_all();
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
+        self.stop_pipe_writers();
         let _ = std::fs::remove_file(&self.out_path);
     }
 }
@@ -551,16 +1275,21 @@ impl SegmentEncoder {
 
 /// Parses `ffmpeg -i` stderr for video dimensions and duration.
 pub fn probe_video(ffmpeg: &Path, video: &Path) -> Option<(i64, i64, Option<f64>)> {
-    let output = Command::new(ffmpeg)
-        .arg("-hide_banner")
-        .arg("-i")
-        .arg(video)
-        .arg("-f")
-        .arg("null")
-        .arg("-")
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stderr).to_string();
+    // Supplying no output makes FFmpeg stop immediately after opening the
+    // input and printing stream metadata. `-f null -` would decode the entire
+    // recording, making library import scale with recording duration.
+    let output = run_command_with_timeout(
+        Command::new(ffmpeg)
+            .arg("-hide_banner")
+            .arg("-i")
+            .arg(video)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped()),
+        ENCODER_PROBE_TIMEOUT,
+    )
+    .ok()?;
+    let text = String::from_utf8_lossy(&output.stderr);
 
     // "Stream #0:0[0x1](und): Video: h264 ... 1920x1080 [SAR ...]" or
     // "... (1920x1080), ..." on some builds.
@@ -665,35 +1394,43 @@ pub fn merge_segments(segments: &[PathBuf], out_path: &Path, ffmpeg: &Path) -> R
         .join("\n");
     std::fs::write(&list_path, list)?;
 
-    let copy_status = ffmpeg_command(ffmpeg)
-        .args(["-f", "concat", "-safe", "0"])
-        .arg("-i")
-        .arg(&list_path)
-        .args(["-c", "copy"])
-        .arg(out_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .context("concat failed to start")?;
+    let copy_status = run_command_with_output_progress(
+        ffmpeg_command(ffmpeg)
+            .args(["-f", "concat", "-safe", "0"])
+            .arg("-i")
+            .arg(&list_path)
+            .args(["-c", "copy"])
+            .arg(out_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+        out_path,
+        MERGE_STALL_TIMEOUT,
+    );
 
-    if copy_status.success() {
+    if matches!(&copy_status, Ok(status) if status.success()) {
         let _ = std::fs::remove_file(&list_path);
         return Ok(());
     }
+    if let Err(error) = &copy_status {
+        log::warn!("record: lossless segment merge failed or stalled: {error}");
+    }
 
     let _ = std::fs::remove_file(out_path);
-    let status = ffmpeg_command(ffmpeg)
-        .args(["-f", "concat", "-safe", "0"])
-        .arg("-i")
-        .arg(&list_path)
-        .args(["-c:v", "libx264", "-c:a", "aac"])
-        .args(["-movflags", "+faststart"])
-        .arg(out_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    let status = run_command_with_output_progress(
+        ffmpeg_command(ffmpeg)
+            .args(["-f", "concat", "-safe", "0"])
+            .arg("-i")
+            .arg(&list_path)
+            .args(["-c:v", "libx264", "-c:a", "aac"])
+            .args(["-movflags", "+faststart"])
+            .arg(out_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null()),
+        out_path,
+        MERGE_STALL_TIMEOUT,
+    );
     let _ = std::fs::remove_file(&list_path);
     match status {
         Ok(status) if status.success() => Ok(()),
@@ -704,6 +1441,228 @@ pub fn merge_segments(segments: &[PathBuf], out_path: &Path, ffmpeg: &Path) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn audio_queue_budget_is_derived_from_pcm_time() {
+        let spec = AudioSpec {
+            sample_rate: 48_000,
+            channels: 2,
+            format: AudioSampleFormat::F32,
+        };
+        assert_eq!(
+            spec.queue_byte_budget(AUDIO_QUEUE_MAX_LATENCY).unwrap(),
+            96_000
+        );
+    }
+
+    #[test]
+    fn audio_queue_rejects_overload_without_exceeding_its_byte_bound() {
+        let (tx, rx) = audio_channel_with_limits(Some(8), 8);
+        let status = rx.status();
+        tx.try_send(vec![0; 4]).unwrap();
+        tx.try_send(vec![1; 4]).unwrap();
+
+        assert_eq!(
+            tx.try_send(vec![2; 1]),
+            Err(AudioQueueSendError::Overloaded)
+        );
+        assert_eq!(
+            status.snapshot(),
+            AudioQueueSnapshot {
+                queued_bytes: 8,
+                dropped_chunks: 1,
+                dropped_bytes: 1,
+                ..AudioQueueSnapshot::default()
+            }
+        );
+    }
+
+    #[test]
+    fn audio_queue_receive_releases_capacity() {
+        let (tx, rx) = audio_channel_with_limits(Some(4), 1);
+        tx.try_send(vec![0; 4]).unwrap();
+        assert_eq!(rx.recv().unwrap(), vec![0; 4]);
+        tx.try_send(vec![1; 4]).unwrap();
+        assert_eq!(rx.recv().unwrap(), vec![1; 4]);
+    }
+
+    #[test]
+    fn audio_queue_drains_then_closes_after_last_sender() {
+        let (tx, rx) = audio_channel_with_limits(Some(4), 1);
+        let tx_clone = tx.clone();
+        tx.try_send(vec![7; 4]).unwrap();
+        drop(tx);
+        assert_eq!(rx.recv().unwrap(), vec![7; 4]);
+        drop(tx_clone);
+        assert!(rx.recv().is_none());
+    }
+
+    #[test]
+    fn audio_queue_sender_observes_receiver_close() {
+        let (tx, rx) = audio_channel_with_limits(Some(4), 1);
+        drop(rx);
+        assert_eq!(tx.try_send(vec![0; 1]), Err(AudioQueueSendError::Closed));
+    }
+
+    #[test]
+    fn audio_queue_overload_is_a_segment_integrity_error() {
+        let (tx, rx) = audio_channel_with_limits(Some(4), 1);
+        rx.attach_consumer();
+        let status = rx.status();
+        tx.try_send(vec![0; 4]).unwrap();
+        assert_eq!(
+            tx.try_send(vec![1; 1]),
+            Err(AudioQueueSendError::Overloaded)
+        );
+        let error = ensure_audio_queues_healthy(&[status]).unwrap_err();
+        assert!(error.to_string().contains("avoid A/V desynchronization"));
+    }
+
+    #[test]
+    fn audio_queue_attach_discards_pre_roll_without_a_false_overload() {
+        let (tx, rx) = audio_channel_with_limits(Some(4), 1);
+        let status = rx.status();
+        tx.try_send(vec![0; 4]).unwrap();
+        assert_eq!(
+            tx.try_send(vec![1; 1]),
+            Err(AudioQueueSendError::Overloaded)
+        );
+
+        rx.attach_consumer();
+
+        assert_eq!(status.snapshot().queued_bytes, 0);
+        ensure_audio_queues_healthy(&[status]).unwrap();
+        tx.try_send(vec![2; 4]).unwrap();
+        assert_eq!(rx.recv().unwrap(), vec![2; 4]);
+    }
+
+    #[test]
+    fn delayed_audio_handoff_is_a_segment_integrity_error_without_sleeping() {
+        let (_tx, rx) = audio_channel_with_limits(Some(4), 1);
+        rx.attach_consumer();
+        let status = rx.status();
+        rx.report_handoff_residence(AUDIO_QUEUE_MAX_RESIDENCE + Duration::from_nanos(1));
+
+        let error = ensure_audio_queues_healthy(&[status]).unwrap_err();
+        assert!(error.to_string().contains("1 delayed chunks"));
+    }
+
+    #[test]
+    fn capture_and_pipe_faults_are_segment_integrity_errors() {
+        let (capture_tx, capture_rx) = audio_channel_with_limits(Some(4), 1);
+        let capture_status = capture_rx.status();
+        capture_tx.report_capture_failure();
+        let capture_error = ensure_audio_queues_healthy(&[capture_status]).unwrap_err();
+        assert!(capture_error.to_string().contains("capture fault=true"));
+
+        let (pipe_tx, pipe_rx) = audio_channel_with_limits(Some(4), 1);
+        pipe_rx.attach_consumer();
+        let pipe_status = pipe_rx.status();
+        pipe_tx.try_send(vec![0; 4]).unwrap();
+        drop(pipe_tx);
+        let (reader, writer) = os_pipe::pipe().unwrap();
+        drop(reader);
+        spawn_audio_pipe_writer(pipe_rx, writer, Arc::new(AtomicBool::new(false)))
+            .join()
+            .unwrap();
+        let pipe_error = ensure_audio_queues_healthy(&[pipe_status]).unwrap_err();
+        assert!(pipe_error.to_string().contains("pipe fault=true"));
+    }
+
+    #[test]
+    fn encoder_selection_probes_the_software_fallback() {
+        let mut probed = Vec::new();
+        let selected = select_video_encoder(" V..... h264_nvenc ", &["h264_nvenc"], |encoder| {
+            probed.push(encoder.to_string());
+            Ok(encoder == "libx264")
+        })
+        .unwrap();
+
+        assert_eq!(selected, "libx264");
+        assert_eq!(probed, vec!["h264_nvenc", "libx264"]);
+    }
+
+    #[test]
+    fn encoder_selection_rejects_an_unusable_software_fallback() {
+        let error = select_video_encoder("", &[], |_| Ok(false)).unwrap_err();
+        assert!(error.to_string().contains("libx264 failed"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn child_timeout_terminates_and_reaps_a_stalled_process() {
+        let mut child = Command::new("/bin/sleep").arg("10").spawn().unwrap();
+        let started = Instant::now();
+        let outcome = wait_for_child_with_timeout(&mut child, Duration::from_millis(30)).unwrap();
+
+        assert!(matches!(outcome, TimedChildExit::TimedOut));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(
+            child.try_wait().unwrap().is_some(),
+            "timed-out child is reaped"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn merge_watchdog_terminates_a_process_with_no_output_progress() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("never-created.mp4");
+        let mut child = Command::new("/bin/sleep").arg("10").spawn().unwrap();
+        let started = Instant::now();
+        let outcome =
+            wait_for_child_with_output_progress(&mut child, &output, Duration::from_millis(30))
+                .unwrap();
+
+        assert!(matches!(outcome, TimedChildExit::TimedOut));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(
+            child.try_wait().unwrap().is_some(),
+            "stalled child is reaped"
+        );
+    }
+
+    #[test]
+    fn segment_finalize_timeout_scales_with_file_size_and_stays_bounded() {
+        assert_eq!(
+            segment_finalize_timeout_for_bytes(0),
+            FFMPEG_FINALIZE_MIN_TIMEOUT
+        );
+        assert!(
+            segment_finalize_timeout_for_bytes(FFMPEG_FINALIZE_BYTES_PER_SECOND)
+                > FFMPEG_FINALIZE_MIN_TIMEOUT
+        );
+        assert_eq!(
+            segment_finalize_timeout_for_bytes(u64::MAX),
+            FFMPEG_FINALIZE_MAX_TIMEOUT
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn video_probe_reads_metadata_without_requesting_a_decode_output() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let fake_ffmpeg = directory.path().join("ffmpeg");
+        std::fs::write(
+            &fake_ffmpeg,
+            b"#!/bin/sh\n\
+              [ \"$#\" -eq 3 ] || exit 64\n\
+              [ \"$1\" = \"-hide_banner\" ] || exit 65\n\
+              [ \"$2\" = \"-i\" ] || exit 66\n\
+              echo '  Duration: 01:02:03.50, start: 0.000000, bitrate: 1000 kb/s' >&2\n\
+              echo '  Stream #0:0: Video: h264, yuv420p, 1920x1080, 30 fps' >&2\n\
+              exit 1\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&fake_ffmpeg).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&fake_ffmpeg, permissions).unwrap();
+
+        let metadata = probe_video(&fake_ffmpeg, Path::new("ignored.mp4")).unwrap();
+        assert_eq!(metadata, (1920, 1080, Some(3723.5)));
+    }
 
     #[test]
     fn ffmpeg_validation_rejects_a_missing_executable() {
@@ -753,7 +1712,8 @@ mod tests {
         };
 
         let (video_tx, video_rx) = mpsc::channel::<Vec<u8>>();
-        let (audio_tx, audio_rx) = mpsc::channel::<Vec<u8>>();
+        let (audio_tx, audio_rx) = bounded_audio_channel();
+        audio_tx.configure(config.audio.unwrap()).unwrap();
         let encoder = SegmentEncoder::start(
             &config,
             out_path.clone(),
@@ -765,9 +1725,10 @@ mod tests {
         .expect("encoder should start");
         drop(video_tx);
 
-        // 0.5 s of 440 Hz sine, f32le interleaved stereo.
+        // 0.125 s of 440 Hz sine, f32le interleaved stereo. Native capture
+        // delivers much smaller chunks than the queue's 250 ms byte budget.
         let rate = 48_000u32;
-        let frames = rate / 2;
+        let frames = rate / 8;
         let mut audio = Vec::with_capacity(frames as usize * 8);
         for i in 0..frames {
             let v = (0.5f32 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / rate as f32).sin())
@@ -775,7 +1736,7 @@ mod tests {
             audio.extend_from_slice(&v);
             audio.extend_from_slice(&v);
         }
-        audio_tx.send(audio).unwrap();
+        audio_tx.try_send(audio).unwrap();
         drop(audio_tx);
 
         let finished = encoder.finish().expect("encoder should finish");

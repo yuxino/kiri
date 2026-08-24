@@ -198,9 +198,8 @@ export function OverlayWindow() {
         reportFrontend(`complete(${action}): exportPng returned no data`);
         return;
       }
-      const bytes = Array.from(png);
       try {
-        await api.confirmCapture(bytes, action);
+        await api.confirmCapture(png, action);
       } catch (error) {
         reportFrontend(`confirm_capture(${action}) rejected: ${String(error)}`);
       }

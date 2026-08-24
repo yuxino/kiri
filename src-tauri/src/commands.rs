@@ -17,8 +17,9 @@ use crate::platform;
 #[cfg(target_os = "macos")]
 use crate::state::RecoveryAction;
 use crate::state::{
-    emit_error, emit_library_changed, emit_notice, emit_notice_local, emit_recording_state,
-    ActiveRecording, AppState, CaptureSession, RecordingConfiguration, RecordingFlow,
+    emit_asset_content_changed, emit_error, emit_library_changed, emit_notice, emit_notice_local,
+    emit_recording_state, ActiveRecording, AppState, CaptureSession, RecordingConfiguration,
+    RecordingFlow,
 };
 
 // ---------------------------------------------------------------------------
@@ -164,11 +165,18 @@ pub fn restore_asset(app: AppHandle, id: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn permanently_delete(app: AppHandle, id: String) -> Result<(), String> {
-    with_asset_mutation(&app, &id, |library, parsed| {
-        library
-            .permanently_delete(parsed)
+    let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+    let state = app.state::<AppState>();
+    let store = app.state::<crate::protocol::ProtocolStore>();
+    crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
+        state
+            .library
+            .lock()
+            .unwrap()
+            .permanently_delete(&parsed)
             .map_err(|e| e.to_string())
     })?;
+    emit_library_changed(&app);
     emit_notice_local(&app, "Deleted Permanently".into(), "trash.fill".into());
     Ok(())
 }
@@ -176,9 +184,23 @@ pub fn permanently_delete(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn empty_trash(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let mut library = state.library.lock().unwrap();
-    library.empty_trash().map_err(|e| e.to_string())?;
-    drop(library);
+    let removed_ids = state
+        .library
+        .lock()
+        .unwrap()
+        .all_assets(true)
+        .into_iter()
+        .map(|asset| asset.id)
+        .collect::<Vec<_>>();
+    let store = app.state::<crate::protocol::ProtocolStore>();
+    crate::protocol::with_thumbnail_invalidations(&store, &removed_ids, || {
+        state
+            .library
+            .lock()
+            .unwrap()
+            .empty_trash()
+            .map_err(|e| e.to_string())
+    })?;
     emit_library_changed(&app);
     emit_notice_local(&app, "Trash Emptied".into(), "trash.slash".into());
     Ok(())
@@ -222,13 +244,15 @@ pub fn batch_restore(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
 #[tauri::command]
 pub fn batch_permanently_delete(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     let parsed = parse_ids(&ids)?;
-    {
-        let state = app.state::<AppState>();
+    let state = app.state::<AppState>();
+    let store = app.state::<crate::protocol::ProtocolStore>();
+    crate::protocol::with_thumbnail_invalidations(&store, &parsed, || {
         let mut library = state.library.lock().unwrap();
         for id in &parsed {
             library.permanently_delete(id).map_err(|e| e.to_string())?;
         }
-    }
+        Ok::<(), String>(())
+    })?;
     emit_library_changed(&app);
     Ok(())
 }
@@ -676,27 +700,60 @@ fn invalidate_capture_resources(app: &AppHandle, session: &CaptureSession) {
     );
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfirmCaptureRequest {
-    pub png: Vec<u8>,
-    pub action: String,
-}
-
 #[tauri::command]
-pub fn confirm_capture(app: AppHandle, request: ConfirmCaptureRequest) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let mut capture = state.capture.lock().unwrap();
-    let Some(session) = capture.session.take() else {
-        return Err("No active capture session.".into());
+pub fn confirm_capture(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let action = request
+        .headers()
+        .get("x-kiri-capture-action")
+        .and_then(|value| value.to_str().ok())
+        .filter(|action| matches!(*action, "copy" | "save" | "pin" | "edit"))
+        .ok_or_else(|| "The capture action is invalid.".to_string())?
+        .to_string();
+    let png = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes.as_slice(),
+        tauri::ipc::InvokeBody::Json(_) => {
+            return Err("The capture image must use the binary IPC payload.".into())
+        }
     };
-    drop(capture);
+    if png.is_empty() {
+        return Err("The capture image is empty.".into());
+    }
+
+    let state = app.state::<AppState>();
+    let (capture_id, max_width, max_height) = {
+        let capture = state.capture.lock().unwrap();
+        let session = capture
+            .session
+            .as_ref()
+            .ok_or_else(|| "No active capture session.".to_string())?;
+        (
+            session.capture_id,
+            session.display.pixel_width,
+            session.display.pixel_height,
+        )
+    };
+    // Validate the complete PNG before consuming the active session or writing
+    // to the clipboard/library. This also bounds decoder allocation by the
+    // dimensions of the frozen display that owns the request.
+    let pixel_size = validate_capture_png(png, max_width, max_height)?;
+    let session = {
+        let mut capture = state.capture.lock().unwrap();
+        if capture
+            .session
+            .as_ref()
+            .is_none_or(|session| session.capture_id != capture_id)
+        {
+            return Err("The capture session changed before confirmation.".into());
+        }
+        capture.session.take().unwrap()
+    };
     invalidate_capture_resources(&app, &session);
     // Errors must be visible: show the library window before emitting.
-    let session_failure = match confirm_capture_inner(&app, &state, session, request) {
-        Ok(()) => return Ok(()),
-        Err(error) => error,
-    };
+    let session_failure =
+        match confirm_capture_inner(&app, &state, session, png, pixel_size, &action) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
     if let Some(window) = app.get_webview_window("library") {
         let _ = window.show();
     }
@@ -707,13 +764,11 @@ fn confirm_capture_inner(
     app: &AppHandle,
     state: &AppState,
     session: CaptureSession,
-    request: ConfirmCaptureRequest,
+    png: &[u8],
+    pixel_size: (i64, i64),
+    action: &str,
 ) -> Result<(), String> {
-    log::info!(
-        "confirm_capture: action={} bytes={}",
-        request.action,
-        request.png.len()
-    );
+    log::info!("confirm_capture: action={} bytes={}", action, png.len());
 
     for label in &session.overlay_labels {
         if let Some(window) = app.get_webview_window(label) {
@@ -721,9 +776,8 @@ fn confirm_capture_inner(
         }
     }
 
-    let action = request.action.clone();
     if action == "copy" {
-        if let Err(error) = platform::write_image_to_clipboard(&request.png) {
+        if let Err(error) = platform::write_image_to_clipboard(png) {
             log::error!("confirm_capture: clipboard write failed: {error}");
             emit_error(
                 app,
@@ -739,12 +793,11 @@ fn confirm_capture_inner(
         }
     }
 
-    let image = image::load_from_memory(&request.png).map_err(|e| e.to_string())?;
-    let (pixel_width, pixel_height) = (image.width() as i64, image.height() as i64);
+    let (pixel_width, pixel_height) = pixel_size;
     let mut library = state.library.lock().unwrap();
     let imported = library
         .import_data(
-            &request.png,
+            png,
             CaptureKind::Image,
             "png",
             pixel_width,
@@ -757,14 +810,14 @@ fn confirm_capture_inner(
     drop(library);
     emit_library_changed(app);
 
-    match action.as_str() {
+    match action {
         "save" => {
             // Spec §5.4: default name kiri-<timestamp>.png; write the PNG to
             // the chosen location after the save panel closes.
             let now = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
             let default_name = format!("kiri-{now}.png");
             if let Ok(Some(path)) = save_file_dialog(app.clone(), default_name) {
-                if let Err(error) = std::fs::write(&path, &request.png) {
+                if let Err(error) = std::fs::write(&path, png) {
                     log::error!("confirm_capture: save failed: {error}");
                     emit_error(app, "Could not save the capture.".into(), None);
                 } else {
@@ -778,7 +831,7 @@ fn confirm_capture_inner(
                 .pin_images
                 .lock()
                 .unwrap()
-                .insert(imported.id.to_string(), request.png.clone());
+                .insert(imported.id.to_string(), png.to_vec());
             let label = format!("pin-{}", imported.id);
             let builder = WebviewWindowBuilder::new(
                 app,
@@ -790,7 +843,15 @@ fn confirm_capture_inner(
             .always_on_top(true)
             .shadow(false)
             .transparent(true);
-            let _ = builder.build();
+            if let Err(error) = builder.build() {
+                store
+                    .pin_images
+                    .lock()
+                    .unwrap()
+                    .remove(&imported.id.to_string());
+                log::error!("confirm_capture: pin window creation failed: {error}");
+                emit_error(app, "Could not pin the capture.".into(), None);
+            }
         }
         "edit" => {
             let label = format!("editor-{}", imported.id);
@@ -812,6 +873,70 @@ fn confirm_capture_inner(
 
     restore_focus(app, &session);
     Ok(())
+}
+
+const CAPTURE_PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+const CAPTURE_PNG_END: &[u8; 12] = b"\0\0\0\0IEND\xaeB`\x82";
+const CAPTURE_PNG_SIZE_SLACK: u64 = 1024 * 1024;
+const CAPTURE_PNG_DECODE_BYTES_PER_PIXEL: u64 = 8;
+
+fn capture_png_dimensions(png: &[u8]) -> Option<(u32, u32)> {
+    if png.len() < 33
+        || !png.starts_with(CAPTURE_PNG_SIGNATURE)
+        || png.get(8..12)? != 13_u32.to_be_bytes()
+        || png.get(12..16)? != b"IHDR"
+    {
+        return None;
+    }
+    let width = u32::from_be_bytes(png.get(16..20)?.try_into().ok()?);
+    let height = u32::from_be_bytes(png.get(20..24)?.try_into().ok()?);
+    (width > 0 && height > 0).then_some((width, height))
+}
+
+fn validate_capture_png(png: &[u8], max_width: i64, max_height: i64) -> Result<(i64, i64), String> {
+    if !png.starts_with(CAPTURE_PNG_SIGNATURE)
+        || !png.ends_with(CAPTURE_PNG_END)
+        || max_width <= 0
+        || max_height <= 0
+    {
+        return Err("The capture image is invalid.".into());
+    }
+    let (header_width, header_height) =
+        capture_png_dimensions(png).ok_or_else(|| "The capture image is invalid.".to_string())?;
+    let width = i64::from(header_width);
+    let height = i64::from(header_height);
+    if width > max_width || height > max_height {
+        return Err("The capture dimensions are invalid.".into());
+    }
+
+    let max_bytes = u64::from(header_width)
+        .checked_mul(u64::from(header_height))
+        .and_then(|pixels| pixels.checked_mul(4))
+        .and_then(|bytes| bytes.checked_add(CAPTURE_PNG_SIZE_SLACK))
+        .ok_or_else(|| "The capture dimensions are invalid.".to_string())?;
+    if u64::try_from(png.len()).unwrap_or(u64::MAX) > max_bytes {
+        return Err("The capture image is too large.".into());
+    }
+
+    let max_alloc = u64::from(header_width)
+        .checked_mul(u64::from(header_height))
+        .and_then(|pixels| pixels.checked_mul(CAPTURE_PNG_DECODE_BYTES_PER_PIXEL))
+        .and_then(|bytes| bytes.checked_add(CAPTURE_PNG_SIZE_SLACK))
+        .ok_or_else(|| "The capture dimensions are invalid.".to_string())?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(header_width);
+    limits.max_image_height = Some(header_height);
+    limits.max_alloc = Some(max_alloc);
+    let mut reader =
+        image::ImageReader::with_format(std::io::Cursor::new(png), image::ImageFormat::Png);
+    reader.limits(limits);
+    let image = reader
+        .decode()
+        .map_err(|_| "The capture image is invalid.".to_string())?;
+    if image.width() != header_width || image.height() != header_height {
+        return Err("The capture dimensions are invalid.".into());
+    }
+    Ok((width, height))
 }
 
 #[tauri::command]
@@ -853,35 +978,90 @@ fn restore_focus(app: &AppHandle, session: &CaptureSession) {
 // Editor command
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UpdateAssetRequest {
-    pub png: Vec<u8>,
-    pub copy_to_clipboard: bool,
-    pub save_path: Option<String>,
-}
-
 #[tauri::command]
-pub fn update_asset(app: AppHandle, id: String, request: UpdateAssetRequest) -> Result<(), String> {
-    let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
+pub fn update_asset(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    let parsed = request
+        .headers()
+        .get("x-kiri-asset-id")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+        .ok_or_else(|| "The edited asset id is invalid.".to_string())?;
+    let copy_to_clipboard = match request
+        .headers()
+        .get("x-kiri-copy-to-clipboard")
+        .and_then(|value| value.to_str().ok())
+    {
+        Some("1") => true,
+        Some("0") => false,
+        _ => return Err("The editor action is invalid.".into()),
+    };
+    let save_path = request
+        .headers()
+        .get("x-kiri-save-path")
+        .map(|value| {
+            value
+                .to_str()
+                .map_err(|_| "The save path is invalid.".to_string())
+                .and_then(decode_save_path_header)
+        })
+        .transpose()?;
+    let png = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) if !bytes.is_empty() => bytes.as_slice(),
+        tauri::ipc::InvokeBody::Raw(_) => return Err("The edited image is empty.".into()),
+        tauri::ipc::InvokeBody::Json(_) => {
+            return Err("The edited image must use the binary IPC payload.".into())
+        }
+    };
+
     let state = app.state::<AppState>();
-    let mut library = state.library.lock().unwrap();
-    library
-        .replace_data(&request.png, &parsed)
-        .map_err(|e| e.to_string())?;
-    drop(library);
-    if let Some(save_path) = &request.save_path {
-        let _ = std::fs::write(save_path, &request.png);
+    let expected_size = {
+        let library = state.library.lock().unwrap();
+        let asset = library
+            .asset_by_id(&parsed)
+            .ok_or_else(|| "The edited asset could not be found.".to_string())?;
+        if asset.kind != CaptureKind::Image {
+            return Err("Only image captures can be edited.".into());
+        }
+        (asset.pixel_width, asset.pixel_height)
+    };
+    if validate_capture_png(png, expected_size.0, expected_size.1)? != expected_size {
+        return Err("The edited image dimensions changed unexpectedly.".into());
     }
-    if request.copy_to_clipboard && platform::write_image_to_clipboard(&request.png).is_ok() {
+    let store = app.state::<crate::protocol::ProtocolStore>();
+    crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
+        state.library.lock().unwrap().replace_data(png, &parsed)
+    })
+    .map_err(|e| e.to_string())?;
+    if let Some(save_path) = &save_path {
+        let _ = std::fs::write(save_path, png);
+    }
+    if copy_to_clipboard && platform::write_image_to_clipboard(png).is_ok() {
         emit_notice(
             &app,
             "Copied to Clipboard".into(),
             "checkmark.circle.fill".into(),
         );
     }
+    emit_asset_content_changed(&app, &parsed);
     emit_library_changed(&app);
     Ok(())
+}
+
+fn decode_save_path_header(encoded: &str) -> Result<String, String> {
+    if encoded.is_empty()
+        || encoded.len() > 16 * 1024
+        || encoded
+            .bytes()
+            .any(|byte| matches!(byte, b'&' | b'=' | b'+'))
+    {
+        return Err("The save path is invalid.".into());
+    }
+    let query = format!("path={encoded}");
+    url::form_urlencoded::parse(query.as_bytes())
+        .find(|(key, _)| key == "path")
+        .map(|(_, path)| path.into_owned())
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| "The save path is invalid.".to_string())
 }
 
 /// Sets a friendly display title for a capture (metadata only; the on-disk
@@ -1139,6 +1319,26 @@ fn reset_recording_session(app: &AppHandle) {
     cleanup_abandoned_recording(app, abandoned);
 }
 
+fn take_completed_recording_segments(app: &AppHandle) -> Vec<PathBuf> {
+    let state = app.state::<AppState>();
+    let mut recording = state.recording.lock().unwrap();
+    recording.take_completed_segments()
+}
+
+/// Imports every segment that was completed before the active segment failed.
+/// `finalize_recording` removes source files only after the library import is
+/// durable; on an import failure the valid temporary files remain intact for
+/// recovery instead of being erased by the generic session reset.
+fn recover_completed_recording(
+    app: &AppHandle,
+    completed_segments: Vec<PathBuf>,
+) -> Result<bool, String> {
+    if completed_segments.is_empty() {
+        return Ok(false);
+    }
+    finalize_recording(app, completed_segments).map(|()| true)
+}
+
 /// Resets only the startup task that still owns this session. A late download
 /// failure from a cancelled task must not tear down a replacement recording.
 fn reset_startup_if_current(app: &AppHandle, token: uuid::Uuid) -> bool {
@@ -1253,27 +1453,27 @@ struct StartedRecorder {
 }
 
 struct RecorderSenders {
-    video: mpsc::Sender<Vec<u8>>,
-    system_audio: Option<mpsc::Sender<Vec<u8>>>,
-    microphone: Option<mpsc::Sender<Vec<u8>>>,
+    video: crate::capture::VideoFrameSender,
+    system_audio: Option<crate::record::AudioChunkSender>,
+    microphone: Option<crate::record::AudioChunkSender>,
 }
 
 struct EncoderReceivers {
     video: mpsc::Receiver<Vec<u8>>,
-    system_audio: Option<mpsc::Receiver<Vec<u8>>>,
-    microphone: Option<mpsc::Receiver<Vec<u8>>>,
+    system_audio: Option<crate::record::AudioChunkReceiver>,
+    microphone: Option<crate::record::AudioChunkReceiver>,
 }
 
 fn recording_channels(options: RecordingOptions) -> (RecorderSenders, EncoderReceivers) {
-    let (video_tx, video_rx) = mpsc::channel();
+    let (video_tx, video_rx) = mpsc::sync_channel(crate::capture::VIDEO_FRAME_QUEUE_CAPACITY);
     let (audio_tx, audio_rx) = options
         .captures_system_audio
-        .then(mpsc::channel)
+        .then(crate::record::bounded_audio_channel)
         .map(|(tx, rx)| (Some(tx), Some(rx)))
         .unwrap_or((None, None));
     let (mic_tx, mic_rx) = options
         .captures_microphone
-        .then(mpsc::channel)
+        .then(crate::record::bounded_audio_channel)
         .map(|(tx, rx)| (Some(tx), Some(rx)))
         .unwrap_or((None, None));
     (
@@ -1353,6 +1553,7 @@ fn start_recorder(
 
 fn start_encoder(
     ffmpeg: &std::path::Path,
+    video_encoder: String,
     configuration: &RecordingConfiguration,
     out_path: PathBuf,
     receivers: EncoderReceivers,
@@ -1373,7 +1574,7 @@ fn start_encoder(
         bitrate: crate::record::bitrate_for(width, height),
         audio: recorder.system_audio_spec,
         mic: recorder.microphone_spec,
-        video_encoder: crate::record::pick_video_encoder(ffmpeg),
+        video_encoder,
     };
     log::info!(
         "start_encoder: ffmpeg={} video {}x{}@{}, audio={}, mic={}",
@@ -1395,10 +1596,24 @@ fn start_encoder(
     .map_err(|e| e.to_string())
 }
 
-async fn resolve_ffmpeg(app: AppHandle) -> Result<PathBuf, String> {
+struct PreparedEncoder {
+    ffmpeg: PathBuf,
+    video_encoder: String,
+}
+
+async fn prepare_encoder(app: AppHandle) -> Result<PreparedEncoder, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
-        state.ffmpeg().map_err(|error| error.to_string())
+        let ffmpeg = state.ffmpeg().map_err(|error| error.to_string())?;
+        // Hardware probing can launch several short ffmpeg processes on first
+        // use. Finish it before native capture starts so live audio cannot fill
+        // its bounded queue while no pipe writer exists yet.
+        let video_encoder =
+            crate::record::pick_video_encoder(&ffmpeg).map_err(|error| error.to_string())?;
+        Ok(PreparedEncoder {
+            ffmpeg,
+            video_encoder,
+        })
     })
     .await
     .map_err(|error| format!("video encoder preparation task failed: {error}"))?
@@ -1460,12 +1675,13 @@ pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
         }
     }
 
-    // Resolve and, on first use, download + verify ffmpeg before channels or
-    // native capture exist. Retina BGRA frames can arrive at hundreds of MB/s;
-    // starting capture first would let the unbounded pipe grow throughout a
-    // network download. spawn_blocking keeps that work off Tauri's event loop.
-    let ffmpeg = match resolve_ffmpeg(app.clone()).await {
-        Ok(path) => path,
+    // Resolve and, on first use, download + verify ffmpeg and probe the video
+    // encoder before channels or native capture exist. Retina BGRA frames can
+    // arrive at hundreds of MB/s; preparing first prevents bounded queues from
+    // filling before their consumers exist. spawn_blocking keeps that work off
+    // Tauri's event loop.
+    let prepared = match prepare_encoder(app.clone()).await {
+        Ok(prepared) => prepared,
         Err(error) => {
             log::error!("recording: ffmpeg preparation failed: {error}");
             if reset_startup_if_current(&app, startup_token) {
@@ -1508,7 +1724,8 @@ pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let encoder = match start_encoder(
-        &ffmpeg,
+        &prepared.ffmpeg,
+        prepared.video_encoder,
         &configuration,
         out_path.clone(),
         receivers,
@@ -1626,9 +1843,29 @@ pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
     drop(active);
 
     if let Some(error) = failure {
-        emit_error(&app, "Could not pause screen recording.".into(), None);
+        log::error!("recording: current segment failed while pausing: {error}");
+        let completed_segments = take_completed_recording_segments(&app);
         reset_recording_session(&app);
-        return Err(error);
+        let (message, recovery_error) = match recover_completed_recording(&app, completed_segments) {
+            Ok(true) => (
+                "The current recording section failed. Earlier completed sections were saved as a partial recording."
+                    .to_string(),
+                None,
+            ),
+            Ok(false) => ("Could not pause screen recording.".to_string(), None),
+            Err(recovery_error) => (
+                "Could not pause screen recording. Kiri kept the completed sections so they are not lost."
+                    .to_string(),
+                Some(recovery_error),
+            ),
+        };
+        emit_error(&app, message, None);
+        return Err(match recovery_error {
+            Some(recovery_error) => {
+                format!("{error}; partial recording recovery failed: {recovery_error}")
+            }
+            None => error,
+        });
     }
     let state = app.state::<AppState>();
     let mut recording = state.recording.lock().unwrap();
@@ -1662,11 +1899,11 @@ pub async fn resume_recording(app: AppHandle) -> Result<(), String> {
         configuration
     };
 
-    // Resolve the encoder before recreating unbounded capture channels. A
+    // Resolve the encoder before recreating bounded capture channels. A
     // normal resume hits AppState's initialized path immediately; the async
     // boundary also makes inconsistent/direct IPC fail safely.
-    let ffmpeg = match resolve_ffmpeg(app.clone()).await {
-        Ok(path) => path,
+    let prepared = match prepare_encoder(app.clone()).await {
+        Ok(prepared) => prepared,
         Err(error) => {
             log::error!("recording: resume ffmpeg preparation failed: {error}");
             emit_error(&app, "Could not prepare the video encoder.".into(), None);
@@ -1691,7 +1928,8 @@ pub async fn resume_recording(app: AppHandle) -> Result<(), String> {
         }
     };
     let encoder = match start_encoder(
-        &ffmpeg,
+        &prepared.ffmpeg,
+        prepared.video_encoder,
         &configuration,
         out_path.clone(),
         receivers,
@@ -1760,7 +1998,7 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         recording.started_at = None;
         emit_recording_state(&app, &recording);
         (
-            recording.segments.clone(),
+            recording.take_completed_segments(),
             recording.active.take(),
             needs_active_segment,
             recording.return_pid,
@@ -1809,17 +2047,29 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
             failure = Some("The active recording session is unavailable.".into());
         }
         if let Some(error) = failure {
-            for segment in &final_segments {
-                let _ = std::fs::remove_file(segment);
-            }
+            log::error!("recording: active segment failed while stopping: {error}");
+            let recovery = recover_completed_recording(&handle, final_segments);
             reset_recording_session(&handle);
-            emit_error(&handle, error, None);
+            let message = match recovery {
+                Ok(true) => "Screen recording stopped unexpectedly. Earlier completed sections were saved as a partial recording."
+                    .to_string(),
+                Ok(false) => "Could not save the recording.".to_string(),
+                Err(recovery_error) => {
+                    log::error!("recording: partial recording recovery failed: {recovery_error}");
+                    "Could not save the recording. Kiri kept the completed sections so they are not lost."
+                        .to_string()
+                }
+            };
+            emit_error(&handle, message, None);
         } else {
             let result = finalize_recording(&handle, final_segments);
             reset_recording_session(&handle);
             match result {
                 Ok(()) => emit_notice(&handle, "Recording Saved".into(), "video.fill".into()),
-                Err(error) => emit_error(&handle, error, None),
+                Err(error) => {
+                    log::error!("recording: final import failed: {error}");
+                    emit_error(&handle, "Could not save the recording.".into(), None);
+                }
             }
         }
         if !was_kiri_frontmost {
@@ -1861,14 +2111,20 @@ fn finalize_recording(app: &AppHandle, segments: Vec<PathBuf>) -> Result<(), Str
             .map_err(|e| e.to_string())?;
         Ok(())
     })();
-    for segment in &segments {
-        let _ = std::fs::remove_file(segment);
-    }
-    let _ = std::fs::remove_file(&merged_path);
+    cleanup_finalization_files(&segments, &merged_path, result.is_ok());
     if result.is_ok() {
         emit_library_changed(app);
     }
     result
+}
+
+fn cleanup_finalization_files(segments: &[PathBuf], merged_path: &std::path::Path, imported: bool) {
+    if imported {
+        for segment in segments {
+            let _ = std::fs::remove_file(segment);
+        }
+    }
+    let _ = std::fs::remove_file(merged_path);
 }
 
 // ---------------------------------------------------------------------------
@@ -2012,7 +2268,13 @@ pub fn quit_app(app: AppHandle) -> Result<(), String> {
 
 #[cfg(test)]
 mod command_security_tests {
-    use super::sanitize_frontend_log;
+    use super::{
+        cleanup_finalization_files, decode_save_path_header, recording_channels,
+        sanitize_frontend_log, validate_capture_png,
+    };
+    use crate::core::policy::RecordingOptions;
+    use std::io::Cursor;
+    use std::sync::mpsc::TrySendError;
 
     #[test]
     fn frontend_error_log_is_single_line_and_bounded() {
@@ -2020,6 +2282,68 @@ mod command_security_tests {
         assert!(!sanitized.chars().any(char::is_control));
         assert!(sanitized.len() <= 4 * 1024);
         assert!(sanitized.starts_with("first second "));
+    }
+
+    #[test]
+    fn raw_video_frame_queue_has_a_hard_capacity() {
+        let (senders, _receivers) = recording_channels(RecordingOptions::default());
+        for _ in 0..crate::capture::VIDEO_FRAME_QUEUE_CAPACITY {
+            senders.video.try_send(vec![0]).unwrap();
+        }
+        assert!(matches!(
+            senders.video.try_send(vec![1]),
+            Err(TrySendError::Full(_))
+        ));
+    }
+
+    #[test]
+    fn failed_recording_import_retains_completed_segments_for_recovery() {
+        let directory = tempfile::tempdir().unwrap();
+        let segment = directory.path().join("completed.mp4");
+        let merged = directory.path().join("merged.mp4");
+        std::fs::write(&segment, b"completed segment").unwrap();
+        std::fs::write(&merged, b"failed merged output").unwrap();
+
+        cleanup_finalization_files(std::slice::from_ref(&segment), &merged, false);
+
+        assert!(segment.exists(), "valid completed segment must be retained");
+        assert!(
+            !merged.exists(),
+            "failed merge output is not recoverable data"
+        );
+
+        cleanup_finalization_files(std::slice::from_ref(&segment), &merged, true);
+        assert!(
+            !segment.exists(),
+            "durably imported segments may be removed"
+        );
+    }
+
+    #[test]
+    fn capture_confirmation_validates_png_before_consuming_the_session() {
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::new(8, 6));
+        let mut png = Cursor::new(Vec::new());
+        image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let png = png.into_inner();
+
+        assert_eq!(validate_capture_png(&png, 8, 6).unwrap(), (8, 6));
+        assert!(validate_capture_png(&png, 7, 6).is_err());
+        assert!(validate_capture_png(&png[..png.len() - 1], 8, 6).is_err());
+        assert!(validate_capture_png(b"not a png", 8, 6).is_err());
+
+        let mut oversized_header = png.clone();
+        oversized_header[16..20].copy_from_slice(&u32::MAX.to_be_bytes());
+        assert!(validate_capture_png(&oversized_header, 8, 6).is_err());
+    }
+
+    #[test]
+    fn editor_save_path_header_round_trips_unicode_without_raw_separators() {
+        assert_eq!(
+            decode_save_path_header("%2Ftmp%2F%E6%B5%8B%E8%AF%95%20image.png").unwrap(),
+            "/tmp/测试 image.png"
+        );
+        assert!(decode_save_path_header("/tmp/raw+path.png").is_err());
+        assert!(decode_save_path_header("path&extra=value").is_err());
     }
 }
 
