@@ -92,6 +92,11 @@ export function LibraryWindow() {
     });
   }, [assets, kindFilter, favoritesOnly, tagFilter]);
 
+  const visibleAssetIds = useMemo(
+    () => new Set(filteredAssets.map((asset) => asset.id)),
+    [filteredAssets],
+  );
+
   // Select a single card (clears others) — the default click behavior.
   const selectSingle = (id: string) => setSelection(new Set([id]));
   // Toggle one card in/out — used for ⌘-click.
@@ -107,8 +112,14 @@ export function LibraryWindow() {
   const clearSelection = () => setSelection(new Set());
   const selectAll = () => setSelection(new Set(filteredAssets.map((asset) => asset.id)));
 
-  // Stable ordered list of selected ids (Set preserves insertion order).
-  const selectionIds = [...selection];
+  // Only visible assets are actionable. A library refresh can remove a card
+  // before React has committed the effect that prunes its stale selection.
+  // Deriving this intersection keeps the batch bar from flashing for an
+  // asset that was just moved, restored, or permanently deleted.
+  const selectionIds = useMemo(
+    () => [...selection].filter((id) => visibleAssetIds.has(id)),
+    [selection, visibleAssetIds],
+  );
 
   const localNoticeSeq = useRef(0);
   const showLocalNotice = (title: string) => {
@@ -221,6 +232,16 @@ export function LibraryWindow() {
   useEffect(() => {
     clearSelection();
   }, [section, destination, query, kindFilter, favoritesOnly, tagFilter]);
+
+  // Library mutations arrive through `onLibraryChanged`. Reconcile the
+  // stored selection with the refreshed view so removed cards cannot leave
+  // an invisible selection behind.
+  useEffect(() => {
+    setSelection((current) => {
+      const next = new Set([...current].filter((id) => visibleAssetIds.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [visibleAssetIds]);
 
   useEffect(() => {
     api.getShortcutLabel().then(setShortcutLabel).catch(() => {});
@@ -600,14 +621,14 @@ export function LibraryWindow() {
       </div>
 
       {/* Grid */}
-      {selection.size > 0 && (
+      {selectionIds.length > 0 && (
         <BatchActionBar
-          count={selection.size}
+          count={selectionIds.length}
           showingTrash={showingTrash}
           allFavorites={selectionIds.length > 0 && selectionIds.every((id) => assets.find((a) => a.id === id)?.isFavorite)}
           onRestore={() => {
             void api
-              .batchRestore([...selection])
+              .batchRestore(selectionIds)
               .then(() => showLocalNotice(t("Restored to Library")))
               .catch(() => {});
             clearSelection();
@@ -617,13 +638,13 @@ export function LibraryWindow() {
               "batchDelete",
               t("Delete these captures permanently?"),
               t("This cannot be undone."),
-              t("Delete Permanently (N)").replace("{n}", String(selection.size)),
-              [...selection],
+              t("Delete Permanently (N)").replace("{n}", String(selectionIds.length)),
+              selectionIds,
             )
           }
           onMoveToTrash={() => {
             void api
-              .batchMoveToTrash([...selection])
+              .batchMoveToTrash(selectionIds)
               .then(() => showLocalNotice(t("Moved to Trash")))
               .catch(() => {});
             clearSelection();
@@ -631,7 +652,7 @@ export function LibraryWindow() {
           onToggleFavorite={() => {
             const allFav = selectionIds.every((id) => assets.find((a) => a.id === id)?.isFavorite);
             void api
-              .batchSetFavorite([...selection], !allFav)
+              .batchSetFavorite(selectionIds, !allFav)
               .then(() => showLocalNotice(allFav ? t("Remove from Favorites") : t("Add to Favorites")))
               .catch(() => {});
             clearSelection();
