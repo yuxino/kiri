@@ -2,14 +2,16 @@
 //! CaptureCoordinator.swift / RegionRecorder.swift (legacy backend).
 
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::Weak;
 
 use anyhow::{anyhow, bail, Result};
 use block2::RcBlock;
 use objc2::msg_send;
 use objc2::rc::Retained;
 use objc2::runtime::{NSObjectProtocol, ProtocolObject};
-use objc2::{AnyThread, DefinedClass};
+use objc2::{AnyThread, DefinedClass, MainThreadMarker};
 use objc2_app_kit::{NSBitmapImageRep, NSEvent, NSScreen};
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
 use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGImage};
@@ -229,11 +231,9 @@ fn active_screen() -> Result<ActiveScreen> {
     })
 }
 
-fn shareable_content() -> Result<Retained<SCShareableContent>> {
-    // SCShareableContent is MainThreadOnly: the query must run on the main
-    // thread even when this is called from a background thread (recording
-    // starts off the UI thread). dispatch2 lets us hop to the main queue and
-    // wait for the completion handler synchronously.
+fn shareable_content(_main_thread: MainThreadMarker) -> Result<Retained<SCShareableContent>> {
+    // The marker makes it impossible for call sites to initiate this
+    // MainThreadOnly request from a Tokio worker.
     let (tx, rx) = mpsc::channel::<std::result::Result<Retained<SCShareableContent>, String>>();
     let block = RcBlock::new(
         move |content: *mut SCShareableContent, error: *mut NSError| {
@@ -318,6 +318,103 @@ fn make_filter(
     }
 }
 
+/// Sendable ownership wrapper for a retained SCContentFilter pointer. If a
+/// timed-out receiver drops a queued completion, Drop still balances the
+/// native retain instead of leaking it at the timeout boundary.
+struct RecordingFilterPointer(Option<usize>);
+
+impl RecordingFilterPointer {
+    fn into_raw(mut self) -> usize {
+        self.0
+            .take()
+            .expect("recording filter pointer consumed once")
+    }
+}
+
+impl Drop for RecordingFilterPointer {
+    fn drop(&mut self) {
+        if let Some(pointer) = self.0.take() {
+            unsafe {
+                drop(Retained::from_raw(pointer as *mut SCContentFilter));
+            }
+        }
+    }
+}
+
+fn recording_filter_pointer(
+    display_id: u32,
+    own_process_id: i32,
+    excepted_window_ids: Vec<u32>,
+) -> Result<usize> {
+    if MainThreadMarker::new().is_some() {
+        bail!("recording filter preparation must not block the main thread");
+    }
+
+    let (tx, rx) = mpsc::channel::<std::result::Result<RecordingFilterPointer, String>>();
+    // Only registration happens synchronously on main. Waiting for SCK stays
+    // on the async command's worker thread below.
+    dispatch2::run_on_main(move |_main_thread| {
+        let block = RcBlock::new(
+            move |content: *mut SCShareableContent, error: *mut NSError| {
+                if !error.is_null() {
+                    let error = unsafe { Retained::retain(error).unwrap() };
+                    let _ = tx.send(Err(error.localizedDescription().to_string()));
+                    return;
+                }
+                if content.is_null() {
+                    let _ = tx.send(Err("shareable content failed".to_string()));
+                    return;
+                }
+
+                // Retain on the callback queue, then consume and inspect the
+                // MainThreadOnly object inside a main-thread closure.
+                let content = unsafe { Retained::retain(content).unwrap() };
+                let content_pointer = Retained::into_raw(content) as usize;
+                let completion_tx = tx.clone();
+                let excepted_window_ids = excepted_window_ids.clone();
+                dispatch2::run_on_main(move |_main_thread| {
+                    let result = (|| -> std::result::Result<RecordingFilterPointer, String> {
+                        let content = unsafe {
+                            Retained::from_raw(content_pointer as *mut SCShareableContent)
+                        }
+                        .ok_or_else(|| {
+                            "shareable content callback returned an invalid object".to_string()
+                        })?;
+                        let displays = unsafe { content.displays() };
+                        let display = displays
+                            .iter()
+                            .find(|display| unsafe { display.displayID() } == display_id)
+                            .ok_or_else(|| {
+                                "The selected display is no longer available.".to_string()
+                            })?;
+                        let filter =
+                            make_filter(&content, &display, own_process_id, &excepted_window_ids);
+                        Ok(RecordingFilterPointer(Some(
+                            Retained::into_raw(filter) as usize
+                        )))
+                    })();
+                    // SendError owns and drops a successful pointer guard, so
+                    // a completion racing a timeout cannot leak the filter.
+                    let _ = completion_tx.send(result);
+                });
+            },
+        );
+        unsafe {
+            SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(
+                false,
+                true,
+                &block,
+            );
+        }
+    });
+
+    let pointer = rx
+        .recv_timeout(std::time::Duration::from_secs(8))
+        .map_err(|_| anyhow!("shareable content timed out after 8s"))?
+        .map_err(|message| anyhow!(message))?;
+    Ok(pointer.into_raw())
+}
+
 fn collect_window_rects(content: &SCShareableContent, display_id: CGDirectDisplayID) -> Vec<Rect> {
     let display_bounds = CGDisplayBounds(display_id);
     let own_process_id = std::process::id() as i32;
@@ -393,8 +490,10 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         }
     }
 
+    let main_thread = MainThreadMarker::new()
+        .ok_or_else(|| anyhow!("display capture must start on the main thread"))?;
     let screen = active_screen()?;
-    let content = shareable_content()?;
+    let content = shareable_content(main_thread)?;
     let displays = unsafe { content.displays() };
     let display = displays
         .iter()
@@ -469,10 +568,14 @@ pub struct AudioFormat {
     pub is_non_interleaved: bool,
 }
 
-struct DelegateState {
+struct DelegateSenders {
     video_tx: mpsc::Sender<Vec<u8>>,
     audio_tx: Option<mpsc::Sender<Vec<u8>>>,
     mic_tx: Option<mpsc::Sender<Vec<u8>>>,
+}
+
+struct DelegateState {
+    senders: Weak<DelegateSenders>,
     audio_format: OnceLock<AudioFormat>,
     mic_format: OnceLock<AudioFormat>,
     /// Set before the stream stops so late frame callbacks (already queued
@@ -489,8 +592,8 @@ struct DelegateState {
 pub struct MacRecordingSession {
     stop_tx: mpsc::Sender<()>,
     /// Receives the stream-thread's completion notification after a stop.
-    stop_done_rx: mpsc::Receiver<()>,
-    _thread: std::thread::JoinHandle<()>,
+    stop_done_rx: mpsc::Receiver<std::result::Result<(), String>>,
+    thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl MacRecordingSession {
@@ -512,18 +615,13 @@ impl MacRecordingSession {
             bail!("Microphone recording requires macOS 15 or later.");
         }
 
-        // SCShareableContent is MainThreadOnly: resolve it on the main
-        // thread. The recorder may be started from a background thread (the
-        // UI must stay responsive), so hop to the main thread via the
-        // process-wide dispatch main queue when needed.
-        let content = shareable_content()?;
-        let displays = unsafe { content.displays() };
-        let display = displays
-            .iter()
-            .find(|display| unsafe { display.displayID() } == display_id)
-            .ok_or_else(|| anyhow!("The selected display is no longer available."))?;
+        // SCShareableContent and the objects obtained from it are
+        // MainThreadOnly. Build the filter on the main thread, then transfer
+        // its retained ownership to the dedicated stream thread as a raw
+        // pointer. No SCK content object is inspected on the Tokio worker.
         let own_process_id = std::process::id() as i32;
-        let filter = make_filter(&content, &display, own_process_id, excepted_window_ids);
+        let filter_ptr =
+            recording_filter_pointer(display_id, own_process_id, excepted_window_ids.to_vec())?;
         log::info!("MacRecordingSession: filter created");
 
         let width =
@@ -533,11 +631,7 @@ impl MacRecordingSession {
 
         let (stop_tx, stop_rx) = mpsc::channel::<()>();
         let (result_tx, result_rx) = mpsc::channel::<Result<()>>();
-        let (stop_done_tx, stop_done_rx) = mpsc::channel::<()>();
-        // Transfer ownership across the thread boundary via a raw pointer;
-        // the recorder thread owns the filter exclusively afterwards.
-        let filter_ptr = Retained::into_raw(filter) as usize;
-
+        let (stop_done_tx, stop_done_rx) = mpsc::channel::<std::result::Result<(), String>>();
         log::info!("MacRecordingSession: spawning stream thread");
         let thread = std::thread::spawn(move || {
             log::info!("MacRecordingSession: stream thread running");
@@ -583,18 +677,20 @@ impl MacRecordingSession {
                 configuration
             };
 
-            let state = DelegateState {
+            let senders = Arc::new(DelegateSenders {
                 video_tx,
                 audio_tx,
                 mic_tx,
+            });
+            let state = Arc::new(DelegateState {
+                senders: Arc::downgrade(&senders),
                 audio_format: OnceLock::new(),
                 mic_format: OnceLock::new(),
                 stopped: std::sync::atomic::AtomicBool::new(false),
                 frames: std::sync::atomic::AtomicU64::new(0),
-            };
-            let state_ptr = Box::into_raw(Box::new(state)) as usize;
+            });
 
-            let delegate = KiriStreamDelegate::with_state(state_ptr);
+            let delegate = KiriStreamDelegate::with_state(state);
             let queue = dispatch2::DispatchQueue::new("io.yuxino.kiri.stream", None);
 
             let delegate_ref: &KiriStreamDelegate = &delegate;
@@ -608,6 +704,7 @@ impl MacRecordingSession {
             };
             let output: &ProtocolObject<dyn SCStreamOutput> =
                 ProtocolObject::from_ref(delegate_ref);
+            let mut registered_outputs = Vec::new();
             if let Err(error) = unsafe {
                 stream.addStreamOutput_type_sampleHandlerQueue_error(
                     output,
@@ -615,9 +712,11 @@ impl MacRecordingSession {
                     Some(&queue),
                 )
             } {
+                let _ = remove_stream_outputs(&stream, output, &queue, &registered_outputs);
                 let _ = result_tx.send(Err(anyhow!("{error:?}")));
                 return;
             }
+            registered_outputs.push(SCStreamOutputType::Screen);
             if options.captures_system_audio {
                 if let Err(error) = unsafe {
                     stream.addStreamOutput_type_sampleHandlerQueue_error(
@@ -626,9 +725,11 @@ impl MacRecordingSession {
                         Some(&queue),
                     )
                 } {
+                    let _ = remove_stream_outputs(&stream, output, &queue, &registered_outputs);
                     let _ = result_tx.send(Err(anyhow!("{error:?}")));
                     return;
                 }
+                registered_outputs.push(SCStreamOutputType::Audio);
             }
             if options.captures_microphone {
                 if let Err(error) = unsafe {
@@ -638,14 +739,17 @@ impl MacRecordingSession {
                         Some(&queue),
                     )
                 } {
+                    let _ = remove_stream_outputs(&stream, output, &queue, &registered_outputs);
                     let _ = result_tx.send(Err(anyhow!("{error:?}")));
                     return;
                 }
+                registered_outputs.push(SCStreamOutputType::Microphone);
             }
 
             log::info!("MacRecordingSession: starting capture…");
             if let Err(error) = start_capture_sync(&stream) {
                 log::error!("MacRecordingSession: start_capture_sync failed: {error}");
+                let _ = remove_stream_outputs(&stream, output, &queue, &registered_outputs);
                 let _ = result_tx.send(Err(error));
                 return;
             }
@@ -654,39 +758,38 @@ impl MacRecordingSession {
 
             log::info!("MacRecordingSession: stream thread got stop signal");
             let _ = stop_rx.recv();
-            unsafe {
-                let state = &mut *(state_ptr as *mut DelegateState);
-                state
-                    .stopped
-                    .store(true, std::sync::atomic::Ordering::Relaxed);
-                log::info!(
-                    "MacRecordingSession: stopping after {} frames",
-                    state.frames.load(std::sync::atomic::Ordering::Relaxed)
-                );
-            }
-            // Do NOT call stopCaptureWithCompletionHandler here: it can block
-            // (and its completion may be dispatched onto the sample-handler
-            // queue, deadlocking this thread). Dropping the stream and the
-            // senders (below) signals EOF to ffmpeg and lets SCK tear the
-            // stream down on its own.
-            log::info!("MacRecordingSession: stopping capture (drop)…");
-            // Give SCK a moment to drain any frame callbacks already queued
-            // on the stream queue before we free the delegate state; freeing
-            // it first lets a late callback touch freed memory (SIGSEGV in
-            // stream_didOutputSampleBuffer → Sender::send).
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            // Delegate (and frame senders) drop here → EOF for ffmpeg.
-            unsafe {
-                let _ = Box::from_raw(state_ptr as *mut DelegateState);
-            }
-            // `stream` drops at the end of this scope, releasing the SCK
-            // stream (which stops capture). Only after that notify the stop
-            // waiter — otherwise the stream would still be capturing when
-            // the caller believes recording has stopped.
+            let state = &delegate.ivars().state;
+            state
+                .stopped
+                .store(true, std::sync::atomic::Ordering::Release);
+            log::info!(
+                "MacRecordingSession: stopping after {} frames",
+                state.frames.load(std::sync::atomic::Ordering::Relaxed)
+            );
+            // Removing outputs prevents new sample delivery; the empty
+            // synchronous task is then a FIFO drain barrier on the serial
+            // sample queue. Do not call stopCaptureWithCompletionHandler
+            // here: on affected macOS versions that call can block before a
+            // completion is scheduled (the reason Kiri previously removed
+            // it in the recording-stop deadlock fix).
+            let stop_result = remove_stream_outputs(&stream, output, &queue, &registered_outputs);
+            // The delegate intentionally holds only a Weak reference. Queue
+            // drain guarantees no callback owns a temporary strong Arc, so
+            // this closes every frame channel before stop_done and gives
+            // ffmpeg deterministic EOF even if SCK retains the delegate.
+            drop(senders);
+            log::info!("MacRecordingSession: capture stopped; releasing stream…");
+            // DelegateState is owned by the Objective-C delegate through an
+            // Arc. Any callback already retained by SCK therefore keeps the
+            // state alive as a final safety net; the queue drain above is the
+            // synchronization that lets normal shutdown release it now.
             drop(stream);
+            drop(delegate);
+            drop(queue);
             // Notify the stop waiter that the stream thread has finished
-            // tearing down (senders dropped → ffmpeg EOF, stream released).
-            let _ = stop_done_tx.send(());
+            // releasing stream/delegate ownership and all frame senders have
+            // closed, so ffmpeg has observed EOF.
+            let _ = stop_done_tx.send(stop_result.map_err(|error| error.to_string()));
         });
 
         log::info!("MacRecordingSession: waiting for stream thread result…");
@@ -697,20 +800,47 @@ impl MacRecordingSession {
         Ok(MacRecordingSession {
             stop_tx,
             stop_done_rx,
-            _thread: thread,
+            thread: Some(thread),
         })
     }
 
-    fn request_stop(&self) -> Result<()> {
+    fn request_stop(&mut self) -> Result<()> {
+        if self.thread.is_none() {
+            return Ok(());
+        }
         log::info!("MacRecordingSession: request_stop sending…");
         let _ = self.stop_tx.send(());
         // The result_rx is a one-shot used at start; the stop completion is
         // delivered on stop_done_rx. Waiting on result_rx here would
         // immediately error ("recorder thread exited early") because its
         // sender was already dropped after the start handshake.
-        self.stop_done_rx
-            .recv_timeout(std::time::Duration::from_secs(5))
-            .map_err(|_| anyhow!("recorder stop timed out"))?;
+        let stop_result = match self
+            .stop_done_rx
+            .recv_timeout(std::time::Duration::from_secs(8))
+        {
+            Ok(result) => result.map_err(|error| anyhow!(error)),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // The thread still owns its stream, delegate, and Arc state.
+                // Detach rather than defeating the timeout with an unbounded
+                // join; late cleanup remains memory-safe.
+                let _ = self.thread.take();
+                return Err(anyhow!("recorder stop timed out"));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(anyhow!("recorder thread exited during shutdown"))
+            }
+        };
+        let join_result = if let Some(thread) = self.thread.take() {
+            thread
+                .join()
+                .map_err(|_| anyhow!("recorder thread panicked during shutdown"))
+        } else {
+            Ok(())
+        };
+        // Always join, even when native stop reported an error. Otherwise
+        // Drop would retry a consumed one-shot and detach the cleanup thread.
+        join_result?;
+        stop_result?;
         log::info!("MacRecordingSession: request_stop done");
         Ok(())
     }
@@ -719,6 +849,12 @@ impl MacRecordingSession {
 impl super::PlatformRecorder for MacRecordingSession {
     fn stop(&mut self) -> Result<()> {
         self.request_stop()
+    }
+}
+
+impl Drop for MacRecordingSession {
+    fn drop(&mut self) {
+        let _ = self.request_stop();
     }
 }
 
@@ -735,9 +871,30 @@ fn start_capture_sync(stream: &SCStream) -> Result<()> {
     });
     let block_ref: &block2::Block<dyn Fn(*mut NSError)> = &block;
     unsafe { stream.startCaptureWithCompletionHandler(Some(block_ref)) };
-    rx.recv()
-        .map_err(|_| anyhow!("start capture callback dropped"))?
+    rx.recv_timeout(std::time::Duration::from_secs(8))
+        .map_err(|_| anyhow!("start capture timed out"))?
         .map_err(|message| anyhow!(message))
+}
+
+fn remove_stream_outputs(
+    stream: &SCStream,
+    output: &ProtocolObject<dyn SCStreamOutput>,
+    queue: &dispatch2::DispatchQueue,
+    registered_outputs: &[SCStreamOutputType],
+) -> Result<()> {
+    let mut first_error = None;
+    for output_type in registered_outputs.iter().rev().copied() {
+        if let Err(error) = unsafe { stream.removeStreamOutput_type_error(output, output_type) } {
+            first_error.get_or_insert_with(|| anyhow!("{error:?}"));
+        }
+    }
+    // DispatchQueue::new creates a serial queue. A synchronous no-op from the
+    // recorder thread waits for every previously submitted callback.
+    queue.exec_sync(|| {});
+    match first_error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -809,7 +966,7 @@ fn deinterleave_f32(planar: &[u8], channels: u32, _format: AudioFormat) -> Vec<u
 }
 
 pub struct KiriStreamDelegateIvars {
-    state: usize,
+    state: Arc<DelegateState>,
 }
 
 objc2::define_class!(
@@ -832,12 +989,15 @@ objc2::define_class!(
             if !unsafe { buffer.data_is_ready() } {
                 return;
             }
-            let state = unsafe { &*(self.ivars().state as *const DelegateState) };
-            // Late callback after stop: ignore to avoid use-after-free of
-            // the senders (the receiver is dropped once the stream stops).
-            if state.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+            let state = &self.ivars().state;
+            // Late callbacks retain the delegate and its Arc-owned state, but
+            // do not forward more data once stop begins.
+            if state.stopped.load(std::sync::atomic::Ordering::Acquire) {
                 return;
             }
+            let Some(senders) = state.senders.upgrade() else {
+                return;
+            };
             if of_type == SCStreamOutputType::Screen {
                 if let Some(frame) = copy_pixel_buffer(buffer) {
                     let count = state
@@ -847,10 +1007,10 @@ objc2::define_class!(
                     if count % 30 == 0 {
                         log::info!("MacRecordingSession: {count} frames captured");
                     }
-                    let _ = state.video_tx.send(frame);
+                    let _ = senders.video_tx.send(frame);
                 }
             } else if of_type == SCStreamOutputType::Microphone {
-                if let Some(tx) = &state.mic_tx {
+                if let Some(tx) = &senders.mic_tx {
                     let format = state.mic_format.get_or_init(|| {
                         audio_format_from(buffer).unwrap_or(AudioFormat {
                             channels: 2,
@@ -867,7 +1027,7 @@ objc2::define_class!(
                         let _ = tx.send(payload);
                     }
                 }
-            } else if let Some(tx) = &state.audio_tx {
+            } else if let Some(tx) = &senders.audio_tx {
                 let format = state.audio_format.get_or_init(|| {
                     audio_format_from(buffer).unwrap_or(AudioFormat {
                         channels: 2,
@@ -903,9 +1063,49 @@ objc2::define_class!(
 );
 
 impl KiriStreamDelegate {
-    pub fn with_state(state_ptr: usize) -> Retained<Self> {
-        let this =
-            KiriStreamDelegate::alloc().set_ivars(KiriStreamDelegateIvars { state: state_ptr });
+    fn with_state(state: Arc<DelegateState>) -> Retained<Self> {
+        let this = KiriStreamDelegate::alloc().set_ivars(KiriStreamDelegateIvars { state });
         unsafe { msg_send![super(this), init] }
+    }
+}
+
+#[cfg(test)]
+mod recording_lifetime_tests {
+    use super::*;
+
+    #[test]
+    fn native_delegate_owns_callback_state_and_frame_senders() {
+        let (video_tx, video_rx) = mpsc::channel();
+        let senders = Arc::new(DelegateSenders {
+            video_tx,
+            audio_tx: None,
+            mic_tx: None,
+        });
+        let state = Arc::new(DelegateState {
+            senders: Arc::downgrade(&senders),
+            audio_format: OnceLock::new(),
+            mic_format: OnceLock::new(),
+            stopped: std::sync::atomic::AtomicBool::new(false),
+            frames: std::sync::atomic::AtomicU64::new(0),
+        });
+        let weak_state = Arc::downgrade(&state);
+        let delegate = KiriStreamDelegate::with_state(state.clone());
+
+        drop(state);
+        assert!(weak_state.upgrade().is_some());
+        assert!(matches!(
+            video_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+
+        drop(senders);
+        assert!(weak_state.upgrade().is_some());
+        assert!(matches!(
+            video_rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+
+        drop(delegate);
+        assert!(weak_state.upgrade().is_none());
     }
 }

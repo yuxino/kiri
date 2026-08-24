@@ -228,16 +228,15 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
         }
     }
     #[cfg(target_os = "macos")]
-    let main_height = {
+    let main_height = dispatch2::run_on_main(|mtm| {
         use objc2_app_kit::NSScreen;
-        let mtm = objc2::MainThreadMarker::new().unwrap();
         NSScreen::mainScreen(mtm)
             .map(|screen| {
                 let frame = screen.frame();
                 frame.origin.y + frame.size.height
             })
             .unwrap_or(0.0)
-    };
+    });
     #[cfg(windows)]
     let main_height = 0.0;
 

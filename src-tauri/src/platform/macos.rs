@@ -16,12 +16,17 @@ use objc2_foundation::{NSArray, NSString, NSURL};
 use super::{ClickMonitorHandle, MicrophoneAccess};
 
 pub fn activate_application(pid: u32) {
-    if let Some(application) =
-        NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
-    {
-        application
-            .activateWithOptions(objc2_app_kit::NSApplicationActivationOptions::ActivateAllWindows);
-    }
+    // Focus restoration is also reached from async recording finalization.
+    // Keep the AppKit call on the main thread on every path.
+    dispatch2::run_on_main(move |_main_thread| {
+        if let Some(application) =
+            NSRunningApplication::runningApplicationWithProcessIdentifier(pid as i32)
+        {
+            application.activateWithOptions(
+                objc2_app_kit::NSApplicationActivationOptions::ActivateAllWindows,
+            );
+        }
+    });
 }
 
 pub fn reveal_path(path: &Path) {
@@ -92,9 +97,11 @@ pub fn set_window_click_through(app: &tauri::AppHandle, label: &str) {
 /// The CGWindowID for one of Kiri's windows (NSWindow.windowNumber).
 pub fn window_capture_id(app: &AppHandle, label: &str) -> Option<u32> {
     let window = app.get_webview_window(label)?;
-    let ns_window = window.ns_window().ok()? as *mut NSWindow;
-    let ns_window = unsafe { &*ns_window };
-    Some(ns_window.windowNumber() as u32)
+    dispatch2::run_on_main(move |_main_thread| {
+        let ns_window = window.ns_window().ok()? as *mut NSWindow;
+        let ns_window = unsafe { &*ns_window };
+        Some(ns_window.windowNumber() as u32)
+    })
 }
 
 pub fn set_window_capture_excluded(app: &AppHandle, label: &str, excluded: bool) {

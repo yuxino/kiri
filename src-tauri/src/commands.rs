@@ -589,11 +589,20 @@ fn create_overlay_window(
 #[cfg(target_os = "macos")]
 fn raise_overlay_window(window: &tauri::WebviewWindow) {
     use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow};
-    if let Ok(ns_window) = window.ns_window() {
-        let ns_window = ns_window as *mut NSWindow;
-        let ns_window = unsafe { &*ns_window };
-        ns_window.setLevel(NSScreenSaverWindowLevel);
-    }
+
+    // Recording commands are async Tauri commands and therefore run on a
+    // Tokio worker. AppKit traps the whole process if NSWindow is mutated
+    // there, so keep the native pointer lookup and mutation on the main
+    // thread. `run_on_main` executes inline for the synchronous capture path
+    // and dispatches synchronously for countdown/control-panel creation.
+    let window = window.clone();
+    dispatch2::run_on_main(move |_main_thread| {
+        if let Ok(ns_window) = window.ns_window() {
+            let ns_window = ns_window as *mut NSWindow;
+            let ns_window = unsafe { &*ns_window };
+            ns_window.setLevel(NSScreenSaverWindowLevel);
+        }
+    });
 }
 
 #[cfg(not(target_os = "macos"))]
