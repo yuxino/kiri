@@ -1240,8 +1240,9 @@ function OcrPanel(props: {
 }
 
 const sizeInputStyle: React.CSSProperties = {
-  width: 34,
+  width: 58,
   height: 26,
+  boxSizing: "border-box",
   borderRadius: 8,
   border: "1px solid rgba(255,255,255,0.18)",
   background: "rgba(255,255,255,0.08)",
@@ -1484,21 +1485,23 @@ function Toolbar(props: ToolbarProps) {
     onSetSize,
   } = props;
 
-  // Quick pixel-size entry. As soon as both output-pixel values are valid,
-  // apply the size to the point-based selection through onSetSize.
+  // Quick pixel-size entry: keep edits local until the user confirms them.
+  // Values are output pixels; the selection is point-based, so onSetSize
+  // converts them using the display scale.
   const [sizeW, setSizeW] = useState("");
   const [sizeH, setSizeH] = useState("");
-  const applySize = (widthValue: string, heightValue: string) => {
-    const w = Math.round(Number(widthValue));
-    const h = Math.round(Number(heightValue));
+  const applySize = () => {
+    const w = Math.round(Number(sizeW));
+    const h = Math.round(Number(sizeH));
     if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return;
     onSetSize(w, h);
   };
 
   const onSizeInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    // Return keeps its window-level meaning: finish the screenshot. Other
-    // keystrokes stay inside the number field and cannot switch tools.
-    if (e.key !== "Enter" && e.key !== "Return") e.stopPropagation();
+    if (e.key === "Enter" || e.key === "Return") applySize();
+    // Number-field input must not trigger the overlay's tool shortcuts or
+    // finish the screenshot when Return is used to confirm the dimensions.
+    e.stopPropagation();
   };
 
   const slider =
@@ -1658,7 +1661,7 @@ function Toolbar(props: ToolbarProps) {
         <ToolButton icon="arrow.uturn.backward" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={onUndo} />
         <ToolButton icon="arrow.uturn.forward" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={onRedo} />
         {sep}
-        {/* Quick pixel-size entry — valid values resize the selection live. */}
+        {/* Quick pixel-size entry — confirm before resizing the selection. */}
         <div
           style={{
             display: "flex",
@@ -1671,11 +1674,7 @@ function Toolbar(props: ToolbarProps) {
             type="number"
             min={1}
             value={sizeW}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSizeW(value);
-              applySize(value, sizeH);
-            }}
+            onChange={(e) => setSizeW(e.target.value)}
             onKeyDown={onSizeInputKeyDown}
             placeholder={t("Width (px)").charAt(0)}
             title={t("Width (px)")}
@@ -1686,16 +1685,13 @@ function Toolbar(props: ToolbarProps) {
             type="number"
             min={1}
             value={sizeH}
-            onChange={(e) => {
-              const value = e.target.value;
-              setSizeH(value);
-              applySize(sizeW, value);
-            }}
+            onChange={(e) => setSizeH(e.target.value)}
             onKeyDown={onSizeInputKeyDown}
             placeholder={t("Height (px)").charAt(0)}
             title={t("Height (px)")}
             style={sizeInputStyle}
           />
+          <ToolButton icon="checkmark" title={t("Apply size")} onClick={applySize} />
         </div>
         <ToolButton icon="checkmark" title={t("Done — Copy to clipboard · Return")} primary onClick={onDone} />
         <div style={{ position: "relative" }}>
