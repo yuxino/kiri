@@ -750,7 +750,11 @@ export function OverlayWindow() {
             }}
           />
           <SelectionHandles rect={displayRect} />
-          <SizeBadge rect={displayRect} bounds={bounds} />
+          <SizeBadge
+            rect={displayRect}
+            bounds={bounds}
+            pixelScale={context?.scale ?? 1}
+          />
         </>
       )}
 
@@ -1089,9 +1093,17 @@ function SelectionHandles(props: { rect: Rect }) {
   );
 }
 
-function SizeBadge(props: { rect: Rect; bounds: Rect }) {
+function SizeBadge(props: { rect: Rect; bounds: Rect; pixelScale: number }) {
   const { rect, bounds } = props;
-  const label = `${Math.round(rect.width)} × ${Math.round(rect.height)}`;
+  const pixelScale =
+    Number.isFinite(props.pixelScale) && props.pixelScale > 0 ? props.pixelScale : 1;
+  // Selection geometry is expressed in display points, while the exact-size
+  // controls and exported capture use physical pixels. Keep the badge in the
+  // same unit so a 200 × 300 px request does not appear as 100 × 150 on a
+  // Retina display.
+  const pixelWidth = Math.round(rect.width * pixelScale);
+  const pixelHeight = Math.round(rect.height * pixelScale);
+  const label = `${pixelWidth} × ${pixelHeight}`;
   // Spec §3.2.3: badge sits 6pt above the selection, x clamped to
   // [6, bounds.maxX - badgeWidth - 6]; if it would clip the top edge,
   // it moves inside the selection's top instead.
