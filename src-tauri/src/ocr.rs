@@ -1,18 +1,26 @@
 //! Local OCR — Vision on macOS, Windows.Media.Ocr on Windows.
-//! Mirrors TextRecognizer.swift: .accurate level, language correction,
-//! languages [zh-Hans, zh-Hant, en-US, ja-JP], top-1 candidate per line.
+//! Uses accurate recognition with language correction and automatic language
+//! detection, returning the top candidate per line.
 
 use anyhow::{anyhow, Result};
+
+#[cfg(target_os = "macos")]
+fn make_macos_text_request() -> objc2::rc::Retained<objc2_vision::VNRecognizeTextRequest> {
+    use objc2_vision::{VNRecognizeTextRequest, VNRequestTextRecognitionLevel};
+
+    let request = VNRecognizeTextRequest::new();
+    request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
+    request.setUsesLanguageCorrection(true);
+    request.setAutomaticallyDetectsLanguage(true);
+    request
+}
 
 #[cfg(target_os = "macos")]
 pub fn recognize_text(png: &[u8]) -> Result<String> {
     use objc2::rc::Retained;
     use objc2::AnyThread;
-    use objc2_foundation::{NSArray, NSData, NSDictionary, NSString};
-    use objc2_vision::{
-        VNImageRequestHandler, VNRecognizeTextRequest, VNRecognizedTextObservation,
-        VNRequestTextRecognitionLevel,
-    };
+    use objc2_foundation::{NSArray, NSData, NSDictionary};
+    use objc2_vision::{VNImageRequestHandler, VNRecognizedTextObservation};
 
     let data = NSData::with_bytes(png);
     let handler = VNImageRequestHandler::initWithData_options(
@@ -21,19 +29,10 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
         &NSDictionary::new(),
     );
 
-    let request = VNRecognizeTextRequest::new();
-    request.setRecognitionLevel(VNRequestTextRecognitionLevel::Accurate);
-    request.setUsesLanguageCorrection(true);
-    let zh_hans = NSString::from_str("zh-Hans");
-    let zh_hant = NSString::from_str("zh-Hant");
-    let en_us = NSString::from_str("en-US");
-    let ja_jp = NSString::from_str("ja-JP");
-    let languages = NSArray::from_slice(&[&*zh_hans, &*zh_hant, &*en_us, &*ja_jp]);
-    request.setRecognitionLanguages(&languages);
+    let request = make_macos_text_request();
 
     let request_ref: &objc2_vision::VNRequest = &request;
-    let requests: Retained<NSArray<objc2_vision::VNRequest>> =
-        NSArray::from_slice(&[request_ref]);
+    let requests: Retained<NSArray<objc2_vision::VNRequest>> = NSArray::from_slice(&[request_ref]);
     let result = handler.performRequests_error(&requests);
     if result.is_err() {
         return Err(anyhow!("Text Recognition Failed"));
@@ -55,6 +54,17 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
         Err(anyhow!("No Text Found"))
     } else {
         Ok(text)
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::make_macos_text_request;
+
+    #[test]
+    fn macos_request_uses_automatic_language_detection() {
+        let request = make_macos_text_request();
+        assert!(request.automaticallyDetectsLanguage());
     }
 }
 
