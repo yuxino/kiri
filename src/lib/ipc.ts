@@ -71,6 +71,11 @@ export interface NoticeDto {
   symbol: string;
 }
 
+export interface GifConversionStateDto {
+  id: string;
+  isConverting: boolean;
+}
+
 export interface ErrorDto {
   message: string;
   recovery: string | null;
@@ -170,10 +175,7 @@ export const api = {
 
   startCapture: () => invoke<CaptureContextDto>("start_capture"),
   cancelCapture: () => invoke<void>("cancel_capture"),
-  confirmCapture: (png: Uint8Array, action: string) =>
-    invoke<void>("confirm_capture", png, {
-      headers: { "x-kiri-capture-action": action },
-    }),
+  confirmCapture: (png: Uint8Array) => invoke<void>("confirm_capture", png),
   copyText: (text: string) => invoke<void>("copy_text", { text }),
   getOcrProviderSettings: () =>
     invoke<OcrProviderSettingsDto>("get_ocr_provider_settings"),
@@ -245,6 +247,14 @@ export function onNotice(handler: (notice: NoticeDto) => void): Promise<Unlisten
   return listen<NoticeDto>("notice", (event) => handler(event.payload));
 }
 
+export function onGifConversionState(
+  handler: (state: GifConversionStateDto) => void,
+): Promise<UnlistenFn> {
+  return listen<GifConversionStateDto>("gif-conversion-state", (event) =>
+    handler(event.payload),
+  );
+}
+
 export function onError(handler: (error: ErrorDto) => void): Promise<UnlistenFn> {
   return listen<ErrorDto>("error", (event) => handler(event.payload));
 }
@@ -261,10 +271,6 @@ export function onRecordingState(
   handler: (state: RecordingState) => void,
 ): Promise<UnlistenFn> {
   return listen<RecordingState>("recording-state", (event) => handler(event.payload));
-}
-
-export function pinImageUrl(id: string): string {
-  return `kiri://pin/${id}.png`;
 }
 
 export function mediaUrl(id: string): string {

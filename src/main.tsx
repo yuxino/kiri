@@ -21,9 +21,6 @@ const ControlPanelWindow = React.lazy(() =>
 const RippleWindow = React.lazy(() =>
   import("./windows/RippleWindow").then((module) => ({ default: module.RippleWindow })),
 );
-const PinWindow = React.lazy(() =>
-  import("./windows/PinWindow").then((module) => ({ default: module.PinWindow })),
-);
 const EditorWindow = React.lazy(() =>
   import("./windows/EditorWindow").then((module) => ({ default: module.EditorWindow })),
 );
@@ -98,8 +95,6 @@ function App() {
       return <ControlPanelWindow />;
     case "ripple":
       return <RippleWindow />;
-    case "pin":
-      return <PinWindow id={params.get("id") ?? ""} />;
     case "editor":
       return <EditorWindow id={params.get("id") ?? ""} />;
     case "viewer":

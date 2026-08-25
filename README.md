@@ -19,11 +19,11 @@ workspace. Capture overlays stay out of completed screenshots and recordings.
 
 ## Features
 
-- **Screenshots** — window or region capture with precise selection.
+- **Screenshots** — window or region capture with precise selection and a movable mode selector; completion copies the result to the clipboard and saves it to the local library.
 - **Annotations** — pen, shapes, arrows, text, and mosaic with undo/redo; existing annotations stay selectable and editable.
 - **OCR** — local text recognition by default (macOS Vision / Windows.Media.Ocr), plus multiple optional profiles for Alibaba Cloud, OpenAI, or other image-capable services that implement the OpenAI Chat Completions API. Before every remote request, Kiri shows the destination, model, and selected-image details; only an explicit Send or Retry action uploads that selected region. Failures never retry, switch providers, or fall back to another upload automatically.
 - **Recording** — region recording with optional audio, pointer, and click highlights; a 3-2-1 countdown, a draggable control bar (Esc to stop), and Retina-quality MP4 output.
-- **GIF** — convert short recordings into looping GIFs.
+- **GIF** — convert short recordings into looping GIFs with visible conversion progress.
 - **Library** — date-grouped captures with favorites, tags, rename, search, copy, reveal, and a recoverable Trash. The sidebar and filter bar let you browse by type, favorites, and tags.
 
 ## Download

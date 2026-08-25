@@ -23,6 +23,12 @@ application or a durable product decision.
   — opt-in remote OCR and credential handling.
 - [`adr/0008-stable-development-signing-identity.md`](adr/0008-stable-development-signing-identity.md)
   — stable macOS privacy identity during development.
+- [`adr/0009-operation-local-feedback.md`](adr/0009-operation-local-feedback.md)
+  — operation-local progress and completion feedback.
+- [`adr/0010-single-action-screenshot-completion.md`](adr/0010-single-action-screenshot-completion.md)
+  — one clipboard-first completion action without an overflow menu.
+- [`adr/0011-movable-capture-mode-selector.md`](adr/0011-movable-capture-mode-selector.md)
+  — a top-centered mode selector that can be moved for the current capture.
 
 Completed implementation plans and the former Swift migration specifications
 are intentionally not kept in the working tree. Git history and release tags

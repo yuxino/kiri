@@ -19,7 +19,6 @@ const MEDIA_RANGE_MAX_BYTES: u64 = 1024 * 1024;
 
 pub struct ProtocolStore {
     frozen_capture: Mutex<Option<FrozenCapture>>,
-    pub pin_images: Mutex<HashMap<String, Vec<u8>>>,
     thumbnails: Mutex<ThumbnailCache>,
     thumbnail_generation: Mutex<()>,
 }
@@ -28,7 +27,6 @@ impl ProtocolStore {
     pub fn new() -> Self {
         Self {
             frozen_capture: Mutex::new(None),
-            pin_images: Mutex::new(HashMap::new()),
             thumbnails: Mutex::new(ThumbnailCache::with_limits(
                 THUMBNAIL_CACHE_MAX_BYTES,
                 THUMBNAIL_CACHE_MAX_ENTRIES,
@@ -129,23 +127,6 @@ pub fn set_frozen_png(store: &ProtocolStore, capture_id: uuid::Uuid, png: Arc<[u
     token
 }
 
-/// Releases the encoded image owned by a closed `pin-<uuid>` window.
-/// Returns true only when a valid pin label had a cached image to remove.
-pub fn clear_pin_image_for_window_label(store: &ProtocolStore, label: &str) -> bool {
-    let Some(id) = label.strip_prefix("pin-") else {
-        return false;
-    };
-    let Ok(id) = uuid::Uuid::parse_str(id) else {
-        return false;
-    };
-    store
-        .pin_images
-        .lock()
-        .unwrap()
-        .remove(&id.to_string())
-        .is_some()
-}
-
 pub fn with_thumbnail_invalidation<T, E>(
     store: &ProtocolStore,
     id: uuid::Uuid,
@@ -193,15 +174,6 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     // only into the overlay URL, never returned by the public IPC context.
     if host == "capture" {
         if let Some(bytes) = frozen_png_for_path(&store, &path) {
-            return respond_png(bytes);
-        }
-        return not_found();
-    }
-
-    // Pinned images: kiri://pin/<id>.png
-    if host == "pin" {
-        let id = path.trim_end_matches(".png");
-        if let Some(bytes) = store.pin_images.lock().unwrap().get(id).cloned() {
             return respond_png(bytes);
         }
         return not_found();
@@ -855,31 +827,6 @@ mod tests {
         assert!(!cache.entries.contains_key(&first.to_string()));
         assert!(!cache.entries.contains_key(&second.to_string()));
         assert!(cache.entries.contains_key(&retained.to_string()));
-    }
-
-    #[test]
-    fn clearing_a_destroyed_pin_window_releases_only_its_image() {
-        let store = ProtocolStore::new();
-        let id = uuid::Uuid::new_v4();
-        store
-            .pin_images
-            .lock()
-            .unwrap()
-            .insert(id.to_string(), vec![1, 2, 3]);
-
-        assert!(!clear_pin_image_for_window_label(
-            &store,
-            "viewer-not-a-pin"
-        ));
-        assert!(!clear_pin_image_for_window_label(&store, "pin-not-a-uuid"));
-        assert!(clear_pin_image_for_window_label(
-            &store,
-            &format!("pin-{id}")
-        ));
-        assert!(!clear_pin_image_for_window_label(
-            &store,
-            &format!("pin-{id}")
-        ));
     }
 
     #[test]

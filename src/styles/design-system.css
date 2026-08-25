@@ -340,6 +340,19 @@ textarea {
   gap: 4px;
   padding: 6px;
   align-items: center;
+  cursor: grab;
+  touch-action: none;
+  will-change: left, top;
+}
+
+.kiri-mode-select[data-dragging] {
+  cursor: grabbing;
+  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.34);
+}
+
+.kiri-mode-select[data-dragging] .kiri-mode-btn {
+  cursor: grabbing;
+  transform: none;
 }
 
 .kiri-mode-btn {

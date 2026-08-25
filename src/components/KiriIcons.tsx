@@ -13,8 +13,6 @@ import {
   CirclePause,
   CirclePlay,
   Copy,
-  Crop,
-  Download,
   Film,
   Folder,
   Grid3x3,
@@ -24,7 +22,6 @@ import {
   MousePointer2,
   Pause,
   Pen,
-  Pin,
   Play,
   PlaySquare,
   Redo2,
@@ -61,7 +58,7 @@ export type IconName =
   | "trash.slash" // notice: trash emptied
   | "pause.circle.fill" // notice: recording paused
   | "play.circle.fill" // notice: recording resumed
-  | "ellipsis.circle" // More
+  | "ellipsis.circle" // More / close editor
   | "xmark" // Cancel
   | "camera.viewfinder" // Screenshot mode
   | "record.circle" // Record mode
@@ -72,11 +69,8 @@ export type IconName =
   | "play.fill" // resume recording
   | "pause.fill" // pause recording
   | "stop.fill" // stop recording
-  | "crop" // more menu: reselect region
-  | "square.and.arrow.down" // more menu: save as
-  | "pin" // more menu: pin on screen
-  | "slider.horizontal.3" // more menu: open in editor
-  | "trash" // more menu: clear annotations
+  | "slider.horizontal.3" // Settings / adjustments
+  | "trash" // Clear annotations
   | "trash.fill" // library: move to trash
   | "doc.on.doc" // library: copy
   | "sparkles.rectangle.stack" // library: convert to GIF
@@ -117,9 +111,6 @@ const ICONS: Record<IconName, React.ComponentType<Record<string, unknown>>> = {
   "play.fill": Play,
   "pause.fill": Pause,
   "stop.fill": Square,
-  crop: Crop,
-  "square.and.arrow.down": Download,
-  pin: Pin,
   "slider.horizontal.3": SlidersHorizontal,
   trash: Trash2,
   "trash.fill": Trash2,

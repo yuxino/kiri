@@ -57,6 +57,28 @@ type Phase =
 type Mode = "screenshot" | "record" | "ocr";
 
 const ACCENT = "#7D69F5";
+const MODE_SELECTOR_DRAG_THRESHOLD = 4;
+const FLOATING_CONTROL_MARGIN = 8;
+
+type ModeSelectorDrag = {
+  pointerId: number;
+  captureTarget: Element;
+  start: Point;
+  origin: Point;
+  size: { width: number; height: number };
+  moved: boolean;
+};
+
+function clampFloatingControl(position: Point, size: { width: number; height: number }, bounds: Rect): Point {
+  const minLeft = minX(bounds) + FLOATING_CONTROL_MARGIN;
+  const minTop = minY(bounds) + FLOATING_CONTROL_MARGIN;
+  const maxLeft = Math.max(minLeft, maxX(bounds) - size.width - FLOATING_CONTROL_MARGIN);
+  const maxTop = Math.max(minTop, maxY(bounds) - size.height - FLOATING_CONTROL_MARGIN);
+  return {
+    x: Math.min(Math.max(position.x, minLeft), maxLeft),
+    y: Math.min(Math.max(position.y, minTop), maxTop),
+  };
+}
 
 // --- window hover candidate (WindowSelectionGeometry.candidate port) ---
 function reportFrontend(message: string) {
@@ -102,9 +124,13 @@ export function OverlayWindow() {
   const [remoteOcrFailed, setRemoteOcrFailed] = useState(false);
   const [recordOptions, setRecordOptions] = useState<RecordingOptions>(DEFAULT_RECORDING_OPTIONS);
   const [micSupported, setMicSupported] = useState(true);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [modeSelectorPosition, setModeSelectorPosition] = useState<Point | null>(null);
+  const [modeSelectorDragging, setModeSelectorDragging] = useState(false);
   const canvasRef = useRef<AnnotationCanvasHandle>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const modeSelectorRef = useRef<HTMLDivElement>(null);
+  const modeSelectorDragRef = useRef<ModeSelectorDrag | null>(null);
+  const suppressModeSelectorClickRef = useRef(false);
   const modeRef = useRef<Mode>("screenshot");
   const preparedOcrRef = useRef<PreparedOcrRequestDto | null>(null);
   const ocrGenerationRef = useRef(0);
@@ -172,6 +198,84 @@ export function OverlayWindow() {
     ? { x: 0, y: 0, width: context.displayWidth, height: context.displayHeight }
     : { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
 
+  const modeSelectorPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !event.isPrimary || modeSelectorDragRef.current) return;
+    event.stopPropagation();
+    const selector = modeSelectorRef.current;
+    if (!selector) return;
+    const rect = selector.getBoundingClientRect();
+    const captureTarget = event.target instanceof Element ? event.target : event.currentTarget;
+    suppressModeSelectorClickRef.current = false;
+    modeSelectorDragRef.current = {
+      pointerId: event.pointerId,
+      captureTarget,
+      start: { x: event.clientX, y: event.clientY },
+      origin: { x: rect.left, y: rect.top },
+      size: { width: rect.width, height: rect.height },
+      moved: false,
+    };
+    captureTarget.setPointerCapture(event.pointerId);
+  };
+
+  const modeSelectorPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    const gesture = modeSelectorDragRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const dx = event.clientX - gesture.start.x;
+    const dy = event.clientY - gesture.start.y;
+    if (!gesture.moved && Math.hypot(dx, dy) < MODE_SELECTOR_DRAG_THRESHOLD) return;
+    event.preventDefault();
+    if (!gesture.moved) {
+      gesture.moved = true;
+      setModeSelectorDragging(true);
+    }
+    setModeSelectorPosition(
+      clampFloatingControl(
+        { x: gesture.origin.x + dx, y: gesture.origin.y + dy },
+        gesture.size,
+        bounds,
+      ),
+    );
+  };
+
+  const finishModeSelectorDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    const gesture = modeSelectorDragRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (gesture.captureTarget.hasPointerCapture(event.pointerId)) {
+      gesture.captureTarget.releasePointerCapture(event.pointerId);
+    }
+    modeSelectorDragRef.current = null;
+    setModeSelectorDragging(false);
+    if (gesture.moved) {
+      suppressModeSelectorClickRef.current = true;
+      window.setTimeout(() => {
+        suppressModeSelectorClickRef.current = false;
+      }, 0);
+    }
+  };
+
+  const cancelModeSelectorDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.stopPropagation();
+    const gesture = modeSelectorDragRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    modeSelectorDragRef.current = null;
+    setModeSelectorDragging(false);
+  };
+
+  useEffect(() => {
+    setModeSelectorPosition((current) => {
+      const selector = modeSelectorRef.current;
+      if (!current || !selector) return current;
+      const next = clampFloatingControl(
+        current,
+        { width: selector.offsetWidth, height: selector.offsetHeight },
+        bounds,
+      );
+      return next.x === current.x && next.y === current.y ? current : next;
+    });
+  }, [bounds.x, bounds.y, bounds.width, bounds.height]);
+
   const discardPreparedOcr = useCallback(() => {
     ocrGenerationRef.current += 1;
     const pending = preparedOcrRef.current;
@@ -187,21 +291,21 @@ export function OverlayWindow() {
   }, [discardPreparedOcr]);
 
   const complete = useCallback(
-    async (action: "copy" | "save" | "pin" | "edit") => {
+    async () => {
       const canvas = canvasRef.current;
       if (!canvas) {
-        reportFrontend(`complete(${action}): annotation canvas not mounted`);
+        reportFrontend("complete: annotation canvas not mounted");
         return;
       }
       const png = await canvas.exportPng();
       if (!png) {
-        reportFrontend(`complete(${action}): exportPng returned no data`);
+        reportFrontend("complete: exportPng returned no data");
         return;
       }
       try {
-        await api.confirmCapture(png, action);
+        await api.confirmCapture(png);
       } catch (error) {
-        reportFrontend(`confirm_capture(${action}) rejected: ${String(error)}`);
+        reportFrontend(`confirm_capture rejected: ${String(error)}`);
       }
     },
     [],
@@ -362,12 +466,7 @@ export function OverlayWindow() {
       }
       if (mod && e.key.toLowerCase() === "c") {
         e.preventDefault();
-        if (phaseRef.current === "annotating") void complete("copy");
-        return;
-      }
-      if (mod && e.key.toLowerCase() === "s") {
-        e.preventDefault();
-        if (phaseRef.current === "annotating") void complete("save");
+        if (phaseRef.current === "annotating") void complete();
         return;
       }
       if (e.key === "Enter" || e.key === "Return") {
@@ -380,7 +479,7 @@ export function OverlayWindow() {
           return;
         }
         if (ph === "annotating") {
-          void complete("copy");
+          void complete();
           return;
         }
         if (ph === "record-options" && selectionRef.current) {
@@ -391,7 +490,7 @@ export function OverlayWindow() {
         if (ph === "selecting" && selectionRef.current && isValidSelection(selectionRef.current, 3)) {
           // Spec §5.2: Return with a valid selection confirms per mode.
           if (modeRef.current === "screenshot") {
-            void complete("copy");
+            void complete();
           } else if (modeRef.current === "record") {
             setPhase("record-options");
           } else if (modeRef.current === "ocr") {
@@ -821,7 +920,7 @@ export function OverlayWindow() {
               setCanRedo(r);
             }}
             onCancel={cancel}
-            onFinishAfterTextCommit={() => void complete("copy")}
+            onFinishAfterTextCommit={() => void complete()}
           />
         </div>
       )}
@@ -832,8 +931,29 @@ export function OverlayWindow() {
       {phase !== "ocr-result" && (
         <>
           <div
+            ref={modeSelectorRef}
             className="kiri-hud kiri-mode-select"
-            onPointerDown={(e) => e.stopPropagation()}
+            data-dragging={modeSelectorDragging || undefined}
+            style={
+              modeSelectorPosition
+                ? {
+                    left: modeSelectorPosition.x,
+                    top: modeSelectorPosition.y,
+                    transform: "none",
+                  }
+                : undefined
+            }
+            onPointerDown={modeSelectorPointerDown}
+            onPointerMove={modeSelectorPointerMove}
+            onPointerUp={finishModeSelectorDrag}
+            onPointerCancel={cancelModeSelectorDrag}
+            onLostPointerCapture={cancelModeSelectorDrag}
+            onClickCapture={(event) => {
+              if (!suppressModeSelectorClickRef.current) return;
+              event.preventDefault();
+              event.stopPropagation();
+              suppressModeSelectorClickRef.current = false;
+            }}
           >
             <ModeButton
               active={mode === "screenshot"}
@@ -965,22 +1085,8 @@ export function OverlayWindow() {
           canRedo={canRedo}
           onUndo={() => canvasRef.current?.undo()}
           onRedo={() => canvasRef.current?.redo()}
-          onDone={() => void complete("copy")}
+          onDone={() => void complete()}
           onCancel={cancel}
-          moreMenuOpen={moreMenuOpen}
-          setMoreMenuOpen={setMoreMenuOpen}
-          onReselect={() => {
-            // Spec §10.2: reselecting tears down the annotation UI and
-            // resets tool/appearance to defaults.
-            setPhase("selecting");
-            setSelection(null);
-            setTool("select");
-            setAppearance(DEFAULT_APPEARANCE);
-          }}
-          onSaveAs={() => void complete("save")}
-          onPin={() => void complete("pin")}
-          onOpenEditor={() => void complete("edit")}
-          onClear={() => canvasRef.current?.clearAnnotations()}
           onTextFontBegin={() => canvasRef.current?.beginTextFontSizeAdjustment()}
           onTextFontLive={(value) => canvasRef.current?.setTextFontSizeLive(value)}
           onTextFontEnd={() => canvasRef.current?.endTextFontSizeAdjustment()}
@@ -1434,13 +1540,6 @@ interface ToolbarProps {
   onRedo(): void;
   onDone(): void;
   onCancel(): void;
-  moreMenuOpen: boolean;
-  setMoreMenuOpen(open: boolean): void;
-  onReselect(): void;
-  onSaveAs(): void;
-  onPin(): void;
-  onOpenEditor(): void;
-  onClear(): void;
   onTextFontBegin?(): void;
   onTextFontLive?(value: number): void;
   onTextFontEnd?(): void;
@@ -1472,13 +1571,6 @@ function Toolbar(props: ToolbarProps) {
     onRedo,
     onDone,
     onCancel,
-    moreMenuOpen,
-    setMoreMenuOpen,
-    onReselect,
-    onSaveAs,
-    onPin,
-    onOpenEditor,
-    onClear,
     onTextFontBegin,
     onTextFontLive,
     onTextFontEnd,
@@ -1528,7 +1620,7 @@ function Toolbar(props: ToolbarProps) {
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [tool, moreMenuOpen, appearance]);
+  }, [tool, appearance]);
   // Spec §7.6: centered on the selection's midX; clamp so the bar's left
   // and right edges stay ≥8pt inside the screen. y is already resolved.
   const left = Math.min(
@@ -1694,32 +1786,6 @@ function Toolbar(props: ToolbarProps) {
           <ToolButton icon="checkmark" title={t("Apply size")} onClick={applySize} />
         </div>
         <ToolButton icon="checkmark" title={t("Done — Copy to clipboard · Return")} primary onClick={onDone} />
-        <div style={{ position: "relative" }}>
-          <ToolButton icon="ellipsis.circle" title={t("More — Save, pin, edit, or clear")} onClick={() => setMoreMenuOpen(!moreMenuOpen)} />
-          {moreMenuOpen && (
-            <div
-              className="kiri-hud"
-              style={{
-                position: "absolute",
-                right: 0,
-                top: 34,
-                padding: 6,
-                display: "flex",
-                flexDirection: "column",
-                minWidth: 190,
-                zIndex: 10,
-              }}
-            >
-              <MenuItem icon="crop" label={t("Reselect Region")} onClick={onReselect} />
-              <div style={{ height: 1, background: "rgba(255,255,255,0.14)", margin: "4px 0" }} />
-              <MenuItem icon="square.and.arrow.down" label={t("Save As…")} onClick={onSaveAs} />
-              <MenuItem icon="pin" label={t("Pin on Screen")} onClick={onPin} />
-              <MenuItem icon="slider.horizontal.3" label={t("Open in Editor")} onClick={onOpenEditor} />
-              <div style={{ height: 1, background: "rgba(255,255,255,0.14)", margin: "4px 0" }} />
-              <MenuItem icon="trash" label={t("Clear Annotations")} onClick={onClear} />
-            </div>
-          )}
-        </div>
       </div>
     </>
   );
@@ -1888,33 +1954,5 @@ function SegmentedControl(props: {
         </button>
       ))}
     </div>
-  );
-}
-
-function MenuItem(props: { label: string; icon?: IconName; onClick(): void }) {
-  return (
-    <button
-      onClick={props.onClick}
-      style={{
-        background: "transparent",
-        border: "none",
-        color: "#fff",
-        textAlign: "left",
-        padding: "6px 10px",
-        borderRadius: 8,
-        font: "400 12.5px var(--kiri-font-ui)",
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-      }}
-    >
-      {props.icon && (
-        <span style={{ width: 14, display: "flex", justifyContent: "center", opacity: 0.75 }}>
-          <KiriIcon name={props.icon} size={13} />
-        </span>
-      )}
-      {props.label}
-    </button>
   );
 }

@@ -37,7 +37,6 @@ modules.
 | `control-panel` | Recording pause/resume/stop controls |
 | `ripple` | Optional recorded click highlight |
 | `editor-*` | Full screenshot editor |
-| `pin-*` | Floating pinned image |
 | `viewer-*` | Image, video, or GIF viewer |
 | `toast` | Transient status feedback |
 | `confirm` | Destructive-action confirmation |
@@ -137,8 +136,8 @@ and thumbnail generation never trigger that download.
   640-pixel previews; image thumbnails downsample through ImageIO on macOS and
   WIC on Windows before PNG encoding. Generated thumbnails use a 32 MiB/256-
   entry LRU cache with a 15-second decoder deadline. Edited assets invalidate
-  only their own browser preview, permanently deleted assets are evicted
-  immediately, and a pinned image is released when its window is destroyed.
+  only their own browser preview, and permanently deleted assets are evicted
+  immediately.
 
 Tests must use temporary directories and fake transports. They must never read,
 write, or delete the user's capture library.

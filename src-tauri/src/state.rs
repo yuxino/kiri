@@ -7,7 +7,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
+};
 
 use crate::capture::{CapturedDisplay, PlatformRecorder};
 use crate::core::asset::CaptureAsset;
@@ -305,8 +308,24 @@ pub fn emit_notice(app: &AppHandle, title: String, symbol: String) {
         title,
         symbol,
     };
-    let _ = app.emit("notice", notice.clone());
-    show_completion_toast(app, &notice);
+    show_completion_toast(app, &notice, None);
+}
+
+/// Completion notice pinned to the monitor where the originating Kiri window
+/// was shown. Capture and recording windows may be closed before the work
+/// finishes, so their monitor must be retained by the caller.
+pub fn emit_notice_on_monitor(
+    app: &AppHandle,
+    title: String,
+    symbol: String,
+    monitor: Option<Monitor>,
+) {
+    let notice = NoticeDto {
+        id: uuid::Uuid::new_v4().to_string(),
+        title,
+        symbol,
+    };
+    show_completion_toast(app, &notice, monitor);
 }
 
 /// Library-scoped notice: shown only inside the library window, never as a
@@ -402,29 +421,16 @@ pub fn show_confirm_dialog(
     let _ = window.set_focus();
 }
 
-/// Shows the notice as a borderless always-on-top toast near the TOP-CENTER
-/// of the primary display. Screenshots and recordings return focus to the
-/// source application, so the library-window notice alone is easy to miss;
-/// the toast keeps completion feedback visible without covering the Dock or
-/// the taskbar. It reuses one resident "toast" window and hides itself after
-/// 2s (see ToastWindow.tsx).
-fn show_completion_toast(app: &AppHandle, notice: &NoticeDto) {
+/// Shows the notice as a borderless always-on-top toast near the top-center of
+/// the display where the operation happened. Screenshots and recordings
+/// return focus to the source application, so the library-window notice alone
+/// is easy to miss. One resident window is reused and repositioned before
+/// every notice, including after Kiri moves between displays.
+fn show_completion_toast(app: &AppHandle, notice: &NoticeDto, monitor: Option<Monitor>) {
     let label = "toast";
     let window = match app.get_webview_window(label) {
         Some(window) => window,
         None => {
-            // Position in LOGICAL coordinates. monitor.size() returns
-            // physical pixels (e.g. 3024×1964 on a Retina display) but
-            // WebviewWindowBuilder::position takes logical points — feeding
-            // the physical value put the toast far off-screen (2652 > 1512
-            // logical width) so it was never visible.
-            let (win_x, win_y) = match app.primary_monitor() {
-                Ok(Some(monitor)) => {
-                    let size = *monitor.size();
-                    toast_position(size, monitor.scale_factor())
-                }
-                _ => (540.0, 24.0), // 1440×900 fallback, top-center
-            };
             let builder = WebviewWindowBuilder::new(
                 app,
                 label,
@@ -447,27 +453,69 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto) {
             .focused(false)
             .visible(false)
             .inner_size(360.0, 60.0)
-            .position(win_x, win_y);
+            .position(0.0, 0.0);
             let Ok(window) = builder.build() else {
                 return;
             };
             window
         }
     };
+
+    let target_monitor = monitor
+        .or_else(|| focused_kiri_monitor(app))
+        .or_else(|| {
+            let cursor = app.cursor_position().ok()?;
+            app.monitor_from_point(cursor.x, cursor.y).ok().flatten()
+        })
+        .or_else(|| app.primary_monitor().ok().flatten());
+    if let Some(monitor) = target_monitor {
+        position_completion_toast(&window, &monitor);
+    }
+
     // Content is delivered via event so the resident window can update in
     // place (initial render reads the URL params above).
     let _ = window.emit("toast", notice.clone());
     let _ = window.show();
 }
 
-/// Top-center toast position in LOGICAL points for a monitor of the given
-/// PHYSICAL pixel size and scale factor. (WebviewWindowBuilder::position
-/// takes logical points; feeding physical pixels put the toast off-screen
-/// on Retina displays.)
-fn toast_position(size: tauri::PhysicalSize<u32>, scale: f64) -> (f64, f64) {
-    let logical_w = size.width as f64 / scale;
-    let x = ((logical_w - 360.0) / 2.0).max(0.0);
-    (x, 24.0)
+fn focused_kiri_monitor(app: &AppHandle) -> Option<Monitor> {
+    app.webview_windows()
+        .into_iter()
+        .filter(|(label, _)| label != "toast" && label != "ripple" && label != "confirm")
+        .find_map(|(_, window)| {
+            window
+                .is_focused()
+                .ok()
+                .filter(|focused| *focused)
+                .and_then(|_| window.current_monitor().ok().flatten())
+        })
+}
+
+fn position_completion_toast(window: &WebviewWindow, monitor: &Monitor) {
+    let work_area = monitor.work_area();
+    let position = toast_position(work_area.position, work_area.size, monitor.scale_factor());
+
+    // Position first so the following logical size is resolved using the
+    // destination display's scale factor on mixed-DPI setups.
+    let _ = window.set_position(position);
+    let _ = window.set_size(LogicalSize::new(360.0, 60.0));
+}
+
+/// Top-center toast position in physical desktop coordinates. Including the
+/// work-area origin keeps the toast on secondary displays (including displays
+/// arranged left/above the primary), and using the destination scale keeps a
+/// 360pt toast centered on Retina/mixed-DPI screens.
+fn toast_position(
+    work_area_position: PhysicalPosition<i32>,
+    work_area_size: PhysicalSize<u32>,
+    scale: f64,
+) -> PhysicalPosition<i32> {
+    let toast_width = (360.0 * scale).round() as i64;
+    let available_width = i64::from(work_area_size.width);
+    let centered_offset = ((available_width - toast_width) / 2).max(0);
+    let x = i64::from(work_area_position.x) + centered_offset;
+    let y = i64::from(work_area_position.y) + (20.0 * scale).round() as i64;
+    PhysicalPosition::new(x as i32, y as i32)
 }
 
 /// Minimal percent-encoding for query values (notice titles/symbols are
@@ -684,22 +732,33 @@ mod tests {
 
     #[test]
     fn toast_position_is_top_centered_on_screen() {
-        // Retina 3024×1964 @2x: physical pixels must be divided by scale so
-        // the toast lands inside the 1512×982 logical screen (regression:
-        // using 3024−372 = 2652 put it far off-screen).
-        let (x, y) = toast_position(tauri::PhysicalSize::new(3024, 1964), 2.0);
-        assert_eq!(x, (3024.0 / 2.0 - 360.0) / 2.0);
-        assert_eq!(y, 24.0);
-        assert!((0.0..1512.0).contains(&x), "x={x} must be on-screen");
-        assert!((0.0..982.0).contains(&y), "y={y} must be on-screen");
+        // Retina 3024×1964 @2x: the 360pt toast is 720 physical pixels wide.
+        let position = toast_position(
+            tauri::PhysicalPosition::new(0, 48),
+            tauri::PhysicalSize::new(3024, 1916),
+            2.0,
+        );
+        assert_eq!(position.x, (3024 - 720) / 2);
+        assert_eq!(position.y, 48 + 40);
 
-        // Non-retina 1920×1080 @1x stays on-screen too.
-        let (x, y) = toast_position(tauri::PhysicalSize::new(1920, 1080), 1.0);
-        assert!((0.0..1920.0).contains(&x) && (0.0..1080.0).contains(&y));
+        // A secondary display to the left keeps its negative desktop origin.
+        let position = toast_position(
+            tauri::PhysicalPosition::new(-1920, 0),
+            tauri::PhysicalSize::new(1920, 1040),
+            1.0,
+        );
+        assert_eq!(position.x, -1920 + (1920 - 360) / 2);
+        assert_eq!(position.y, 20);
 
-        // Small screens must not go negative.
-        let (x, _) = toast_position(tauri::PhysicalSize::new(320, 240), 1.0);
-        assert!(x >= 0.0);
+        // Small screens clamp the centering offset instead of moving farther
+        // left than the display's own origin.
+        let position = toast_position(
+            tauri::PhysicalPosition::new(200, 100),
+            tauri::PhysicalSize::new(320, 240),
+            1.0,
+        );
+        assert_eq!(position.x, 200);
+        assert_eq!(position.y, 120);
     }
 
     #[test]

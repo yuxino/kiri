@@ -48,8 +48,14 @@ pub fn run() {
                 .build(),
         )
         .manage(protocol::ProtocolStore::new())
-        .register_uri_scheme_protocol("kiri", |ctx, request| {
-            protocol::handle(ctx.app_handle(), &request)
+        .register_asynchronous_uri_scheme_protocol("kiri", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            // WebKit starts custom-scheme tasks on the application thread on
+            // macOS. Thumbnail decoding and media I/O must not block that
+            // thread, especially while a native save panel is closing.
+            std::mem::drop(tauri::async_runtime::spawn_blocking(move || {
+                responder.respond(protocol::handle(&app, &request));
+            }));
         })
         .setup(|app| {
             // Force a regular activation policy (macOS Dock icon). A bare
@@ -85,12 +91,6 @@ pub fn run() {
             match event {
                 tauri::WindowEvent::CloseRequested { .. } => {}
                 tauri::WindowEvent::Destroyed => {
-                    if let Some(store) = window
-                        .app_handle()
-                        .try_state::<crate::protocol::ProtocolStore>()
-                    {
-                        crate::protocol::clear_pin_image_for_window_label(&store, window.label());
-                    }
                     if let Some(state) = window.app_handle().try_state::<AppState>() {
                         let label = window.label();
                         let destroyed_overlay = {

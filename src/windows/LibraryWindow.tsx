@@ -7,6 +7,7 @@ import {
   api,
   onAssetContentChanged,
   onError,
+  onGifConversionState,
   onLibraryChanged,
   onNotice,
   type AssetDto,
@@ -68,6 +69,7 @@ export function LibraryWindow() {
   const [notice, setNotice] = useState<NoticeDto | null>(null);
   const [error, setError] = useState<ErrorDto | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [gifConversionIds, setGifConversionIds] = useState<Set<string>>(new Set());
   // Menu anchor in viewport coordinates (mouse position on right-click, or
   // the ⋯ button's corner), so the menu appears where the user looked.
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -284,6 +286,14 @@ export function LibraryWindow() {
           [assetId]: (revisions[assetId] ?? 0) + 1,
         }));
       }),
+      onGifConversionState(({ id, isConverting }) => {
+        setGifConversionIds((current) => {
+          const next = new Set(current);
+          if (isConverting) next.add(id);
+          else next.delete(id);
+          return next;
+        });
+      }),
       onNotice((n) => {
         setNotice(n);
         setTimeout(() => {
@@ -406,11 +416,24 @@ export function LibraryWindow() {
     },
     [closeMenu],
   );
+  const startGifConversion = useCallback((id: string) => {
+    // Give immediate feedback before the backend thread publishes its state.
+    setGifConversionIds((current) => new Set(current).add(id));
+    void api.convertToGif(id).catch(() => {
+      setGifConversionIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    });
+  }, []);
 
   const itemMenu = useCallback(
     (asset: AssetDto) => (
       <div
         className="kiri-card-menu"
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={(event) => event.stopPropagation()}
         style={{
           position: "fixed",
           ...(menuStyle ?? { left: 0, top: 0 }),
@@ -448,7 +471,12 @@ export function LibraryWindow() {
         <MenuRow icon="photo.on.rectangle" label={t("Open")} onClick={run(() => void api.openAsset(asset.id).catch(() => {}))} />
         <MenuRow icon="folder" label={t("Show in Finder")} onClick={run(() => void api.revealAsset(asset.id).catch(() => {}))} />
         {asset.gifEligible && (
-          <MenuRow icon="sparkles.rectangle.stack" label={t("Convert to GIF")} onClick={run(() => void api.convertToGif(asset.id).catch(() => {}))} />
+          <MenuRow
+            icon="sparkles.rectangle.stack"
+            label={gifConversionIds.has(asset.id) ? t("Creating GIF…") : t("Convert to GIF")}
+            disabled={gifConversionIds.has(asset.id)}
+            onClick={run(() => startGifConversion(asset.id))}
+          />
         )}
         <div style={{ height: 1, background: "var(--kiri-surface-border)", margin: "5px 8px", opacity: 0.8 }} />
         {showingTrash ? (
@@ -481,7 +509,7 @@ export function LibraryWindow() {
         )}
       </div>
     ),
-    [showingTrash, menuStyle, run],
+    [gifConversionIds, menuStyle, run, showingTrash, startGifConversion],
   );
 
   return (
@@ -828,13 +856,16 @@ export function LibraryWindow() {
         <SettingsView />
       )}
 
-      {/* Notice toast */}
-      {notice && (
+      {/* Window-level progress and local notices stay in one predictable
+          place below the header. Global capture/recording completions use the
+          separate always-on-top toast on the originating display. */}
+      {(gifConversionIds.size > 0 || notice) && (
         <div
+          aria-live="polite"
           style={{
-            position: "absolute",
+            position: "fixed",
             left: "50%",
-            bottom: 24,
+            top: 72,
             transform: "translateX(-50%)",
             background: "var(--kiri-elevated)",
             border: "1px solid var(--kiri-surface-border)",
@@ -847,10 +878,32 @@ export function LibraryWindow() {
             color: "var(--kiri-label)",
             fontSize: 12.5,
             fontWeight: 500,
+            zIndex: 30,
+            whiteSpace: "nowrap",
           }}
         >
-          {notice.symbol && <KiriIcon name={notice.symbol as never} size={13} />}
-          {t(notice.title)}
+          {gifConversionIds.size > 0 ? (
+            <>
+              <span
+                aria-hidden="true"
+                style={{
+                  width: 12,
+                  height: 12,
+                  borderRadius: "50%",
+                  border: "1.5px solid var(--kiri-surface-border)",
+                  borderTopColor: "var(--kiri-label)",
+                  animation: "kiri-library-spin 0.75s linear infinite",
+                }}
+              />
+              {t("Creating GIF…")}
+            </>
+          ) : (
+            <>
+              {notice?.symbol && <KiriIcon name={notice.symbol as never} size={13} />}
+              {notice && t(notice.title)}
+            </>
+          )}
+          <style>{`@keyframes kiri-library-spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       )}
 
@@ -1423,27 +1476,47 @@ function AssetCard(props: {
   );
 }
 
-function MenuRow(props: { label: string; icon?: IconName; onClick(): void; destructive?: boolean }) {
+function MenuRow(props: {
+  label: string;
+  icon?: IconName;
+  onClick(): void;
+  destructive?: boolean;
+  disabled?: boolean;
+}) {
   return (
     <button
-      onClick={props.onClick}
+      onClick={(event) => {
+        // Portaled menu events still follow the React component tree. Stop at
+        // the row before its action closes/unmounts the menu; otherwise the
+        // click reaches AssetCard and enters batch selection 220ms later.
+        event.stopPropagation();
+        props.onClick();
+      }}
+      onDoubleClick={(event) => event.stopPropagation()}
+      disabled={props.disabled}
       style={{
         background: "transparent",
         border: "none",
         textAlign: "left",
         padding: "7px 10px",
         borderRadius: 9,
-        color: props.destructive ? "#FA476E" : "var(--kiri-label)",
+        color: props.disabled
+          ? "var(--kiri-disabled-label)"
+          : props.destructive
+            ? "#FA476E"
+            : "var(--kiri-label)",
         font: "400 12.5px var(--kiri-font-ui)",
-        cursor: "pointer",
+        cursor: props.disabled ? "default" : "pointer",
         display: "flex",
         alignItems: "center",
         gap: 10,
         transition: "background 0.12s ease-out, transform 0.06s ease-out",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background =
-          "color-mix(in srgb, var(--kiri-accent) 18%, transparent)";
+        if (!props.disabled) {
+          e.currentTarget.style.background =
+            "color-mix(in srgb, var(--kiri-accent) 18%, transparent)";
+        }
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = "transparent";
@@ -1462,7 +1535,7 @@ function MenuRow(props: { label: string; icon?: IconName; onClick(): void; destr
             display: "flex",
             justifyContent: "center",
             color: props.destructive ? "#FA476E" : "var(--kiri-accent)",
-            opacity: 0.9,
+            opacity: props.disabled ? 0.45 : 0.9,
             flexShrink: 0,
           }}
         >

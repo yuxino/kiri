@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::capture::current as capture_backend;
 use crate::core::asset::{CaptureAsset, CaptureKind};
@@ -18,8 +18,8 @@ use crate::platform;
 use crate::state::RecoveryAction;
 use crate::state::{
     emit_asset_content_changed, emit_error, emit_library_changed, emit_notice, emit_notice_local,
-    emit_recording_state, ActiveRecording, AppState, CaptureSession, RecordingConfiguration,
-    RecordingFlow,
+    emit_notice_on_monitor, emit_recording_state, ActiveRecording, AppState, CaptureSession,
+    RecordingConfiguration, RecordingFlow,
 };
 
 // ---------------------------------------------------------------------------
@@ -33,6 +33,13 @@ pub struct RectDto {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GifConversionStateDto {
+    id: String,
+    is_converting: bool,
 }
 
 impl From<&Rect> for RectDto {
@@ -388,11 +395,25 @@ pub fn convert_to_gif(app: AppHandle, id: String) -> Result<(), String> {
         }
         converting.insert(parsed);
     }
+    let _ = app.emit(
+        "gif-conversion-state",
+        GifConversionStateDto {
+            id: parsed.to_string(),
+            is_converting: true,
+        },
+    );
     let handle = app.clone();
     std::thread::spawn(move || {
         let result = convert_asset_to_gif(&handle, &asset, &source_path);
         let state = handle.state::<AppState>();
         state.gif_conversion_ids.lock().unwrap().remove(&parsed);
+        let _ = handle.emit(
+            "gif-conversion-state",
+            GifConversionStateDto {
+                id: parsed.to_string(),
+                is_converting: false,
+            },
+        );
         if let Err(error) = result {
             emit_error(&handle, error, None);
         }
@@ -702,13 +723,6 @@ fn invalidate_capture_resources(app: &AppHandle, session: &CaptureSession) {
 
 #[tauri::command]
 pub fn confirm_capture(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
-    let action = request
-        .headers()
-        .get("x-kiri-capture-action")
-        .and_then(|value| value.to_str().ok())
-        .filter(|action| matches!(*action, "copy" | "save" | "pin" | "edit"))
-        .ok_or_else(|| "The capture action is invalid.".to_string())?
-        .to_string();
     let png = match request.body() {
         tauri::ipc::InvokeBody::Raw(bytes) => bytes.as_slice(),
         tauri::ipc::InvokeBody::Json(_) => {
@@ -749,11 +763,10 @@ pub fn confirm_capture(app: AppHandle, request: tauri::ipc::Request<'_>) -> Resu
     };
     invalidate_capture_resources(&app, &session);
     // Errors must be visible: show the library window before emitting.
-    let session_failure =
-        match confirm_capture_inner(&app, &state, session, png, pixel_size, &action) {
-            Ok(()) => return Ok(()),
-            Err(error) => error,
-        };
+    let session_failure = match confirm_capture_inner(&app, &state, session, png, pixel_size) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
     if let Some(window) = app.get_webview_window("library") {
         let _ = window.show();
     }
@@ -766,36 +779,38 @@ fn confirm_capture_inner(
     session: CaptureSession,
     png: &[u8],
     pixel_size: (i64, i64),
-    action: &str,
 ) -> Result<(), String> {
-    log::info!("confirm_capture: action={} bytes={}", action, png.len());
+    log::info!("confirm_capture: bytes={}", png.len());
 
+    let completion_monitor = session.overlay_labels.iter().find_map(|label| {
+        app.get_webview_window(label)
+            .and_then(|window| window.current_monitor().ok().flatten())
+    });
     for label in &session.overlay_labels {
         if let Some(window) = app.get_webview_window(label) {
             let _ = window.close();
         }
     }
 
-    if action == "copy" {
-        if let Err(error) = platform::write_image_to_clipboard(png) {
-            log::error!("confirm_capture: clipboard write failed: {error}");
-            emit_error(
-                app,
-                "Could not copy the capture to the clipboard.".into(),
-                None,
-            );
-        } else {
-            emit_notice(
-                app,
-                "Copied to Clipboard".into(),
-                "checkmark.circle.fill".into(),
-            );
-        }
+    if let Err(error) = platform::write_image_to_clipboard(png) {
+        log::error!("confirm_capture: clipboard write failed: {error}");
+        emit_error(
+            app,
+            "Could not copy the capture to the clipboard.".into(),
+            None,
+        );
+    } else {
+        emit_notice_on_monitor(
+            app,
+            "Copied to Clipboard".into(),
+            "checkmark.circle.fill".into(),
+            completion_monitor,
+        );
     }
 
     let (pixel_width, pixel_height) = pixel_size;
     let mut library = state.library.lock().unwrap();
-    let imported = library
+    library
         .import_data(
             png,
             CaptureKind::Image,
@@ -809,67 +824,6 @@ fn confirm_capture_inner(
         .map_err(|e| e.to_string())?;
     drop(library);
     emit_library_changed(app);
-
-    match action {
-        "save" => {
-            // Spec §5.4: default name kiri-<timestamp>.png; write the PNG to
-            // the chosen location after the save panel closes.
-            let now = chrono::Utc::now().format("%Y%m%d-%H%M%S").to_string();
-            let default_name = format!("kiri-{now}.png");
-            if let Ok(Some(path)) = save_file_dialog(app.clone(), default_name) {
-                if let Err(error) = std::fs::write(&path, png) {
-                    log::error!("confirm_capture: save failed: {error}");
-                    emit_error(app, "Could not save the capture.".into(), None);
-                } else {
-                    emit_notice(app, "Saved".into(), "checkmark.circle.fill".into());
-                }
-            }
-        }
-        "pin" => {
-            let store = app.state::<crate::protocol::ProtocolStore>();
-            store
-                .pin_images
-                .lock()
-                .unwrap()
-                .insert(imported.id.to_string(), png.to_vec());
-            let label = format!("pin-{}", imported.id);
-            let builder = WebviewWindowBuilder::new(
-                app,
-                label,
-                WebviewUrl::App(format!("index.html?window=pin&id={}", imported.id).into()),
-            )
-            .title("kiri")
-            .decorations(false)
-            .always_on_top(true)
-            .shadow(false)
-            .transparent(true);
-            if let Err(error) = builder.build() {
-                store
-                    .pin_images
-                    .lock()
-                    .unwrap()
-                    .remove(&imported.id.to_string());
-                log::error!("confirm_capture: pin window creation failed: {error}");
-                emit_error(app, "Could not pin the capture.".into(), None);
-            }
-        }
-        "edit" => {
-            let label = format!("editor-{}", imported.id);
-            let builder = WebviewWindowBuilder::new(
-                app,
-                label,
-                WebviewUrl::App(format!("index.html?window=editor&id={}", imported.id).into()),
-            )
-            .title("Kiri Editor")
-            .inner_size(880.0, 620.0)
-            .min_inner_size(860.0, 520.0)
-            .center();
-            if let Ok(window) = builder.build() {
-                let _ = window.set_focus();
-            }
-        }
-        _ => {}
-    }
 
     restore_focus(app, &session);
     Ok(())
@@ -940,23 +894,29 @@ fn validate_capture_png(png: &[u8], max_width: i64, max_height: i64) -> Result<(
 }
 
 #[tauri::command]
-pub fn save_file_dialog(app: AppHandle, default_name: String) -> Result<Option<String>, String> {
+pub async fn save_file_dialog(
+    app: AppHandle,
+    default_name: String,
+) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
     // Localize the filter label from the persisted language preference.
     let filter_label = match crate::state::load_language(&app).as_str() {
         "zh-Hans" => "PNG 图片",
         "ja" => "PNG 画像",
         _ => "PNG image",
-    };
-    let path = app
-        .dialog()
-        .file()
-        .set_file_name(default_name)
-        .add_filter(filter_label, &["png"])
-        .blocking_save_file();
-    Ok(path
-        .and_then(|p| p.into_path().ok())
-        .map(|p| p.display().to_string()))
+    }
+    .to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .set_file_name(default_name)
+            .add_filter(filter_label, &["png"])
+            .blocking_save_file()
+            .and_then(|path| path.into_path().ok())
+            .map(|path| path.display().to_string())
+    })
+    .await
+    .map_err(|error| format!("Could not open the save panel: {error}"))
 }
 
 fn restore_focus(app: &AppHandle, session: &CaptureSession) {
@@ -2006,6 +1966,10 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         )
     };
 
+    let completion_monitor = app
+        .get_webview_window("control-panel")
+        .and_then(|window| window.current_monitor().ok().flatten());
+
     stop_click_monitor(&app);
     close_recording_windows(&app);
 
@@ -2065,7 +2029,12 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
             let result = finalize_recording(&handle, final_segments);
             reset_recording_session(&handle);
             match result {
-                Ok(()) => emit_notice(&handle, "Recording Saved".into(), "video.fill".into()),
+                Ok(()) => emit_notice_on_monitor(
+                    &handle,
+                    "Recording Saved".into(),
+                    "video.fill".into(),
+                    completion_monitor,
+                ),
                 Err(error) => {
                     log::error!("recording: final import failed: {error}");
                     emit_error(&handle, "Could not save the recording.".into(), None);
@@ -2143,7 +2112,7 @@ fn require_known_frontend_window(window: &WebviewWindow) -> Result<(), String> {
     if matches!(
         label,
         "library" | "overlay" | "countdown" | "control-panel" | "ripple" | "confirm" | "toast"
-    ) || ["viewer-", "pin-", "editor-"]
+    ) || ["viewer-", "editor-"]
         .iter()
         .any(|prefix| label.starts_with(prefix))
     {
