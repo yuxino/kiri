@@ -11,15 +11,15 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindo
 use crate::capture::current as capture_backend;
 use crate::core::asset::{CaptureAsset, CaptureKind};
 use crate::core::geometry::Rect;
-use crate::core::policy::RecordingOptions;
+use crate::core::policy::{RecordingOptions, RecordingOutputFormat};
 use crate::core::shortcut::KIRI_CAPTURE;
 use crate::platform;
 #[cfg(target_os = "macos")]
 use crate::state::RecoveryAction;
 use crate::state::{
     emit_asset_content_changed, emit_error, emit_library_changed, emit_notice, emit_notice_local,
-    emit_notice_on_monitor, emit_recording_state, ActiveRecording, AppState, CaptureSession,
-    RecordingConfiguration, RecordingFlow,
+    emit_notice_on_monitor, emit_recording_state, show_completion_preview, ActiveRecording,
+    AppState, CaptureSession, CompletionPreviewDto, RecordingConfiguration, RecordingFlow,
 };
 
 // ---------------------------------------------------------------------------
@@ -108,6 +108,24 @@ fn asset_dto(asset: &CaptureAsset, root: &std::path::Path) -> AssetDto {
     }
 }
 
+fn completion_asset_detail(asset: &CaptureAsset) -> String {
+    let format = match asset.kind {
+        CaptureKind::Image => "PNG",
+        CaptureKind::Video => "MP4",
+        CaptureKind::Gif => "GIF",
+    };
+    let mut parts = vec![format.to_string()];
+    if let Some(duration) = asset.duration {
+        parts.push(crate::core::policy::RecordingPolicy::elapsed_label(
+            duration,
+        ));
+    }
+    if asset.pixel_width > 0 && asset.pixel_height > 0 {
+        parts.push(format!("{} × {}", asset.pixel_width, asset.pixel_height));
+    }
+    parts.join(" · ")
+}
+
 // ---------------------------------------------------------------------------
 // Library commands (main thread)
 // ---------------------------------------------------------------------------
@@ -149,24 +167,28 @@ pub fn set_favorite(app: AppHandle, id: String, favorite: bool) -> Result<(), St
 }
 
 #[tauri::command]
-pub fn move_to_trash(app: AppHandle, id: String) -> Result<(), String> {
+pub fn move_to_trash(app: AppHandle, window: WebviewWindow, id: String) -> Result<(), String> {
     with_asset_mutation(&app, &id, |library, parsed| {
         library.move_to_trash(parsed).map_err(|e| e.to_string())
     })?;
-    emit_notice_local(&app, "Moved to Trash".into(), "trash".into());
+    if window.label() != "toast" {
+        emit_notice_local(&app, "Moved to Trash".into(), "trash".into());
+    }
     Ok(())
 }
 
 #[tauri::command]
-pub fn restore_asset(app: AppHandle, id: String) -> Result<(), String> {
+pub fn restore_asset(app: AppHandle, window: WebviewWindow, id: String) -> Result<(), String> {
     with_asset_mutation(&app, &id, |library, parsed| {
         library.restore(parsed).map_err(|e| e.to_string())
     })?;
-    emit_notice_local(
-        &app,
-        "Restored to Library".into(),
-        "arrow.uturn.backward".into(),
-    );
+    if window.label() != "toast" {
+        emit_notice_local(
+            &app,
+            "Restored to Library".into(),
+            "arrow.uturn.backward".into(),
+        );
+    }
     Ok(())
 }
 
@@ -281,7 +303,7 @@ pub fn batch_set_favorite(app: AppHandle, ids: Vec<String>, favorite: bool) -> R
 }
 
 #[tauri::command]
-pub fn copy_asset(app: AppHandle, id: String) -> Result<(), String> {
+pub fn copy_asset(app: AppHandle, window: WebviewWindow, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let state = app.state::<AppState>();
     let library = state.library.lock().unwrap();
@@ -289,18 +311,24 @@ pub fn copy_asset(app: AppHandle, id: String) -> Result<(), String> {
         .asset_by_id(&parsed)
         .cloned()
         .ok_or_else(|| "The capture could not be found.".to_string())?;
-    if asset.kind != CaptureKind::Image {
-        return Err("Only images can be copied.".to_string());
-    }
     let path = state.asset_file_url(&asset);
     drop(library);
-    let data = std::fs::read(&path).map_err(|e| e.to_string())?;
-    platform::write_image_to_clipboard(&data).map_err(|e| e.to_string())?;
-    emit_notice_local(
-        &app,
-        "Copied to Clipboard".into(),
-        "checkmark.circle.fill".into(),
-    );
+    match asset.kind {
+        CaptureKind::Image => {
+            let data = std::fs::read(&path).map_err(|e| e.to_string())?;
+            platform::write_image_to_clipboard(&data).map_err(|e| e.to_string())?;
+        }
+        CaptureKind::Video | CaptureKind::Gif => {
+            platform::write_file_to_clipboard(&path).map_err(|e| e.to_string())?;
+        }
+    }
+    if window.label() != "toast" {
+        emit_notice_local(
+            &app,
+            "Copied to Clipboard".into(),
+            "checkmark.circle.fill".into(),
+        );
+    }
     Ok(())
 }
 
@@ -375,7 +403,7 @@ pub fn reveal_asset(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn convert_to_gif(app: AppHandle, id: String) -> Result<(), String> {
+pub fn convert_to_gif(app: AppHandle, window: WebviewWindow, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let (asset, source_path) = {
         let state = app.state::<AppState>();
@@ -387,6 +415,16 @@ pub fn convert_to_gif(app: AppHandle, id: String) -> Result<(), String> {
         let source_path = state.asset_file_url(&asset);
         (asset, source_path)
     };
+    if asset.kind != CaptureKind::Video
+        || !crate::core::policy::RecordingPolicy::is_gif_eligible(asset.duration)
+    {
+        return Err("Only recordings with a known duration can be converted to GIF.".into());
+    }
+    let from_completion = window.label() == "toast";
+    let completion_monitor = from_completion
+        .then(|| window.current_monitor().ok().flatten())
+        .flatten();
+    let completion_id = uuid::Uuid::new_v4().to_string();
     {
         let state = app.state::<AppState>();
         let mut converting = state.gif_conversion_ids.lock().unwrap();
@@ -402,6 +440,18 @@ pub fn convert_to_gif(app: AppHandle, id: String) -> Result<(), String> {
             is_converting: true,
         },
     );
+    if from_completion {
+        show_completion_preview(
+            &app,
+            &CompletionPreviewDto::processing(
+                completion_id.clone(),
+                "gif",
+                "Creating GIF",
+                &completion_asset_detail(&asset),
+            ),
+            completion_monitor.clone(),
+        );
+    }
     let handle = app.clone();
     std::thread::spawn(move || {
         let result = convert_asset_to_gif(&handle, &asset, &source_path);
@@ -414,8 +464,34 @@ pub fn convert_to_gif(app: AppHandle, id: String) -> Result<(), String> {
                 is_converting: false,
             },
         );
-        if let Err(error) = result {
-            emit_error(&handle, error, None);
+        match result {
+            Ok(gif_asset) if from_completion => show_completion_preview(
+                &handle,
+                &CompletionPreviewDto::ready(
+                    completion_id,
+                    &gif_asset,
+                    "GIF Created",
+                    completion_asset_detail(&gif_asset),
+                    false,
+                ),
+                completion_monitor,
+            ),
+            Ok(_) => emit_notice_local(
+                &handle,
+                "GIF Created".into(),
+                "sparkles.rectangle.stack".into(),
+            ),
+            Err(error) => {
+                if from_completion {
+                    emit_notice_on_monitor(
+                        &handle,
+                        "Could not create GIF".into(),
+                        "exclamationmark.triangle.fill".into(),
+                        completion_monitor,
+                    );
+                }
+                emit_error(&handle, error, None);
+            }
         }
     });
     Ok(())
@@ -425,7 +501,7 @@ fn convert_asset_to_gif(
     app: &AppHandle,
     asset: &CaptureAsset,
     source_path: &std::path::Path,
-) -> Result<(), String> {
+) -> Result<CaptureAsset, String> {
     let state = app.state::<AppState>();
     // GIF export is an explicit user action, so it may perform the same
     // pinned, verified first-use installation as recording.
@@ -437,6 +513,8 @@ fn convert_asset_to_gif(
         &ffmpeg,
     )
     .map_err(|e| e.to_string())?;
+    let (gif_width, gif_height, gif_duration) = crate::record::probe_video(&ffmpeg, &gif_path)
+        .unwrap_or((asset.pixel_width, asset.pixel_height, asset.duration));
     let import_result = state
         .library
         .lock()
@@ -445,17 +523,16 @@ fn convert_asset_to_gif(
             &gif_path,
             CaptureKind::Gif,
             "gif",
-            asset.pixel_width,
-            asset.pixel_height,
-            asset.duration,
+            gif_width,
+            gif_height,
+            gif_duration.or(asset.duration),
             asset.source_application.clone(),
         )
         .map_err(|e| e.to_string());
     let _ = std::fs::remove_file(&gif_path);
-    import_result?;
+    let gif_asset = import_result?;
     emit_library_changed(app);
-    emit_notice(app, "GIF Created".into(), "sparkles.rectangle.stack".into());
-    Ok(())
+    Ok(gif_asset)
 }
 
 // ---------------------------------------------------------------------------
@@ -590,6 +667,11 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
 fn hide_library_windows(app: &AppHandle) -> Vec<String> {
     let mut hidden = Vec::new();
     for (label, window) in app.webview_windows() {
+        if label == "toast" {
+            let _ = window.emit("toast-dismiss", ());
+            let _ = window.hide();
+            continue;
+        }
         if label.starts_with("library") && window.is_visible().unwrap_or(false) {
             let _ = window.hide();
             hidden.push(label);
@@ -792,25 +874,17 @@ fn confirm_capture_inner(
         }
     }
 
-    if let Err(error) = platform::write_image_to_clipboard(png) {
-        log::error!("confirm_capture: clipboard write failed: {error}");
-        emit_error(
-            app,
-            "Could not copy the capture to the clipboard.".into(),
-            None,
-        );
-    } else {
-        emit_notice_on_monitor(
-            app,
-            "Copied to Clipboard".into(),
-            "checkmark.circle.fill".into(),
-            completion_monitor,
-        );
-    }
+    let copied = match platform::write_image_to_clipboard(png) {
+        Ok(()) => true,
+        Err(error) => {
+            log::error!("confirm_capture: clipboard write failed: {error}");
+            false
+        }
+    };
 
     let (pixel_width, pixel_height) = pixel_size;
     let mut library = state.library.lock().unwrap();
-    library
+    let import_result = library
         .import_data(
             png,
             CaptureKind::Image,
@@ -821,9 +895,40 @@ fn confirm_capture_inner(
             session.source_application.clone(),
             None,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string());
     drop(library);
+    let asset = match import_result {
+        Ok(asset) => asset,
+        Err(error) => {
+            if copied {
+                emit_notice_on_monitor(
+                    app,
+                    "Copied, but could not save".into(),
+                    "exclamationmark.triangle.fill".into(),
+                    completion_monitor,
+                );
+            }
+            return Err(error);
+        }
+    };
     emit_library_changed(app);
+
+    let title = if copied {
+        "Copied and Saved"
+    } else {
+        "Saved — Copy Failed"
+    };
+    show_completion_preview(
+        app,
+        &CompletionPreviewDto::ready(
+            uuid::Uuid::new_v4().to_string(),
+            &asset,
+            title,
+            completion_asset_detail(&asset),
+            copied,
+        ),
+        completion_monitor,
+    );
 
     restore_focus(app, &session);
     Ok(())
@@ -1091,7 +1196,14 @@ pub async fn start_recording_flow(
         }
     }
 
-    let mut options = request.options.normalized();
+    let saved_options = request.options.normalized();
+    let mut options = saved_options;
+    if options.output_format == RecordingOutputFormat::Gif {
+        // GIF has no audio channel. Keep the saved MP4 preferences intact and
+        // disable audio only for this capture session.
+        options.captures_system_audio = false;
+        options.captures_microphone = false;
+    }
     #[cfg(target_os = "macos")]
     if options.captures_microphone {
         match platform::request_microphone_access() {
@@ -1114,13 +1226,24 @@ pub async fn start_recording_flow(
         }
     }
 
-    let (display_id, backing_scale, screen_frame, return_pid, was_kiri_frontmost) = {
+    let (
+        display_id,
+        backing_scale,
+        screen_frame,
+        return_pid,
+        was_kiri_frontmost,
+        completion_monitor,
+    ) = {
         let state = app.state::<AppState>();
         let mut capture = state.capture.lock().unwrap();
         let Some(session) = capture.session.take() else {
             return Err("No active capture session.".into());
         };
         drop(capture);
+        let completion_monitor = session.overlay_labels.iter().find_map(|label| {
+            app.get_webview_window(label)
+                .and_then(|window| window.current_monitor().ok().flatten())
+        });
         invalidate_capture_resources(&app, &session);
         for label in &session.overlay_labels {
             if let Some(window) = app.get_webview_window(label) {
@@ -1133,6 +1256,7 @@ pub async fn start_recording_flow(
             session.display.screen_frame,
             session.return_pid,
             session.was_kiri_frontmost,
+            completion_monitor,
         )
     };
 
@@ -1143,15 +1267,18 @@ pub async fn start_recording_flow(
         }
     }
 
-    crate::state::save_recording_options(&app, &options);
+    crate::state::save_recording_options(&app, &saved_options);
 
     {
         let state = app.state::<AppState>();
+        *state.saved_recording_options.lock().unwrap() = saved_options;
         let mut recording = state.recording.lock().unwrap();
         *recording = RecordingFlow {
+            session_id: uuid::Uuid::new_v4(),
             return_pid,
             was_kiri_frontmost,
             is_starting: true,
+            completion_monitor,
             configuration: Some(RecordingConfiguration {
                 display_id,
                 region: Rect::new(
@@ -1296,7 +1423,7 @@ fn recover_completed_recording(
     if completed_segments.is_empty() {
         return Ok(false);
     }
-    finalize_recording(app, completed_segments).map(|()| true)
+    finalize_recording(app, completed_segments, RecordingOutputFormat::Mp4).map(|_| true)
 }
 
 /// Resets only the startup task that still owns this session. A late download
@@ -1579,6 +1706,33 @@ async fn prepare_encoder(app: AppHandle) -> Result<PreparedEncoder, String> {
     .map_err(|error| format!("video encoder preparation task failed: {error}"))?
 }
 
+fn spawn_recording_clock(app: &AppHandle, session_id: uuid::Uuid) {
+    let handle = app.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let should_continue = {
+            let state = handle.state::<AppState>();
+            let recording = state.recording.lock().unwrap();
+            if recording.session_id != session_id
+                || recording.configuration.is_none()
+                || recording.is_finalizing
+            {
+                false
+            } else if recording.is_recording && !recording.is_paused {
+                emit_recording_state(&handle, &recording);
+                true
+            } else {
+                // Keep the one session clock alive across pause/resume
+                // transitions; paused time is excluded by recording_state().
+                true
+            }
+        };
+        if !should_continue {
+            break;
+        }
+    });
+}
+
 #[tauri::command]
 pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
     log::info!("begin_recording: called");
@@ -1586,7 +1740,7 @@ pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
         let _ = window.close();
     }
 
-    let (startup_token, configuration) = {
+    let (startup_token, configuration, session_id) = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
         if recording.is_recording || recording.is_paused {
@@ -1601,7 +1755,7 @@ pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
             return Ok(());
         };
         emit_recording_state(&app, &recording);
-        (token, configuration)
+        (token, configuration, recording.session_id)
     };
 
     if let Err(error) = create_control_panel(&app, &configuration) {
@@ -1729,27 +1883,9 @@ pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
     // (Space = pause/resume, Esc = stop); stop_recording hands focus back to
     // the original application afterwards.
 
-    // Spec (app-orchestration §2.6 / recording §7): a 250ms recording clock
-    // refreshes the elapsed time in the control panel while recording.
-    {
-        let handle = app.clone();
-        std::thread::spawn(move || loop {
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            let should_continue = {
-                let state = handle.state::<AppState>();
-                let recording = state.recording.lock().unwrap();
-                if recording.is_recording && !recording.is_paused {
-                    emit_recording_state(&handle, &recording);
-                    true
-                } else {
-                    false
-                }
-            };
-            if !should_continue {
-                break;
-            }
-        });
-    }
+    // A single session-owned clock survives pause/resume and refreshes the
+    // control panel without counting paused time.
+    spawn_recording_clock(&app, session_id);
 
     emit_notice(
         &app,
@@ -1768,6 +1904,8 @@ pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
         if !recording.is_recording || recording.is_transitioning {
             return Ok(());
         }
+        recording.elapsed_before_segment = crate::state::recording_state(&recording).elapsed;
+        recording.started_at = None;
         recording.is_recording = false;
         recording.is_transitioning = true;
         emit_recording_state(&app, &recording);
@@ -1832,11 +1970,8 @@ pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
     if let Some(path) = segment_path {
         recording.segments.push(path);
     }
-    let elapsed = crate::state::recording_state(&recording).elapsed;
-    recording.elapsed_before_segment = elapsed;
     recording.is_paused = true;
     recording.is_transitioning = false;
-    recording.started_at = None;
     emit_recording_state(&app, &recording);
     emit_notice(&app, "Recording Paused".into(), "pause.circle.fill".into());
     Ok(())
@@ -1945,7 +2080,15 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let (segments, active, needs_active_segment, return_pid, was_kiri_frontmost) = {
+    let (
+        segments,
+        active,
+        needs_active_segment,
+        return_pid,
+        was_kiri_frontmost,
+        output_format,
+        completion_monitor,
+    ) = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
         if !(recording.is_recording || recording.is_paused) || recording.is_transitioning {
@@ -1963,12 +2106,14 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
             needs_active_segment,
             recording.return_pid,
             recording.was_kiri_frontmost,
+            recording
+                .configuration
+                .as_ref()
+                .map(|configuration| configuration.options.output_format)
+                .unwrap_or_default(),
+            recording.completion_monitor.take(),
         )
     };
-
-    let completion_monitor = app
-        .get_webview_window("control-panel")
-        .and_then(|window| window.current_monitor().ok().flatten());
 
     stop_click_monitor(&app);
     close_recording_windows(&app);
@@ -2010,10 +2155,22 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         } else if needs_active_segment {
             failure = Some("The active recording session is unavailable.".into());
         }
+
+        // The native capture session is over once its final MP4 segment has
+        // been closed. Release the global recording lock and restore the
+        // source application before potentially long merge/GIF work so an
+        // unlimited-duration GIF never blocks the next capture or holds
+        // focus for the whole conversion.
+        reset_recording_session(&handle);
+        if !was_kiri_frontmost {
+            if let Some(pid) = return_pid {
+                platform::activate_application(pid);
+            }
+        }
+
         if let Some(error) = failure {
             log::error!("recording: active segment failed while stopping: {error}");
             let recovery = recover_completed_recording(&handle, final_segments);
-            reset_recording_session(&handle);
             let message = match recovery {
                 Ok(true) => "Screen recording stopped unexpectedly. Earlier completed sections were saved as a partial recording."
                     .to_string(),
@@ -2026,31 +2183,91 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
             };
             emit_error(&handle, message, None);
         } else {
-            let result = finalize_recording(&handle, final_segments);
-            reset_recording_session(&handle);
+            let completion_id = uuid::Uuid::new_v4().to_string();
+            let (processing_kind, processing_title, processing_detail) = match output_format {
+                RecordingOutputFormat::Mp4 => ("video", "Saving Recording", "MP4"),
+                RecordingOutputFormat::Gif => ("gif", "Creating GIF", "12 fps · 720 px long edge"),
+            };
+            show_completion_preview(
+                &handle,
+                &CompletionPreviewDto::processing(
+                    completion_id.clone(),
+                    processing_kind,
+                    processing_title,
+                    processing_detail,
+                ),
+                completion_monitor.clone(),
+            );
+            let result = finalize_recording(&handle, final_segments, output_format);
             match result {
-                Ok(()) => emit_notice_on_monitor(
+                Ok(outcome) => show_completion_preview(
                     &handle,
-                    "Recording Saved".into(),
-                    "video.fill".into(),
+                    &CompletionPreviewDto::ready(
+                        completion_id,
+                        &outcome.asset,
+                        if outcome.gif_fallback {
+                            "GIF Failed — Recording Saved as MP4"
+                        } else if outcome.asset.kind == CaptureKind::Gif {
+                            "GIF Created"
+                        } else {
+                            "Recording Saved"
+                        },
+                        completion_asset_detail(&outcome.asset),
+                        false,
+                    ),
                     completion_monitor,
                 ),
                 Err(error) => {
                     log::error!("recording: final import failed: {error}");
+                    emit_notice_on_monitor(
+                        &handle,
+                        "Could not save the recording".into(),
+                        "exclamationmark.triangle.fill".into(),
+                        completion_monitor,
+                    );
                     emit_error(&handle, "Could not save the recording.".into(), None);
                 }
-            }
-        }
-        if !was_kiri_frontmost {
-            if let Some(pid) = return_pid {
-                platform::activate_application(pid);
             }
         }
     });
     Ok(())
 }
 
-fn finalize_recording(app: &AppHandle, segments: Vec<PathBuf>) -> Result<(), String> {
+struct RecordingFinalizeOutcome {
+    asset: CaptureAsset,
+    gif_fallback: bool,
+}
+
+fn import_recording_file(
+    state: &AppState,
+    path: &std::path::Path,
+    kind: CaptureKind,
+    extension: &str,
+    pixel_width: i64,
+    pixel_height: i64,
+    duration: Option<f64>,
+) -> Result<CaptureAsset, String> {
+    state
+        .library
+        .lock()
+        .unwrap()
+        .import_file(
+            path,
+            kind,
+            extension,
+            pixel_width,
+            pixel_height,
+            duration,
+            None,
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn finalize_recording(
+    app: &AppHandle,
+    segments: Vec<PathBuf>,
+    output_format: RecordingOutputFormat,
+) -> Result<RecordingFinalizeOutcome, String> {
     let state = app.state::<AppState>();
     let ffmpeg = state
         .ffmpeg_path
@@ -2066,19 +2283,77 @@ fn finalize_recording(app: &AppHandle, segments: Vec<PathBuf>) -> Result<(), Str
             .map_err(|e| e.to_string())?;
         let (pixel_width, pixel_height, duration) =
             crate::record::probe_video(&ffmpeg, &merged_path).unwrap_or((0, 0, None));
-        let mut library = state.library.lock().unwrap();
-        library
-            .import_file(
+
+        if output_format == RecordingOutputFormat::Mp4 {
+            let asset = import_recording_file(
+                &state,
                 &merged_path,
                 CaptureKind::Video,
                 "mp4",
                 pixel_width,
                 pixel_height,
                 duration,
-                None,
+            )?;
+            return Ok(RecordingFinalizeOutcome {
+                asset,
+                gif_fallback: false,
+            });
+        }
+
+        let gif_result = (|| {
+            let gif_path = crate::gif::export_gif(
+                &merged_path,
+                crate::core::policy::RecordingPolicy::MAXIMUM_GIF_LONG_EDGE,
+                crate::core::policy::RecordingPolicy::GIF_FRAMES_PER_SECOND,
+                &ffmpeg,
             )
-            .map_err(|e| e.to_string())?;
-        Ok(())
+            .map_err(|error| error.to_string())?;
+            let (gif_width, gif_height, gif_duration) = crate::record::probe_video(
+                &ffmpeg, &gif_path,
+            )
+            .unwrap_or((pixel_width, pixel_height, duration));
+            let import_result = import_recording_file(
+                &state,
+                &gif_path,
+                CaptureKind::Gif,
+                "gif",
+                gif_width,
+                gif_height,
+                gif_duration.or(duration),
+            );
+            let _ = std::fs::remove_file(&gif_path);
+            import_result
+        })();
+
+        match gif_result {
+            Ok(asset) => Ok(RecordingFinalizeOutcome {
+                asset,
+                gif_fallback: false,
+            }),
+            Err(gif_error) => {
+                log::warn!(
+                    "recording: GIF finalization failed, preserving the MP4 fallback: {gif_error}"
+                );
+                let asset = import_recording_file(
+                    &state,
+                    &merged_path,
+                    CaptureKind::Video,
+                    "mp4",
+                    pixel_width,
+                    pixel_height,
+                    duration,
+                )
+                .map_err(|fallback_error| {
+                    format!(
+                        "GIF finalization failed: {gif_error}; MP4 fallback failed: {fallback_error}"
+                    )
+                })?;
+                Ok(RecordingFinalizeOutcome {
+                    asset,
+                    gif_fallback: true,
+                })
+            }
+        }
     })();
     cleanup_finalization_files(&segments, &merged_path, result.is_ok());
     if result.is_ok() {

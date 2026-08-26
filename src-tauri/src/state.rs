@@ -89,11 +89,15 @@ impl Default for RecordingFlow {
             configuration: None,
             startup_token: None,
             active: None,
+            completion_monitor: None,
+            session_id: uuid::Uuid::nil(),
         }
     }
 }
 
 pub struct RecordingFlow {
+    /// Stable identity for timer/finalization work owned by this session.
+    pub session_id: uuid::Uuid,
     /// PID of the app that was frontmost before capture (focus restoration).
     pub return_pid: Option<u32>,
     pub was_kiri_frontmost: bool,
@@ -111,6 +115,9 @@ pub struct RecordingFlow {
     /// the token, so a cancelled or superseded task cannot start recording.
     pub(crate) startup_token: Option<uuid::Uuid>,
     pub active: Option<ActiveRecording>,
+    /// Display where the recording selection originated. The control panel is
+    /// draggable, so its final display is not a reliable completion target.
+    pub completion_monitor: Option<Monitor>,
 }
 
 impl RecordingFlow {
@@ -226,6 +233,54 @@ pub struct NoticeDto {
     pub id: String,
     pub title: String,
     pub symbol: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionPreviewDto {
+    pub id: String,
+    pub phase: String,
+    pub asset_id: Option<String>,
+    pub kind: String,
+    pub title: String,
+    pub detail: String,
+    pub gif_eligible: bool,
+    pub copied: bool,
+}
+
+impl CompletionPreviewDto {
+    pub fn processing(id: String, kind: &str, title: &str, detail: &str) -> Self {
+        Self {
+            id,
+            phase: "processing".into(),
+            asset_id: None,
+            kind: kind.into(),
+            title: title.into(),
+            detail: detail.into(),
+            gif_eligible: false,
+            copied: false,
+        }
+    }
+
+    pub fn ready(
+        id: String,
+        asset: &CaptureAsset,
+        title: &str,
+        detail: String,
+        copied: bool,
+    ) -> Self {
+        Self {
+            id,
+            phase: "ready".into(),
+            asset_id: Some(asset.id.to_string()),
+            kind: asset.kind.as_str().into(),
+            title: title.into(),
+            detail,
+            gif_eligible: asset.kind == crate::core::asset::CaptureKind::Video
+                && crate::core::policy::RecordingPolicy::is_gif_eligible(asset.duration),
+            copied,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -447,6 +502,7 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto, monitor: Option<Mo
             .decorations(false)
             .transparent(true)
             .shadow(false)
+            .content_protected(true)
             .always_on_top(true)
             .skip_taskbar(true)
             .resizable(false)
@@ -469,13 +525,79 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto, monitor: Option<Mo
         })
         .or_else(|| app.primary_monitor().ok().flatten());
     if let Some(monitor) = target_monitor {
-        position_completion_toast(&window, &monitor);
+        position_completion_toast(&window, &monitor, 60.0);
     }
 
     // Content is delivered via event so the resident window can update in
     // place (initial render reads the URL params above).
+    let _ = window.set_ignore_cursor_events(true);
+    let _ = window.set_content_protected(true);
+    crate::platform::set_window_capture_excluded(app, label, true);
     let _ = window.emit("toast", notice.clone());
-    let _ = window.show();
+    crate::platform::show_window_without_activation(app, label);
+}
+
+/// Shows an interactive completion card in the same resident global-feedback
+/// window used by passive notices. The window is visible without taking focus;
+/// it accepts pointer input only while the completion card is active.
+pub fn show_completion_preview(
+    app: &AppHandle,
+    preview: &CompletionPreviewDto,
+    monitor: Option<Monitor>,
+) {
+    let label = "toast";
+    let asset_id = preview.asset_id.as_deref().unwrap_or_default();
+    let initial_url = format!(
+        "index.html?window=toast&mode=completion&id={}&phase={}&assetId={}&kind={}&title={}&detail={}&gifEligible={}&copied={}",
+        urlencode(&preview.id),
+        urlencode(&preview.phase),
+        urlencode(asset_id),
+        urlencode(&preview.kind),
+        urlencode(&preview.title),
+        urlencode(&preview.detail),
+        preview.gif_eligible,
+        preview.copied,
+    );
+    let window = match app.get_webview_window(label) {
+        Some(window) => window,
+        None => {
+            let builder =
+                WebviewWindowBuilder::new(app, label, WebviewUrl::App(initial_url.into()))
+                    .title("kiri")
+                    .decorations(false)
+                    .transparent(true)
+                    .shadow(false)
+                    .content_protected(true)
+                    .always_on_top(true)
+                    .skip_taskbar(true)
+                    .resizable(false)
+                    .focused(false)
+                    .visible(false)
+                    .inner_size(360.0, 124.0)
+                    .position(0.0, 0.0);
+            let Ok(window) = builder.build() else {
+                return;
+            };
+            window
+        }
+    };
+
+    let target_monitor = monitor
+        .or_else(|| focused_kiri_monitor(app))
+        .or_else(|| {
+            let cursor = app.cursor_position().ok()?;
+            app.monitor_from_point(cursor.x, cursor.y).ok().flatten()
+        })
+        .or_else(|| app.primary_monitor().ok().flatten());
+    if let Some(monitor) = target_monitor {
+        position_completion_toast(&window, &monitor, 124.0);
+    }
+
+    let _ = window.set_ignore_cursor_events(preview.phase == "processing");
+    let _ = window.set_content_protected(true);
+    crate::platform::set_window_capture_excluded(app, label, true);
+    let _ = window.emit("completion-preview", preview.clone());
+    crate::platform::show_window_without_activation(app, label);
 }
 
 fn focused_kiri_monitor(app: &AppHandle) -> Option<Monitor> {
@@ -491,14 +613,14 @@ fn focused_kiri_monitor(app: &AppHandle) -> Option<Monitor> {
         })
 }
 
-fn position_completion_toast(window: &WebviewWindow, monitor: &Monitor) {
+fn position_completion_toast(window: &WebviewWindow, monitor: &Monitor, height: f64) {
     let work_area = monitor.work_area();
     let position = toast_position(work_area.position, work_area.size, monitor.scale_factor());
 
     // Position first so the following logical size is resolved using the
     // destination display's scale factor on mixed-DPI setups.
     let _ = window.set_position(position);
-    let _ = window.set_size(LogicalSize::new(360.0, 60.0));
+    let _ = window.set_size(LogicalSize::new(360.0, height));
 }
 
 /// Top-center toast position in physical desktop coordinates. Including the

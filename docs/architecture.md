@@ -38,7 +38,7 @@ modules.
 | `ripple` | Optional recorded click highlight |
 | `editor-*` | Full screenshot editor |
 | `viewer-*` | Image, video, or GIF viewer |
-| `toast` | Transient status feedback |
+| `toast` | Passive status feedback or an interactive completion preview |
 | `confirm` | Destructive-action confirmation |
 
 The backend owns window creation and validates commands against the expected
@@ -58,8 +58,12 @@ unrestricted filesystem path.
 4. The overlay performs window hit testing, region selection, and annotation.
 5. Screenshot confirmation sends only the rendered selected PNG to Rust. Rust
    validates its header and decodes it under capture-sized allocation limits,
-   then imports it into the local library, copies it to the clipboard, tears
+   then copies it to the clipboard, imports it into the local library, tears
    down the session, and restores focus.
+6. A successful import presents the persisted asset in the resident completion
+   window on the originating display. The preview does not take focus; a copy
+   failure is reported without discarding the saved asset, and a save failure
+   never presents a preview for an asset that does not exist.
 
 Escape cancels the active session and releases its frozen image. There is no
 runtime synthetic-desktop or temporary-library mode in development or
@@ -87,9 +91,21 @@ WebView CSP does not allow direct provider access.
 
 Platform capture produces BGRA video frames and optional PCM audio. macOS uses
 ScreenCaptureKit. Windows uses Windows Graphics Capture plus WASAPI through
-`cpal`. Rust feeds the actual pixel and audio formats to FFmpeg and produces a
-30 fps H.264/HEVC MP4 with AAC audio. Hardware encoding is probed first and
-falls back to `libx264`.
+`cpal`. Rust feeds the actual pixel and audio formats to FFmpeg and first
+produces a 30 fps H.264/HEVC MP4 with AAC audio. Hardware encoding is probed
+first and falls back to `libx264`.
+
+The recording panel explicitly chooses the final MP4 or GIF output before
+capture starts; existing saved options without this field default to MP4. GIF
+output disables audio for that recording session without erasing the user's
+saved MP4 audio preferences. After the MP4 staging file is finalized, Kiri
+converts it locally to a looping, silent GIF at 12 fps with a 720-pixel long
+edge. There is no duration cutoff for a recording with a positive known
+duration. If GIF encoding or import fails, Kiri imports the valid MP4 staging
+file instead of losing the recording. The native recording session returns to
+idle and restores the source application's focus before long merge/GIF work,
+so background finalization does not block the next capture. FFmpeg jobs must
+keep growing their output; a stalled child process is terminated and reaped.
 
 The native-to-encoder video handoff has a hard two-frame capacity. On macOS,
 ScreenCaptureKit's native IOSurface queue is independently limited to three
@@ -115,6 +131,12 @@ re-encodes are not constrained by a short total timeout. Kiri control windows
 are excluded from exported frames, while an enabled click-ripple window is
 intentionally included.
 
+The countdown is a single background-free 3-2-1 numeral in system display
+typography. It has no ring, disc, panel, hint pill, blur, or shadow, remains
+centered without dimming the selected region, supports Escape cancellation and
+reduced-motion preferences, and stays visually independent of the selected
+output format.
+
 Kiri does not bundle FFmpeg. A recording or explicit GIF conversion resolves a
 validated local copy first, otherwise downloads a version-pinned archive,
 checks its SHA-256, validates the executable, and caches it. Library browsing
@@ -130,6 +152,24 @@ semantic version. The response never supplies an executable path or an
 arbitrary navigation target. When a newer version exists, a separate user
 action opens Kiri's fixed Releases page in the system browser. Kiri does not
 download or install application updates.
+
+## Completion feedback
+
+One resident `toast` window serves two distinct modes. Ordinary notices are
+short-lived and ignore pointer input. Persisted screenshot, MP4, and GIF assets
+use an interactive completion card with a bounded thumbnail, status detail,
+and actions to open the existing viewer, copy, or move the asset to recoverable
+Trash. Images copy as clipboard pixels; MP4 and GIF assets copy as operating-
+system file items, never as a text path or a full in-memory video payload.
+
+Moving an asset to Trash collapses the preview into a compact three-second Undo
+row that calls the normal library restore operation. Permanent deletion is not
+exposed from completion feedback. Ready cards close automatically after eight
+seconds; only an in-flight action delays either deadline, so pointer or window
+focus cannot leave feedback stuck onscreen. If another completion arrives
+during Undo, only the newest pending completion is shown afterward. Feedback
+surfaces are flat, without a drop shadow. The window appears on the originating
+display without taking focus and is protected/excluded from subsequent captures.
 
 ## Persistence boundaries
 

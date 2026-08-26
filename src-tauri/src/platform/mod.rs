@@ -49,6 +49,34 @@ pub fn write_text_to_clipboard(text: &str) -> Result<()> {
         .map_err(|error| anyhow::anyhow!(error))
 }
 
+/// Writes an existing regular file to the system clipboard as a file item.
+pub fn write_file_to_clipboard(path: &Path) -> Result<()> {
+    let metadata = std::fs::metadata(path).map_err(|error| {
+        anyhow::anyhow!(
+            "The file could not be accessed for copying ({}): {error}",
+            path.display()
+        )
+    })?;
+    if !metadata.is_file() {
+        anyhow::bail!(
+            "Only an existing regular file can be copied ({}).",
+            path.display()
+        );
+    }
+
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|error| anyhow::anyhow!("The system clipboard is unavailable: {error}"))?;
+    clipboard
+        .set()
+        .file_list(&[path])
+        .map_err(|error| anyhow::anyhow!("The file could not be copied to the clipboard: {error}"))
+}
+
+/// Shows a window without activating Kiri or moving keyboard focus to it.
+pub fn show_window_without_activation(app: &tauri::AppHandle, label: &str) {
+    current::show_window_without_activation(app, label);
+}
+
 /// Activate the application with the given PID (focus restoration).
 pub fn activate_application(pid: u32) {
     current::activate_application(pid);

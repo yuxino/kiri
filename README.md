@@ -16,15 +16,18 @@ Capture screenshots, annotate, recognize text, record regions, and keep everythi
 
 The library, recoverable Trash, filters, and settings live in one compact local
 workspace. Capture overlays stay out of completed screenshots and recordings.
+After a screenshot or recording finishes, a compact preview appears on the
+originating display without taking focus away from the application you were
+using.
 
 ## Features
 
-- **Screenshots** — window or region capture with precise selection and a movable mode selector; completion copies the result to the clipboard and saves it to the local library.
+- **Screenshots** — window or region capture with precise selection and a movable mode selector; completion copies the result to the clipboard, saves it to the local library, and offers open, copy-again, and recoverable Trash actions in the completion preview.
 - **Annotations** — pen, shapes, arrows, text, and mosaic with undo/redo; existing annotations stay selectable and editable.
 - **OCR** — local text recognition by default (macOS Vision / Windows.Media.Ocr). macOS automatically detects any recognition language supported by Vision; Windows uses the first installed OCR language supported from the user profile. Multiple optional profiles support Alibaba Cloud, OpenAI, or other image-capable services that implement the OpenAI Chat Completions API. Before every remote request, Kiri shows the destination, model, and selected-image details; only an explicit Send or Retry action uploads that selected region. Failures never retry, switch providers, or fall back to another upload automatically.
-- **Recording** — region recording with optional audio, pointer, and click highlights; a 3-2-1 countdown, a draggable control bar (Esc to stop), and Retina-quality MP4 output.
-- **GIF** — convert short recordings into looping GIFs with visible conversion progress.
-- **Library** — date-grouped captures with favorites, tags, rename, search, copy, reveal, and a recoverable Trash. The sidebar and filter bar let you browse by type, favorites, and tags.
+- **Recording** — region recording with optional audio, pointer, and click highlights; choose MP4 or GIF before recording, then use the neutral 3-2-1 countdown and draggable control bar (Esc to stop). MP4 output remains Retina-quality with audio when enabled.
+- **GIF** — record directly or convert an existing recording of any duration into a looping, silent GIF at 12 fps with a 720 px long edge. If direct GIF finalization fails, Kiri keeps the valid MP4 instead.
+- **Library** — date-grouped captures with favorites, tags, rename, search, copy, reveal, and a recoverable Trash. Images copy as pixels, while MP4 and GIF captures copy as files. The sidebar and filter bar let you browse by type, favorites, and tags.
 - **Updates** — Settings shows the installed version and checks the official GitHub Release only when you click **Check for Updates**. Kiri never downloads or installs an app update automatically.
 
 ## Download

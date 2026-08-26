@@ -29,6 +29,9 @@ application or a durable product decision.
   — one clipboard-first completion action without an overflow menu.
 - [`adr/0011-movable-capture-mode-selector.md`](adr/0011-movable-capture-mode-selector.md)
   — a top-centered mode selector that can be moved for the current capture.
+- [`adr/0012-interactive-completion-and-recording-output.md`](adr/0012-interactive-completion-and-recording-output.md)
+  — interactive completion actions, explicit MP4/GIF output, and the neutral
+  recording countdown.
 - [`adr/0014-user-initiated-update-checks.md`](adr/0014-user-initiated-update-checks.md)
   — explicit, bounded update checks without background downloads or installs.
 

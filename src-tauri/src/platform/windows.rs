@@ -12,8 +12,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, EnumWindows, GetForegroundWindow, GetMessageW,
     GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
     SetForegroundWindow, SetWindowDisplayAffinity, SetWindowsHookExW, ShowWindow, TranslateMessage,
-    MSG, MSLLHOOKSTRUCT, SW_RESTORE, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WH_MOUSE_LL, WM_LBUTTONDOWN,
-    WM_RBUTTONDOWN,
+    MSG, MSLLHOOKSTRUCT, SW_RESTORE, SW_SHOWNOACTIVATE, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+    WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
 };
 
 use super::{ClickMonitorHandle, MicrophoneAccess};
@@ -28,6 +28,19 @@ pub fn activate_application(pid: u32) {
             let _ = ShowWindow(hwnd, SW_RESTORE);
             let _ = SetForegroundWindow(hwnd);
         }
+    }
+}
+
+pub fn show_window_without_activation(app: &tauri::AppHandle, label: &str) {
+    let Some(window) = app.get_webview_window(label) else {
+        return;
+    };
+    let Ok(hwnd) = window.hwnd() else {
+        let _ = window.show();
+        return;
+    };
+    unsafe {
+        let _ = ShowWindow(HWND(hwnd.0 as *mut _), SW_SHOWNOACTIVATE);
     }
 }
 

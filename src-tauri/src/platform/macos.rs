@@ -9,7 +9,9 @@ use block2::RcBlock;
 use objc2_core_foundation::CFRunLoop;
 use tauri::{AppHandle, Manager};
 
-use objc2_app_kit::{NSEvent, NSEventMask, NSRunningApplication, NSWindow, NSWorkspace};
+use objc2_app_kit::{
+    NSEvent, NSEventMask, NSRunningApplication, NSScreenSaverWindowLevel, NSWindow, NSWorkspace,
+};
 use objc2_core_foundation::kCFRunLoopDefaultMode;
 use objc2_foundation::{NSArray, NSString, NSURL};
 
@@ -27,6 +29,31 @@ pub fn activate_application(pid: u32) {
             );
         }
     });
+}
+
+pub fn show_window_without_activation(app: &AppHandle, label: &str) {
+    let Some(window) = app.get_webview_window(label) else {
+        return;
+    };
+    let fallback = window.clone();
+    let shown_natively = dispatch2::run_on_main(move |_main_thread| {
+        let Ok(ns_window) = window.ns_window() else {
+            return false;
+        };
+        let Some(ns_window) = (unsafe { (ns_window as *mut NSWindow).as_ref() }) else {
+            return false;
+        };
+        // Capture overlays use the screen-saver level so they reliably cover
+        // the desktop. Put passive feedback at that same level before
+        // ordering it front; otherwise OCR's "Text Copied" notice is created
+        // successfully but remains hidden behind the still-open overlay.
+        ns_window.setLevel(NSScreenSaverWindowLevel);
+        ns_window.orderFrontRegardless();
+        true
+    });
+    if !shown_natively {
+        let _ = fallback.show();
+    }
 }
 
 pub fn reveal_path(path: &Path) {

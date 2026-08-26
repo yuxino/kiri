@@ -1380,7 +1380,15 @@ function RecordOptionsPanel(props: {
   onCancel(): void;
 }) {
   const { anchor, bounds, options, micSupported, onChange, onStart, onCancel } = props;
-  const toggle = (key: keyof RecordingOptions) => {
+  const gifOutput = options.outputFormat === "gif";
+  const toggle = (
+    key:
+      | "usesCountdown"
+      | "capturesSystemAudio"
+      | "capturesMicrophone"
+      | "showsCursor"
+      | "highlightsClicks",
+  ) => {
     const next = { ...options, [key]: !options[key] };
     if (key === "showsCursor" && !next.showsCursor) next.highlightsClicks = false;
     onChange(next);
@@ -1427,8 +1435,57 @@ function RecordOptionsPanel(props: {
       }}
     >
       <div style={{ font: "600 12.5px var(--kiri-font-ui)", marginBottom: 6 }}>{t("Record Region")}</div>
-      <div style={{ color: "rgba(255,255,255,0.7)", font: "400 11px var(--kiri-font-ui)", marginBottom: 6 }}>
-        {t("MP4 · 30 fps · Saved locally · Never uploaded")}
+      <div
+        role="radiogroup"
+        aria-label={t("Recording format")}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 3,
+          padding: 3,
+          marginBottom: 4,
+          borderRadius: 10,
+          background: "rgba(255,255,255,0.09)",
+          border: "1px solid rgba(255,255,255,0.1)",
+        }}
+      >
+        {(["mp4", "gif"] as const).map((format) => {
+          const selected = options.outputFormat === format;
+          return (
+            <button
+              key={format}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onChange({ ...options, outputFormat: format })}
+              style={{
+                height: 28,
+                border: "none",
+                borderRadius: 7,
+                background: selected ? "rgba(125,105,245,0.38)" : "transparent",
+                color: selected ? "#fff" : "rgba(255,255,255,0.68)",
+                font: "600 11.5px var(--kiri-font-ui)",
+                cursor: "pointer",
+                boxShadow: selected ? "inset 0 0 0 1px rgba(255,255,255,0.13)" : "none",
+                transition: "background 0.14s ease-out, color 0.14s ease-out",
+              }}
+            >
+              {t(format === "mp4" ? "MP4" : "GIF")}
+            </button>
+          );
+        })}
+      </div>
+      <div
+        style={{
+          minHeight: 27,
+          color: "rgba(255,255,255,0.7)",
+          font: "400 11px/1.35 var(--kiri-font-ui)",
+          marginBottom: 6,
+        }}
+      >
+        {gifOutput
+          ? t("GIF · 12 fps · 720 px long edge · No audio")
+          : t("MP4 · 30 fps · Saved locally · Never uploaded")}
       </div>
       <ToggleRow
         label={t("3-second countdown")}
@@ -1437,15 +1494,16 @@ function RecordOptionsPanel(props: {
       />
       <ToggleRow
         label={t("System audio")}
-        checked={options.capturesSystemAudio}
+        checked={!gifOutput && options.capturesSystemAudio}
         onToggle={() => toggle("capturesSystemAudio")}
+        disabled={gifOutput}
       />
       <ToggleRow
         label={t("Microphone")}
-        suffix={micSupported ? undefined : t("Requires macOS 15")}
-        checked={options.capturesMicrophone}
+        suffix={micSupported || gifOutput ? undefined : t("Requires macOS 15")}
+        checked={!gifOutput && options.capturesMicrophone}
         onToggle={() => toggle("capturesMicrophone")}
-        disabled={!micSupported}
+        disabled={gifOutput || !micSupported}
       />
       <ToggleRow
         label={t("Show pointer")}
@@ -1460,7 +1518,7 @@ function RecordOptionsPanel(props: {
       />
       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
         <button className="kiri-primary-button" style={{ flex: 1 }} onClick={onStart}>
-          {t("Start Recording")}
+          {gifOutput ? t("Start GIF Recording") : t("Start Recording")}
         </button>
         <button
           style={{ ...iconButtonStyle, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}

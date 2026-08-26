@@ -616,7 +616,7 @@ fn cleanup_unpack_directory(cache_dir: &Path) {
 const ENCODER_PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const CHILD_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const PROGRESS_POLL_INTERVAL: Duration = Duration::from_millis(250);
-const MERGE_STALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+pub(crate) const FFMPEG_OUTPUT_STALL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug)]
 enum TimedChildExit {
@@ -652,7 +652,7 @@ fn wait_for_child_with_timeout(child: &mut Child, timeout: Duration) -> Result<T
     }
 }
 
-/// Long recording merges have no useful fixed total deadline: re-encoding a
+/// Long FFmpeg jobs have no useful fixed total deadline: processing a
 /// multi-hour capture can legitimately take hours. Instead, require the output
 /// file to keep making byte-level progress. Ten minutes without any size
 /// change is treated as a wedged encoder, which is then killed and reaped.
@@ -666,7 +666,7 @@ fn wait_for_child_with_output_progress(
         .unwrap_or(0);
     let mut last_progress = Instant::now();
     loop {
-        if let Some(status) = child.try_wait().context("could not poll FFmpeg merge")? {
+        if let Some(status) = child.try_wait().context("could not poll FFmpeg process")? {
             return Ok(TimedChildExit::Exited(status));
         }
         let current_size = std::fs::metadata(output_path)
@@ -676,19 +676,19 @@ fn wait_for_child_with_output_progress(
             observed_size = current_size;
             last_progress = Instant::now();
         } else if last_progress.elapsed() >= stall_timeout {
-            terminate_and_reap(child).context("could not stop stalled FFmpeg merge")?;
+            terminate_and_reap(child).context("could not stop stalled FFmpeg process")?;
             return Ok(TimedChildExit::TimedOut);
         }
         std::thread::sleep(PROGRESS_POLL_INTERVAL.min(stall_timeout));
     }
 }
 
-fn run_command_with_output_progress(
+pub(crate) fn run_command_with_output_progress(
     command: &mut Command,
     output_path: &Path,
     stall_timeout: Duration,
 ) -> Result<ExitStatus> {
-    let mut child = command.spawn().context("could not start FFmpeg merge")?;
+    let mut child = command.spawn().context("could not start FFmpeg process")?;
     let outcome = wait_for_child_with_output_progress(&mut child, output_path, stall_timeout);
     if outcome.is_err() {
         let _ = terminate_and_reap(&mut child);
@@ -696,7 +696,7 @@ fn run_command_with_output_progress(
     match outcome? {
         TimedChildExit::Exited(status) => Ok(status),
         TimedChildExit::TimedOut => bail!(
-            "FFmpeg produced no merge output for {} seconds and was terminated.",
+            "FFmpeg produced no output progress for {} seconds and was terminated.",
             stall_timeout.as_secs()
         ),
     }
@@ -1405,7 +1405,7 @@ pub fn merge_segments(segments: &[PathBuf], out_path: &Path, ffmpeg: &Path) -> R
             .stdout(Stdio::null())
             .stderr(Stdio::null()),
         out_path,
-        MERGE_STALL_TIMEOUT,
+        FFMPEG_OUTPUT_STALL_TIMEOUT,
     );
 
     if matches!(&copy_status, Ok(status) if status.success()) {
@@ -1429,7 +1429,7 @@ pub fn merge_segments(segments: &[PathBuf], out_path: &Path, ffmpeg: &Path) -> R
             .stdout(Stdio::null())
             .stderr(Stdio::null()),
         out_path,
-        MERGE_STALL_TIMEOUT,
+        FFMPEG_OUTPUT_STALL_TIMEOUT,
     );
     let _ = std::fs::remove_file(&list_path);
     match status {

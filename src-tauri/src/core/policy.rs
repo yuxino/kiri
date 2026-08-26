@@ -3,9 +3,19 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RecordingOutputFormat {
+    #[default]
+    Mp4,
+    Gif,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecordingOptions {
+    #[serde(default)]
+    pub output_format: RecordingOutputFormat,
     pub uses_countdown: bool,
     pub captures_system_audio: bool,
     pub captures_microphone: bool,
@@ -16,6 +26,7 @@ pub struct RecordingOptions {
 impl Default for RecordingOptions {
     fn default() -> Self {
         Self {
+            output_format: RecordingOutputFormat::Mp4,
             uses_countdown: true,
             captures_system_audio: false,
             captures_microphone: false,
@@ -40,7 +51,6 @@ pub struct RecordingPolicy;
 
 impl RecordingPolicy {
     pub const FRAMES_PER_SECOND: u32 = 30;
-    pub const MAXIMUM_GIF_DURATION: f64 = 15.0;
     pub const GIF_FRAMES_PER_SECOND: u32 = 12;
     pub const MAXIMUM_GIF_LONG_EDGE: u32 = 720;
 
@@ -68,7 +78,7 @@ impl RecordingPolicy {
     /// Mirrors `RecordingPolicy.isGIFEligible(duration:)`.
     pub fn is_gif_eligible(duration: Option<f64>) -> bool {
         match duration {
-            Some(d) => d > 0.0 && d <= Self::MAXIMUM_GIF_DURATION,
+            Some(d) => d > 0.0,
             None => false,
         }
     }
@@ -108,16 +118,22 @@ mod tests {
 
     #[test]
     fn bit_rate_clamps_to_policy_range() {
-        assert_eq!(RecordingPolicy::high_quality_bit_rate(1920, 1080), 16_588_800);
+        assert_eq!(
+            RecordingPolicy::high_quality_bit_rate(1920, 1080),
+            16_588_800
+        );
         assert_eq!(RecordingPolicy::high_quality_bit_rate(100, 100), 4_000_000);
-        assert_eq!(RecordingPolicy::high_quality_bit_rate(4000, 4000), 40_000_000);
+        assert_eq!(
+            RecordingPolicy::high_quality_bit_rate(4000, 4000),
+            40_000_000
+        );
     }
 
     #[test]
-    fn gif_eligibility_matches_swift() {
+    fn gif_eligibility_accepts_any_positive_duration() {
         assert!(RecordingPolicy::is_gif_eligible(Some(0.5)));
         assert!(RecordingPolicy::is_gif_eligible(Some(15.0)));
-        assert!(!RecordingPolicy::is_gif_eligible(Some(15.001)));
+        assert!(RecordingPolicy::is_gif_eligible(Some(3_600.0)));
         assert!(!RecordingPolicy::is_gif_eligible(Some(0.0)));
         assert!(!RecordingPolicy::is_gif_eligible(None));
     }
@@ -138,5 +154,51 @@ mod tests {
         };
         let normalized = options.normalized();
         assert!(!normalized.highlights_clicks);
+    }
+
+    #[test]
+    fn recording_output_format_serializes_for_frontend_ipc() {
+        let options = RecordingOptions {
+            output_format: RecordingOutputFormat::Gif,
+            ..Default::default()
+        };
+        let json = serde_json::to_value(options).unwrap();
+        assert_eq!(json["outputFormat"], serde_json::json!("gif"));
+        assert_eq!(
+            serde_json::to_value(RecordingOutputFormat::Mp4).unwrap(),
+            serde_json::json!("mp4")
+        );
+    }
+
+    #[test]
+    fn legacy_recording_options_default_to_mp4() {
+        let options: RecordingOptions = serde_json::from_str(
+            r#"{
+                "usesCountdown": false,
+                "capturesSystemAudio": true,
+                "capturesMicrophone": true,
+                "showsCursor": true,
+                "highlightsClicks": false
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(options.output_format, RecordingOutputFormat::Mp4);
+        assert!(options.captures_system_audio);
+        assert!(options.captures_microphone);
+    }
+
+    #[test]
+    fn gif_normalization_preserves_saved_audio_preferences() {
+        let options = RecordingOptions {
+            output_format: RecordingOutputFormat::Gif,
+            captures_system_audio: true,
+            captures_microphone: true,
+            ..Default::default()
+        };
+
+        let normalized = options.normalized();
+        assert!(normalized.captures_system_audio);
+        assert!(normalized.captures_microphone);
     }
 }

@@ -22,8 +22,8 @@ history.
 - [x] Local OCR (macOS Vision, Windows.Media.Ocr)
 - [x] Region recording (SCK / WGC) with ffmpeg H.264 + AAC pipeline
 - [x] Optional system audio, pointer, and click highlights
-- [x] 3-2-1 countdown and multi-segment recording pipeline
-- [x] GIF export (≤15 s, 12 fps, 720 px long edge)
+- [x] Neutral, non-dimming 3-2-1 countdown and multi-segment recording pipeline
+- [x] GIF export for any positive known duration (12 fps, 720 px long edge)
 - [x] English, Simplified Chinese, and Japanese, following the OS language
 
 ## v1.4 — Secure remote OCR and release reliability
@@ -40,6 +40,8 @@ history.
 - [x] One transparent desktop icon source with dev, production, and CI validation
 - [x] Release jobs verify release tools and app icons before packaging
 - [x] FFmpeg is downloaded on the first recording or explicit GIF conversion when absent, then cached locally
+- [x] Interactive screenshot and recording completion preview with open, copy, recoverable Trash, and Undo actions
+- [x] Explicit MP4/GIF recording output choice; direct GIF is silent and preserves the MP4 when GIF finalization fails
 
 Release validation still open:
 

@@ -39,7 +39,10 @@ export interface AssetDto {
   gifEligible: boolean;
 }
 
+export type RecordingOutputFormat = "mp4" | "gif";
+
 export interface RecordingOptions {
+  outputFormat: RecordingOutputFormat;
   usesCountdown: boolean;
   capturesSystemAudio: boolean;
   capturesMicrophone: boolean;
@@ -48,6 +51,7 @@ export interface RecordingOptions {
 }
 
 export const DEFAULT_RECORDING_OPTIONS: RecordingOptions = {
+  outputFormat: "mp4",
   usesCountdown: true,
   capturesSystemAudio: false,
   capturesMicrophone: false,
