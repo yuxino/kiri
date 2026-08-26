@@ -1,20 +1,14 @@
 #!/usr/bin/env bash
-# Packages Kiri with Tauri. macOS builds require a stable signing identity;
-# ad-hoc signing is available only when explicitly requested for disposable QA.
+# Packages Kiri with Tauri. macOS builds require a stable signing identity.
 set -euo pipefail
-cd "$(dirname "$0")/.."
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+cd "$SCRIPT_DIR/.."
 
 if [ "$(uname -s)" = "Darwin" ]; then
-  if [ -n "${KIRI_SIGNING_IDENTITY:-}" ]; then
-    export APPLE_SIGNING_IDENTITY="$KIRI_SIGNING_IDENTITY"
-  elif [ "${KIRI_ALLOW_ADHOC_SIGNING:-0}" = "1" ]; then
-    export APPLE_SIGNING_IDENTITY="-"
-    echo "package-app: using explicitly requested ad-hoc signing" >&2
-  else
-    echo "package-app: no stable signing identity; set KIRI_SIGNING_IDENTITY" >&2
-    echo "package-app: disposable QA may explicitly set KIRI_ALLOW_ADHOC_SIGNING=1" >&2
-    exit 1
-  fi
+  APPLE_SIGNING_IDENTITY="$(
+    "$SCRIPT_DIR/codesign-identity.sh" "${KIRI_SIGNING_IDENTITY:-}"
+  )"
+  export APPLE_SIGNING_IDENTITY
 fi
 
 pnpm tauri build "$@"

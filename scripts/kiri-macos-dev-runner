@@ -56,45 +56,10 @@ case "$file_description" in
   *) fail "expected a Mach-O executable, got: $file_description" ;;
 esac
 
-available_identity_names() {
-  /usr/bin/security find-identity -v -p codesigning 2>/dev/null \
-    | /usr/bin/sed -n 's/^[^"]*"\([^"]*\)".*$/\1/p'
-}
-
-automatic_identity() {
-  local prefix candidate
-  for prefix in "Apple Development:" "Developer ID Application:"; do
-    while IFS= read -r candidate; do
-      case "$candidate" in
-        "$prefix"*) printf '%s\n' "$candidate"; return 0 ;;
-      esac
-    done < <(available_identity_names)
-  done
-  while IFS= read -r candidate; do
-    case "$candidate" in
-      *" Local Development") printf '%s\n' "$candidate"; return 0 ;;
-    esac
-  done < <(available_identity_names)
-  return 1
-}
-
-identity="${KIRI_DEV_SIGNING_IDENTITY:-${KIRI_SIGNING_IDENTITY:-}}"
-if [ -z "$identity" ]; then
-  identity="$(automatic_identity || true)"
-fi
-
-if [ -z "$identity" ]; then
-  if [ "${KIRI_ALLOW_ADHOC_SIGNING:-0}" = "1" ]; then
-    identity="-"
-    echo "kiri dev signing: using explicitly requested ad-hoc signing; macOS may ask for permissions again after rebuilds" >&2
-  else
-    fail "no stable code-signing identity found. Install an Apple Development certificate or set KIRI_DEV_SIGNING_IDENTITY. Disposable local QA may explicitly allow ad-hoc signing with KIRI_ALLOW_ADHOC_SIGNING=1."
-  fi
-fi
-
-if [ "$identity" = "-" ] && [ "${KIRI_ALLOW_ADHOC_SIGNING:-0}" != "1" ]; then
-  fail "ad-hoc signing must be explicitly enabled with KIRI_ALLOW_ADHOC_SIGNING=1"
-fi
+identity="$(
+  "$script_dir/codesign-identity.sh" \
+    "${KIRI_DEV_SIGNING_IDENTITY:-${KIRI_SIGNING_IDENTITY:-}}"
+)"
 
 signing_identifier="io.yuxino.kiri.dev"
 /usr/bin/codesign \

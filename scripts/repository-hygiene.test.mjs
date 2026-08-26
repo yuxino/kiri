@@ -27,6 +27,29 @@ test("the repository has one canonical Tauri and Cargo project", () => {
   }
 });
 
+test("permission-sensitive macOS entry points never allow ad-hoc signing", () => {
+  const paths = [
+    ".github/workflows/release.yml",
+    "scripts/codesign-identity.sh",
+    "scripts/install-app.sh",
+    "scripts/kiri-macos-dev-runner",
+    "scripts/package-app.sh",
+  ];
+  for (const relativePath of paths) {
+    const source = readFileSync(join(repositoryRoot, relativePath), "utf8");
+    assert.equal(
+      source.includes("KIRI_ALLOW_ADHOC_SIGNING"),
+      false,
+      `${relativePath} must not expose an ad-hoc permission-flow escape hatch`,
+    );
+    assert.equal(
+      /APPLE_SIGNING_IDENTITY:\s*["']?-["']?/.test(source),
+      false,
+      `${relativePath} must not publish with an ad-hoc identity`,
+    );
+  }
+});
+
 test("completed migration material stays in Git history", () => {
   for (const obsoletePath of ["docs/plans", "docs/spec"]) {
     assert.equal(

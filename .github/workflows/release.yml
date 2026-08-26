@@ -37,28 +37,19 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - run: npm install -g pnpm@10
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test:release-tools
-      - run: pnpm icons:verify
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No Developer ID secret is available yet. Explicit ad-hoc signing
-          # still seals the complete bundle and passes codesign verification.
-          APPLE_SIGNING_IDENTITY: "-"
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Kiri ${{ github.ref_name }}
-          releaseDraft: true
-          args: --bundles dmg
+      - name: Require a persistent macOS release identity
+        shell: bash
+        run: |
+          cat >&2 <<'EOF'
+          macOS release packaging is intentionally fail-closed.
+
+          Configure one persistent private-key-backed release certificate,
+          import it into an ephemeral CI keychain, pin its fingerprint, and
+          verify the final app's designated requirement before restoring this
+          job. Publishing another ad-hoc build would reset Screen Recording,
+          Input Monitoring, and Microphone authorization after an upgrade.
+          EOF
+          exit 1
 
   build-windows:
     name: Build Windows app
