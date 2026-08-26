@@ -25,9 +25,9 @@ but it cannot preserve the application's privacy identity across rebuilds.
 - `KIRI_DEV_SIGNING_IDENTITY` may select a stable certificate. Otherwise the
   runner chooses an installed Apple Development, Developer ID Application, or
   local-development identity.
-- Ad-hoc signing is never a silent fallback. Disposable QA must opt in with
-  `KIRI_ALLOW_ADHOC_SIGNING=1` and accepts that permissions may be requested
-  again after a rebuild.
+- Ad-hoc signing is rejected for the real development app. ADR 0013 extends
+  the same fail-closed rule to packaging, installation, branch artifacts, and
+  releases.
 - Development and installed applications keep separate identifiers so their
   privacy grants are not accidentally shared.
 
