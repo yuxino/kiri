@@ -4,7 +4,8 @@ Date: 2026-08-11
 
 ## Status
 
-Accepted
+Superseded for application UI styling by ADR 0015. The app-icon history remains
+recorded here.
 
 ## Context
 

@@ -69,7 +69,7 @@
   background: var(--kiri-card);
   border: 1px solid var(--kiri-surface-border);
   border-radius: var(--kiri-radius-card);
-  box-shadow: 0 8px 24px rgba(50, 38, 88, 0.055);
+  box-shadow: none;
 }
 
 .kiri-language-row,
@@ -148,8 +148,8 @@
 
 .kiri-language-picker button[data-active] {
   background: var(--kiri-accent-strong);
-  color: #fff;
-  box-shadow: 0 2px 7px var(--kiri-accent-alpha-32);
+  color: var(--kiri-on-accent);
+  box-shadow: none;
 }
 
 .kiri-settings-add-button {
@@ -285,7 +285,7 @@
 
 .ocr-engine-delete:hover:not(:disabled) {
   color: var(--kiri-coral);
-  background: rgba(250, 71, 110, 0.1);
+  background: rgba(200, 62, 54, 0.1);
 }
 
 .ocr-profile-empty {
@@ -320,8 +320,8 @@
 
 .kiri-settings-alert--error,
 .kiri-settings-form-error {
-  border-color: rgba(250, 71, 110, 0.28);
-  background: rgba(250, 71, 110, 0.08);
+  border-color: rgba(200, 62, 54, 0.28);
+  background: rgba(200, 62, 54, 0.08);
   color: var(--kiri-coral);
 }
 
@@ -366,7 +366,7 @@
   justify-content: center;
   padding: 20px;
   box-sizing: border-box;
-  background: rgba(21, 19, 29, 0.48);
+  background: rgba(0, 0, 0, 0.52);
   backdrop-filter: blur(5px);
   -webkit-backdrop-filter: blur(5px);
 }
@@ -381,7 +381,7 @@
   border-radius: var(--kiri-radius-card);
   background: var(--kiri-elevated);
   color: var(--kiri-label);
-  box-shadow: 0 24px 64px rgba(21, 19, 29, 0.34);
+  box-shadow: none;
 }
 
 .kiri-settings-dialog--compact {

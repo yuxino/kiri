@@ -61,11 +61,11 @@ export function ConfirmWindow(props: ConfirmProps) {
       <div
         style={{
           background: "var(--kiri-elevated)",
-          borderRadius: 18,
+          borderRadius: 14,
           padding: 20,
           width: 340,
           border: "1px solid var(--kiri-surface-border)",
-          boxShadow: "0 18px 40px rgba(0,0,0,0.35)",
+          boxShadow: "none",
         }}
       >
         <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>
@@ -87,7 +87,7 @@ export function ConfirmWindow(props: ConfirmProps) {
           </button>
           <button
             className="kiri-primary-button"
-            style={{ background: "#FA476E" }}
+            style={{ background: "var(--kiri-coral)" }}
             onClick={confirm}
           >
             {t(props.confirmLabel)}

@@ -433,7 +433,7 @@ function drawSelectionOutline(ctx: CanvasRenderingContext2D, mark: AnnotationMar
   ctx.strokeStyle = "rgba(255, 255, 255, 0.96)";
   ctx.lineWidth = 1.5;
   ctx.stroke();
-  ctx.strokeStyle = "#7D69F5";
+  ctx.strokeStyle = "#050505";
   ctx.lineWidth = 1;
   ctx.stroke();
   ctx.setLineDash([]);
@@ -457,7 +457,7 @@ function drawSelectionHandle(ctx: CanvasRenderingContext2D, p: Point) {
   ctx.beginPath();
   ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#7D69F5";
+  ctx.fillStyle = "#050505";
   ctx.beginPath();
   ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
   ctx.fill();

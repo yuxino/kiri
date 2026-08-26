@@ -8,7 +8,7 @@
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
-  box-shadow: 0 16px 46px rgba(0, 0, 0, 0.4);
+  box-shadow: none;
 }
 
 .kiri-remote-consent__tail {
@@ -18,15 +18,15 @@
   width: 14px;
   height: 14px;
   border-radius: 3px;
-  background: rgba(30, 27, 40, 0.92);
+  background: rgba(8, 8, 8, 0.96);
   transform: rotate(45deg);
-  box-shadow: -3px -3px 6px rgba(0, 0, 0, 0.18);
+  box-shadow: none;
 }
 
 .kiri-remote-consent__tail[data-above] {
   top: auto;
   bottom: -6px;
-  box-shadow: 3px 3px 6px rgba(0, 0, 0, 0.18);
+  box-shadow: none;
 }
 
 .kiri-remote-consent__header {
@@ -41,8 +41,8 @@
   padding: 2px 7px;
   margin-bottom: 5px;
   border-radius: var(--kiri-radius-badge);
-  background: rgba(255, 128, 168, 0.16);
-  color: #ffadc7;
+  background: rgba(200, 62, 54, 0.2);
+  color: #ffb0aa;
   font: 700 9.5px var(--kiri-font-ui);
   letter-spacing: 0.025em;
 }
@@ -114,10 +114,10 @@
 
 .kiri-remote-consent__error {
   padding: 8px 10px;
-  border: 1px solid rgba(255, 128, 168, 0.24);
+  border: 1px solid rgba(200, 62, 54, 0.38);
   border-radius: 9px;
-  background: rgba(255, 128, 168, 0.1);
-  color: #ffc0d4;
+  background: rgba(200, 62, 54, 0.16);
+  color: #ffc1bc;
   font: 500 10.5px/1.4 var(--kiri-font-ui);
 }
 
@@ -150,7 +150,7 @@
 }
 
 .kiri-remote-consent button:focus-visible {
-  outline: 3px solid rgba(171, 148, 255, 0.5);
+  outline: 2px solid rgba(255, 255, 255, 0.82);
   outline-offset: 2px;
 }
 

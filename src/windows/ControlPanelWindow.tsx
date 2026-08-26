@@ -9,9 +9,8 @@ import { api, onRecordingState, type RecordingState } from "../lib/ipc";
 import { t } from "../i18n";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 
-const ACCENT = "rgba(125, 105, 245, 1)"; // #7D69F5
 const RED = "#FF3B30"; // system red (spec: Color.red)
-const CORAL = "#FF80A8";
+const PAUSED = "rgba(255,255,255,0.72)";
 
 export function ControlPanelWindow() {
   const [state, setState] = useState<RecordingState | null>(null);
@@ -127,12 +126,12 @@ export function ControlPanelWindow() {
           gap: 10,
           height: 56,
           width: "100%",
-          borderRadius: 18,
-          background: "rgba(30, 28, 40, 0.72)",
-          backdropFilter: "blur(22px) saturate(1.4)",
-          WebkitBackdropFilter: "blur(22px) saturate(1.4)",
-          border: "1px solid rgba(255,255,255,0.14)",
-          boxShadow: "0 6px 14px rgba(0,0,0,0.18)",
+          borderRadius: 12,
+          background: "rgba(8, 8, 8, 0.88)",
+          backdropFilter: "blur(22px)",
+          WebkitBackdropFilter: "blur(22px)",
+          border: "1px solid rgba(255,255,255,0.22)",
+          boxShadow: "none",
           boxSizing: "border-box",
         }}
       >
@@ -141,7 +140,7 @@ export function ControlPanelWindow() {
             width: 10,
             height: 10,
             borderRadius: "50%",
-            background: paused ? CORAL : RED,
+            background: paused ? PAUSED : RED,
             boxShadow:
               !paused && hasSession && !busy
                 ? "0 0 0 4px rgba(255,59,48,0.22)"
@@ -152,7 +151,7 @@ export function ControlPanelWindow() {
         <span
           style={{
             ...textStyle,
-            color: paused ? CORAL : textStyle.color,
+            color: paused ? PAUSED : textStyle.color,
             fontSize: 12,
             fontWeight: 600,
             fontVariantNumeric: "tabular-nums",
@@ -213,10 +212,8 @@ function ControlButton(props: {
         height: 28,
         borderRadius: 9,
         border: "1px solid transparent",
-        background: props.danger
-          ? RED
-          : "rgba(125,105,245,0.14)",
-        color: props.danger ? "#fff" : ACCENT,
+        background: props.danger ? RED : "rgba(255,255,255,0.12)",
+        color: "#fff",
         fontSize: 13,
         cursor: props.disabled ? "default" : "pointer",
         opacity: props.disabled ? 0.46 : 1,
@@ -227,23 +224,19 @@ function ControlButton(props: {
           "background 0.14s ease-out, transform 0.14s ease-out, box-shadow 0.14s ease-out, color 0.14s ease-out",
       }}
       onMouseEnter={(e) => {
-        // Consistent hover language: deepen the fill, lift slightly, and
-        // brighten the icon so the control reads as interactive.
         e.currentTarget.style.background = props.danger
           ? "#FF4D42"
-          : "rgba(125,105,245,0.32)";
-        e.currentTarget.style.boxShadow = props.danger
-          ? "0 2px 10px rgba(255, 59, 48, 0.5)"
-          : "0 1px 6px rgba(0,0,0,0.3)";
-        e.currentTarget.style.color = props.danger ? "#fff" : "#8f7bff";
+          : "#fff";
+        e.currentTarget.style.boxShadow = "none";
+        e.currentTarget.style.color = props.danger ? "#fff" : "#000";
         e.currentTarget.style.transform = "scale(1.04)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = props.danger
           ? RED
-          : "rgba(125,105,245,0.14)";
+          : "rgba(255,255,255,0.12)";
         e.currentTarget.style.boxShadow = "none";
-        e.currentTarget.style.color = props.danger ? "#fff" : ACCENT;
+        e.currentTarget.style.color = "#fff";
         e.currentTarget.style.transform = "scale(1)";
       }}
       onMouseDown={(e) => {

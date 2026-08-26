@@ -44,7 +44,7 @@ export function ViewerWindow(props: { id: string }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#101014",
+        background: "#080808",
         overflow: "hidden",
       }}
     >

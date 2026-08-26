@@ -43,6 +43,7 @@ const COMPLETION_WIDTH = 360;
 const COMPLETION_HEIGHT = 124;
 const UNDO_HEIGHT = 60;
 const ACTION_COOLDOWN_MS = 450;
+const PASSIVE_DISMISS_MS = 1200;
 const UNDO_DISMISS_MS = 3000;
 const COMPLETION_DISMISS_MS = 8000;
 
@@ -260,13 +261,13 @@ export function ToastWindow(props: { title?: string; symbol?: string }) {
     void getCurrentWindow().setIgnoreCursorEvents(!interactive).catch(() => {});
   }, [completion, undo]);
 
-  // Ordinary notices keep their existing two-second lifetime. Ready cards
+  // Ordinary notices stay just long enough to register without lingering. Ready cards
   // remain for eight seconds; the compact Undo state gets only three seconds.
   // Only an in-flight action pauses dismissal, so focus cannot leave a card
   // stuck forever.
   useEffect(() => {
     if (notice && !completion && !undo) {
-      const timer = window.setTimeout(hideWindow, 2000);
+      const timer = window.setTimeout(hideWindow, PASSIVE_DISMISS_MS);
       return () => window.clearTimeout(timer);
     }
     if (completion?.phase === "processing") return;
@@ -612,7 +613,7 @@ function ToastStyles() {
         transform: translate(-50%, -50%);
         border: 1px solid rgba(255, 255, 255, 0.42);
         border-radius: 50%;
-        background: rgba(18, 16, 24, 0.68);
+        background: rgba(0, 0, 0, 0.72);
         color: white;
       }
 

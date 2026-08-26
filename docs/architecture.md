@@ -87,6 +87,10 @@ Prepared crops are bounded, expire from memory, and are tied to both the active
 capture and profile revision. Provider HTTP requests originate in Rust; the
 WebView CSP does not allow direct provider access.
 
+Copying recognized text completes the capture session and closes its full-screen
+overlay before the global success notice is presented. The confirmation must
+never remain hidden behind the OCR result surface.
+
 ## Recording and GIF flow
 
 Platform capture produces BGRA video frames and optional PCM audio. macOS uses

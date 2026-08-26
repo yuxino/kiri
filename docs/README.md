@@ -18,7 +18,7 @@ application or a durable product decision.
 - [`adr/0003-manual-region-selection.md`](adr/0003-manual-region-selection.md)
   — quiet single-outline window selection.
 - [`adr/0004-kawaii-professional-visual-system.md`](adr/0004-kawaii-professional-visual-system.md)
-  — the shared visual language.
+  — the former kawaii-professional system and app-icon history.
 - [`adr/0007-opt-in-remote-ocr-profiles.md`](adr/0007-opt-in-remote-ocr-profiles.md)
   — opt-in remote OCR and credential handling.
 - [`adr/0008-stable-development-signing-identity.md`](adr/0008-stable-development-signing-identity.md)
@@ -34,6 +34,8 @@ application or a durable product decision.
   recording countdown.
 - [`adr/0014-user-initiated-update-checks.md`](adr/0014-user-initiated-update-checks.md)
   — explicit, bounded update checks without background downloads or installs.
+- [`adr/0015-monochrome-workspace-visual-system.md`](adr/0015-monochrome-workspace-visual-system.md)
+  — the black, white, and neutral-gray application visual system.
 
 Completed implementation plans and the former Swift migration specifications
 are intentionally not kept in the working tree. Git history and release tags

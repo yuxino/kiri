@@ -137,6 +137,7 @@ export function KiriIcon(props: {
     <Glyph
       size={size}
       strokeWidth={2}
+      fill={name === "star.fill" ? "currentColor" : "none"}
       style={style}
       aria-hidden="true"
     />

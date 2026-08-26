@@ -341,8 +341,8 @@ export function LibraryWindow() {
 
   const gridStyle: React.CSSProperties = {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))",
-    gap: 20,
+    gridTemplateColumns: "repeat(auto-fill, minmax(206px, 1fr))",
+    gap: 16,
     alignContent: "start",
   };
 
@@ -438,13 +438,13 @@ export function LibraryWindow() {
           position: "fixed",
           ...(menuStyle ?? { left: 0, top: 0 }),
           background: "color-mix(in srgb, var(--kiri-elevated) 92%, transparent)",
-          backdropFilter: "blur(24px) saturate(1.5)",
-          WebkitBackdropFilter: "blur(24px) saturate(1.5)",
+          backdropFilter: "blur(18px)",
+          WebkitBackdropFilter: "blur(18px)",
           border: "1px solid var(--kiri-surface-border)",
           borderRadius: 14,
           padding: 6,
           minWidth: 196,
-          boxShadow: "0 10px 24px rgba(0,0,0,0.22), 0 2px 6px rgba(0,0,0,0.10)",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.14)",
           zIndex: 100,
           display: "flex",
           flexDirection: "column",
@@ -517,155 +517,123 @@ export function LibraryWindow() {
       className="library-root kiri-canvas-surface"
       style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}
     >
-      {/* Header — single compact row: title,
-          search, section picker, then a slim filter bar under the content
-          area instead of crowding the header. */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 12,
-          padding: "12px 24px",
-          background: "color-mix(in srgb, var(--kiri-canvas) 80%, transparent)",
-          backdropFilter: "blur(20px) saturate(1.3)",
-          WebkitBackdropFilter: "blur(20px) saturate(1.3)",
-          borderBottom: "1px solid var(--kiri-surface-border)",
-          zIndex: 2,
-        }}
-      >
-        <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 9,
-            overflow: "hidden",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-            flexShrink: 0,
-          }}
-        >
-          <img src={brandIcon} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 1, flexShrink: 0 }}>
-          <span style={{ fontSize: 15, fontWeight: 700, color: "var(--kiri-label)", lineHeight: 1.2 }}>
-            {destination === "settings"
-              ? t("Settings")
-              : showingTrash
-                ? t("Trash")
-                : t("Library")}
-          </span>
-          <span style={{ fontSize: 10.5, color: "var(--kiri-secondary-label)" }}>
-            {destination === "settings"
-              ? t("Language and text recognition")
-              : fmt("%d captures", assets.length)}
-          </span>
-        </div>
-        <div style={{ flex: 1 }} />
-        {destination === "captures" && (
-          <div className="kiri-library-search">
-            <KiriIcon name="magnifyingglass" size={13} />
-            <input
-              ref={searchInputRef}
-              type="search"
-              value={query}
-              aria-label={t("Search captures")}
-              placeholder={t("Search captures")}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape" && query) {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setQuery("");
+      {/* The top controls form one workspace: identity and global navigation
+          above, contextual asset filters in an inset rail below. */}
+      <header className="library-control-panel">
+        <div className="library-control-panel__primary">
+          <div className="library-control-panel__identity">
+            <div className="library-control-panel__brand">
+              <img src={brandIcon} alt="" />
+            </div>
+            <div className="library-control-panel__titles">
+              <span className="library-control-panel__title">
+                {destination === "settings"
+                  ? t("Settings")
+                  : showingTrash
+                    ? t("Trash")
+                    : t("Library")}
+              </span>
+              <span className="library-control-panel__subtitle">
+                {destination === "settings"
+                  ? t("Language and text recognition")
+                  : fmt("%d captures", assets.length)}
+              </span>
+            </div>
+          </div>
+
+          <div className="library-control-panel__actions">
+            {destination === "captures" && (
+              <div className="kiri-library-search">
+                <KiriIcon name="magnifyingglass" size={14} />
+                <input
+                  ref={searchInputRef}
+                  type="search"
+                  value={query}
+                  aria-label={t("Search captures")}
+                  placeholder={t("Search captures")}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape" && query) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setQuery("");
+                    }
+                  }}
+                />
+                {query && (
+                  <button
+                    type="button"
+                    aria-label={t("Clear Search")}
+                    title={t("Clear Search")}
+                    onClick={() => {
+                      setQuery("");
+                      searchInputRef.current?.focus();
+                    }}
+                  >
+                    <KiriIcon name="xmark" size={10} />
+                  </button>
+                )}
+              </div>
+            )}
+            <SegmentedPicker
+              options={[
+                { label: t("Library"), icon: "square.grid.3x3.fill" },
+                { label: t("Trash"), icon: "trash" },
+                { label: t("Settings"), icon: "slider.horizontal.3" },
+              ]}
+              value={destination === "settings" ? 2 : section === "library" ? 0 : 1}
+              onChange={(index) => {
+                clearSelection();
+                setMenuFor(null);
+                if (index === 2) {
+                  setDestination("settings");
+                  return;
                 }
+                setDestination("captures");
+                setSection(index === 0 ? "library" : "trash");
+                setKindFilter("all");
+                setFavoritesOnly(false);
+                setTagFilter(null);
               }}
             />
-            {query && (
+          </div>
+        </div>
+
+        {destination === "captures" && (
+          <div className="library-control-panel__filter-rail">
+            <FilterBar
+              kind={kindFilter}
+              favoritesOnly={favoritesOnly}
+              tagFilter={tagFilter}
+              allTags={allTags}
+              onChangeKind={setKindFilter}
+              onToggleFavorites={() => setFavoritesOnly((value) => !value)}
+              onToggleTag={(tag) => setTagFilter((current) => (current === tag ? null : tag))}
+            />
+            {showingTrash && assets.length > 0 && (
               <button
-                type="button"
-                aria-label={t("Clear Search")}
-                title={t("Clear Search")}
-                onClick={() => {
-                  setQuery("");
-                  searchInputRef.current?.focus();
-                }}
+                className="kiri-button kiri-button--destructive"
+                title={t("Empty Trash")}
+                onClick={() =>
+                  void api.showConfirmDialog(
+                    "emptyTrash",
+                    t("Empty Trash?"),
+                    t("All captures in Trash will be permanently deleted. This cannot be undone."),
+                    t("Empty Trash"),
+                  )
+                }
+                style={{ minHeight: 30, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
               >
-                <KiriIcon name="xmark" size={10} />
+                <KiriIcon name="trash.fill" size={12} />
+                {t("Empty Trash")}
               </button>
             )}
           </div>
         )}
-        <SegmentedPicker
-          options={[t("Library"), t("Trash")]}
-          value={destination === "settings" ? -1 : section === "library" ? 0 : 1}
-          onChange={(index) => {
-            setDestination("captures");
-            setSection(index === 0 ? "library" : "trash");
-            setKindFilter("all");
-            setFavoritesOnly(false);
-            setTagFilter(null);
-          }}
-        />
-        <button
-          type="button"
-          className="kiri-icon-button library-settings-button"
-          data-active={destination === "settings" || undefined}
-          aria-pressed={destination === "settings"}
-          aria-label={t("Settings")}
-          title={t("Settings")}
-          onClick={() => {
-            clearSelection();
-            setMenuFor(null);
-            setDestination("settings");
-          }}
-        >
-          <KiriIcon name="slider.horizontal.3" size={14} />
-        </button>
-      </div>
+      </header>
 
       {destination === "captures" ? (
         <>
-      {/* Slim filter bar above the content — identical in Library and
-          Trash so both sections share the same interaction language.
-          Section-level actions (Empty Trash) sit at the right end. */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          padding: "8px 24px",
-          borderBottom: "1px solid var(--kiri-surface-border)",
-          background: "color-mix(in srgb, var(--kiri-canvas) 92%, transparent)",
-        }}
-      >
-        <FilterBar
-          kind={kindFilter}
-          favoritesOnly={favoritesOnly}
-          tagFilter={tagFilter}
-          allTags={allTags}
-          onChangeKind={setKindFilter}
-          onToggleFavorites={() => setFavoritesOnly((v) => !v)}
-          onToggleTag={(tag) => setTagFilter((current) => (current === tag ? null : tag))}
-        />
-        <div style={{ flex: 1 }} />
-        {showingTrash && assets.length > 0 && (
-          <button
-            className="kiri-button kiri-button--destructive"
-            title={t("Empty Trash")}
-            onClick={() =>
-              void api.showConfirmDialog(
-                "emptyTrash",
-                t("Empty Trash?"),
-                t("All captures in Trash will be permanently deleted. This cannot be undone."),
-                t("Empty Trash"),
-              )
-            }
-            style={{ minHeight: 28, padding: "0 10px", fontSize: 11.5, flexShrink: 0 }}
-          >
-            <KiriIcon name="trash.fill" size={12} />
-            {t("Empty Trash")}
-          </button>
-        )}
-      </div>
-
       {/* Grid */}
       {selectionIds.length > 0 && (
         <BatchActionBar
@@ -736,7 +704,7 @@ export function LibraryWindow() {
           style={{
             flex: 1,
             overflowY: "auto",
-            padding: "0 24px 24px",
+            padding: "0 22px 24px",
             position: "relative",
             touchAction: "none",
             cursor: band ? "crosshair" : undefined,
@@ -755,8 +723,8 @@ export function LibraryWindow() {
                 top: bandRect.y,
                 width: bandRect.w,
                 height: bandRect.h,
-                background: "rgba(125,105,245,0.14)",
-                border: "1px solid rgba(125,105,245,0.65)",
+                background: "rgba(0,0,0,0.08)",
+                border: "1px solid rgba(0,0,0,0.62)",
                 borderRadius: 6,
                 pointerEvents: "none",
                 zIndex: 5,
@@ -764,29 +732,28 @@ export function LibraryWindow() {
             />
           )}
           {groupByDay(filteredAssets).map((group) => (
-            <div key={group.label} style={{ marginBottom: 24 }}>
+            <div key={group.label} style={{ marginBottom: 22 }}>
               <div
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: 8,
-                  marginBottom: 12,
-                  paddingTop: 10,
+                  marginBottom: 10,
+                  paddingTop: 12,
                 }}
               >
                 <div
                   style={{
-                    width: 4,
-                    height: 14,
-                    borderRadius: 2,
+                    width: 5,
+                    height: 5,
+                    borderRadius: "50%",
                     background: "var(--kiri-accent)",
-                    opacity: 0.7,
                   }}
                 />
                 <span
                   style={{
-                    fontSize: 12,
-                    fontWeight: 600,
+                    fontSize: 12.5,
+                    fontWeight: 700,
                     color: "var(--kiri-label)",
                   }}
                 >
@@ -865,7 +832,7 @@ export function LibraryWindow() {
           style={{
             position: "fixed",
             left: "50%",
-            top: 72,
+            top: destination === "captures" ? 116 : 76,
             transform: "translateX(-50%)",
             background: "var(--kiri-elevated)",
             border: "1px solid var(--kiri-surface-border)",
@@ -874,7 +841,7 @@ export function LibraryWindow() {
             display: "flex",
             gap: 8,
             alignItems: "center",
-            boxShadow: "0 8px 18px rgba(0,0,0,0.18)",
+            boxShadow: "none",
             color: "var(--kiri-label)",
             fontSize: 12.5,
             fontWeight: 500,
@@ -913,7 +880,7 @@ export function LibraryWindow() {
           style={{
             position: "absolute",
             left: "50%",
-            top: 72,
+            top: destination === "captures" ? 116 : 76,
             transform: "translateX(-50%)",
             background: "var(--kiri-elevated)",
             border: "1px solid var(--kiri-surface-border)",
@@ -922,7 +889,7 @@ export function LibraryWindow() {
             display: "flex",
             gap: 12,
             alignItems: "center",
-            boxShadow: "0 8px 18px rgba(0,0,0,0.18)",
+            boxShadow: "none",
             maxWidth: 560,
             zIndex: 20,
           }}
@@ -1086,6 +1053,15 @@ function AssetCard(props: {
     window.addEventListener(`kiri-addtag:${asset.id}`, handler);
     return () => window.removeEventListener(`kiri-addtag:${asset.id}`, handler);
   }, [asset.id]);
+  const previewImageStyle: React.CSSProperties = {
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+    padding: 8,
+    boxSizing: "border-box",
+    transform: hovered ? "scale(1.018)" : "scale(1)",
+    transition: "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)",
+  };
   return (
     <div
       ref={registerRef}
@@ -1105,16 +1081,16 @@ function AssetCard(props: {
       style={{
         position: "relative",
         background: "var(--kiri-card)",
-        border: `2px solid ${selected ? "#7D69F5" : hovered ? "rgba(125,105,245,0.45)" : "var(--kiri-surface-border)"}`,
-        borderRadius: 18,
-        padding: selected ? 11 : 12,
-        transform: hovered && !selected ? "translateY(-1px)" : "none",
+        border: `1px solid ${selected ? "var(--kiri-accent-strong)" : hovered ? "color-mix(in srgb, var(--kiri-label) 34%, var(--kiri-surface-border))" : "var(--kiri-surface-border)"}`,
+        borderRadius: 16,
+        padding: 9,
+        transform: hovered && !selected ? "translateY(-2px)" : "none",
         boxShadow: selected
-          ? "0 0 0 3px rgba(125,105,245,0.28), 0 8px 18px rgba(0,0,0,0.10)"
+          ? "0 0 0 2px var(--kiri-accent-alpha-18), 0 10px 24px rgba(0,0,0,0.08)"
           : hovered
-            ? "0 8px 18px rgba(0,0,0,0.08)"
-            : "0 3px 8px rgba(0,0,0,0.045)",
-        transition: "transform 0.14s ease-out, box-shadow 0.14s ease-out, border-color 0.14s ease-out",
+            ? "0 10px 24px rgba(0,0,0,0.075)"
+            : "0 1px 0 rgba(0,0,0,0.025)",
+        transition: "transform 0.18s ease-out, box-shadow 0.18s ease-out, border-color 0.18s ease-out",
         cursor: "default",
       }}
     >
@@ -1123,17 +1099,17 @@ function AssetCard(props: {
         <div
           style={{
             position: "absolute",
-            top: 8,
-            right: 8,
-            width: 18,
-            height: 18,
-            borderRadius: 6,
+            top: 7,
+            right: 7,
+            width: 20,
+            height: 20,
+            borderRadius: "50%",
             background: "var(--kiri-accent)",
-            color: "#fff",
+            color: "var(--kiri-on-accent)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+            boxShadow: "none",
             zIndex: 2,
             pointerEvents: "none",
           }}
@@ -1144,10 +1120,11 @@ function AssetCard(props: {
       <div
         ref={previewRef}
         style={{
-          height: 184,
-          borderRadius: 14,
+          height: 154,
+          borderRadius: 11,
           overflow: "hidden",
-          background: "var(--kiri-card)",
+          background: "var(--kiri-group-fill)",
+          border: "1px solid color-mix(in srgb, var(--kiri-surface-border) 72%, transparent)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -1160,9 +1137,10 @@ function AssetCard(props: {
             draggable={false}
             loading="lazy"
             decoding="async"
-            // Spec: scaledToFit + 5pt padding — the whole image is visible,
+            // Scaled-to-fit keeps the whole capture visible; the neutral
+            // stage and tighter height stop wide captures floating in a void.
             // never cropped.
-            style={{ width: "100%", height: "100%", objectFit: "contain", padding: 5, boxSizing: "border-box" }}
+            style={previewImageStyle}
           />
         ) : asset.kind === "video" ? (
           <div style={{ position: "relative", width: "100%", height: "100%" }}>
@@ -1172,7 +1150,7 @@ function AssetCard(props: {
               draggable={false}
               loading="lazy"
               decoding="async"
-              style={{ width: "100%", height: "100%", objectFit: "contain", padding: 5, boxSizing: "border-box" }}
+              style={previewImageStyle}
             />
             <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
               <svg width="34" height="34" viewBox="0 0 24 24">
@@ -1189,7 +1167,7 @@ function AssetCard(props: {
               draggable={false}
               loading="lazy"
               decoding="async"
-              style={{ width: "100%", height: "100%", objectFit: "contain", padding: 5, boxSizing: "border-box" }}
+              style={previewImageStyle}
             />
             <div style={{ position: "absolute", left: 8, bottom: 8, background: "rgba(0,0,0,0.6)", color: "#fff", borderRadius: 6, padding: "2px 6px", fontSize: 10, fontWeight: 600 }}>
               GIF
@@ -1197,7 +1175,7 @@ function AssetCard(props: {
           </div>
         ))}
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, padding: "0 1px 1px", position: "relative" }}>
         {editingTitle ? (
           <input
             autoFocus
@@ -1225,17 +1203,17 @@ function AssetCard(props: {
               fontSize: 11.5,
               fontWeight: 600,
               color: "var(--kiri-label)",
-              border: "1px solid rgba(125,105,245,0.7)",
+              border: "1px solid var(--kiri-accent)",
               borderRadius: 9,
               background: "var(--kiri-group-fill)",
               padding: "0 10px",
               outline: "none",
-              boxShadow: "0 0 0 3px rgba(125,105,245,0.18)",
+              boxShadow: "0 0 0 3px var(--kiri-accent-alpha-18)",
               caretColor: "var(--kiri-accent)",
             }}
           />
         ) : (
-          <span
+          <div
             title={asset.filename}
             onClick={(e) => {
               // Title double-click is rename; single click on it should not
@@ -1253,133 +1231,169 @@ function AssetCard(props: {
             }}
             style={{
               flex: 1,
-              fontSize: 11.5,
-              fontWeight: 600,
-              color: asset.title ? "var(--kiri-label)" : "var(--kiri-secondary-label)",
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
               overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
               cursor: "text",
             }}
           >
-            {asset.title ??
-              new Date(asset.createdAt).toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-          </span>
+            <span
+              style={{
+                fontSize: 11.5,
+                fontWeight: 700,
+                color: asset.title ? "var(--kiri-label)" : "var(--kiri-secondary-label)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {asset.title ??
+                new Date(asset.createdAt).toLocaleTimeString(undefined, {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+            </span>
+            <span
+              title={`${asset.pixelWidth} × ${asset.pixelHeight} · ${t(asset.kind === "image" ? "Image" : asset.kind === "video" ? "Video" : "GIF")}`}
+              style={{
+                fontSize: 9.5,
+                fontWeight: 500,
+                color: "var(--kiri-disabled-label)",
+                letterSpacing: "0.01em",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {asset.pixelWidth}×{asset.pixelHeight}
+            </span>
+          </div>
         )}
-        <button
-          className="kiri-icon-button"
-          title={t("View")}
-          draggable={false}
-          onDragStart={(e) => e.preventDefault()}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={(e) => {
-            e.stopPropagation();
-            void api.openAsset(asset.id).catch(() => {});
-          }}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            void api.openAsset(asset.id).catch(() => {});
-          }}
+        <div
           style={{
-            width: 26,
-            height: 26,
-            borderRadius: 8,
-            fontSize: 13,
-            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            padding: 2,
+            borderRadius: 9,
+            background: hovered || menuOpen ? "var(--kiri-group-fill)" : "transparent",
+            opacity: hovered || menuOpen || selected ? 1 : 0.72,
+            transition: "background 0.16s ease-out, opacity 0.16s ease-out",
           }}
         >
-          <KiriIcon name="eye" size={14} />
-        </button>
-        <button
-          className="kiri-icon-button"
-          title={t("Copy")}
-          draggable={false}
-          onDragStart={(e) => e.preventDefault()}
-          onMouseDown={(e) => {
-            // Prevent the draggable card from starting an HTML5 drag when
-            // pressing the button — a drag would swallow the click.
-            e.preventDefault();
-          }}
-          onClick={(e) => {
-            e.stopPropagation();
-            void api.copyAsset(asset.id).catch(() => {});
-          }}
-          onDoubleClick={(e) => {
-            // A rapid double-click on Copy must copy, not open the asset.
-            e.stopPropagation();
-            void api.copyAsset(asset.id).catch(() => {});
-          }}
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 8,
-            fontSize: 13,
-            cursor: "pointer",
-          }}
-        >
-          <KiriIcon name="doc.on.doc" size={14} />
-        </button>
-        <button
-          className="kiri-icon-button"
-          title={asset.isFavorite ? t("Remove Favorite") : t("Favorite")}
-          draggable={false}
-          onDragStart={(e) => e.preventDefault()}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={(e) => {
-            e.stopPropagation();
-            void api.setFavorite(asset.id, !asset.isFavorite).catch(() => {});
-          }}
-          onDoubleClick={(e) => {
-            // Rapid double-click must not open the asset.
-            e.stopPropagation();
-            void api.setFavorite(asset.id, !asset.isFavorite).catch(() => {});
-          }}
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 8,
-            color: asset.isFavorite ? "#FFD129" : "var(--kiri-disabled-label)",
-            fontSize: 13,
-            cursor: "pointer",
-          }}
-          onMouseEnter={(e) => {
-            if (!asset.isFavorite) e.currentTarget.style.color = "#FFD129";
-          }}
-          onMouseLeave={(e) => {
-            if (!asset.isFavorite) e.currentTarget.style.color = "var(--kiri-disabled-label)";
-          }}
-        >
-          <KiriIcon name={asset.isFavorite ? "star.fill" : "star"} size={15} />
-        </button>
-        <button
-          className="kiri-icon-button"
-          title={t("More Actions")}
-          draggable={false}
-          onDragStart={(e) => e.preventDefault()}
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={(e) => {
-            e.stopPropagation();
-            const rect = e.currentTarget.getBoundingClientRect();
-            // Anchor the menu below the ⋯ button; edge-flip handled in
-            // menuStyle (left-aligned so a near-right flip stays sane).
-            onMenu(rect.left, rect.bottom + 4);
-          }}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-          }}
-          style={{
-            width: 26,
-            height: 26,
-            borderRadius: 8,
-            fontSize: 13,
-            cursor: "pointer",
-          }}
-        >
-          <KiriIcon name="ellipsis.circle" size={14} />
-        </button>
+          <button
+            className="kiri-icon-button"
+            title={t("View")}
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.stopPropagation();
+              void api.openAsset(asset.id).catch(() => {});
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              void api.openAsset(asset.id).catch(() => {});
+            }}
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 8,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            <KiriIcon name="eye" size={14} />
+          </button>
+          <button
+            className="kiri-icon-button"
+            title={t("Copy")}
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
+            onMouseDown={(e) => {
+              // Prevent the draggable card from starting an HTML5 drag when
+              // pressing the button — a drag would swallow the click.
+              e.preventDefault();
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              void api.copyAsset(asset.id).catch(() => {});
+            }}
+            onDoubleClick={(e) => {
+              // A rapid double-click on Copy must copy, not open the asset.
+              e.stopPropagation();
+              void api.copyAsset(asset.id).catch(() => {});
+            }}
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 8,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            <KiriIcon name="doc.on.doc" size={14} />
+          </button>
+          <button
+            className="kiri-icon-button"
+            title={asset.isFavorite ? t("Remove Favorite") : t("Favorite")}
+            aria-pressed={asset.isFavorite}
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.stopPropagation();
+              void api.setFavorite(asset.id, !asset.isFavorite).catch(() => {});
+            }}
+            onDoubleClick={(e) => {
+              // Rapid double-click must not open the asset.
+              e.stopPropagation();
+              void api.setFavorite(asset.id, !asset.isFavorite).catch(() => {});
+            }}
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 8,
+              color: asset.isFavorite ? "var(--kiri-label)" : "var(--kiri-disabled-label)",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+            onMouseEnter={(e) => {
+              if (!asset.isFavorite) e.currentTarget.style.color = "var(--kiri-label)";
+            }}
+            onMouseLeave={(e) => {
+              if (!asset.isFavorite) e.currentTarget.style.color = "var(--kiri-disabled-label)";
+            }}
+          >
+            <KiriIcon name={asset.isFavorite ? "star.fill" : "star"} size={15} />
+          </button>
+          <button
+            className="kiri-icon-button"
+            title={t("More Actions")}
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.stopPropagation();
+              const rect = e.currentTarget.getBoundingClientRect();
+              // Anchor the menu below the ⋯ button; edge-flip handled in
+              // menuStyle (left-aligned so a near-right flip stays sane).
+              onMenu(rect.left, rect.bottom + 4);
+            }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+            }}
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 8,
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            <KiriIcon name="ellipsis.circle" size={14} />
+          </button>
+        </div>
         {menuOpen &&
           createPortal(
             // Render the context menu outside the card subtree: the card's
@@ -1503,7 +1517,7 @@ function MenuRow(props: {
         color: props.disabled
           ? "var(--kiri-disabled-label)"
           : props.destructive
-            ? "#FA476E"
+            ? "var(--kiri-coral)"
             : "var(--kiri-label)",
         font: "400 12.5px var(--kiri-font-ui)",
         cursor: props.disabled ? "default" : "pointer",
@@ -1534,7 +1548,7 @@ function MenuRow(props: {
             width: 15,
             display: "flex",
             justifyContent: "center",
-            color: props.destructive ? "#FA476E" : "var(--kiri-accent)",
+            color: props.destructive ? "var(--kiri-coral)" : "var(--kiri-accent)",
             opacity: props.disabled ? 0.45 : 0.9,
             flexShrink: 0,
           }}
@@ -1566,145 +1580,58 @@ function FilterBar(props: {
     onToggleTag,
   } = props;
   const kinds: { value: "all" | "image" | "video" | "gif"; label: string; icon: IconName }[] = [
-    { value: "all", label: t("All"), icon: "photo.on.rectangle" },
+    { value: "all", label: t("All"), icon: "square.grid.3x3.fill" },
     { value: "image", label: t("Images"), icon: "photo.on.rectangle" },
     { value: "video", label: t("Videos"), icon: "play.rectangle" },
     { value: "gif", label: t("GIFs"), icon: "sparkles.rectangle.stack" },
   ];
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-      <div
-        style={{
-          display: "flex",
-          background: "var(--kiri-group-fill)",
-          borderRadius: 11,
-          padding: 3,
-          gap: 2,
-        }}
-      >
+    <div className="library-filter-bar">
+      <div className="library-kind-picker">
         {kinds.map((entry) => (
           <button
+            type="button"
             key={entry.value}
+            className="library-kind-picker__button"
+            data-active={kind === entry.value || undefined}
+            aria-pressed={kind === entry.value}
             onClick={() => onChangeKind(entry.value)}
             title={entry.label}
-            style={{
-              height: 30,
-              minWidth: 34,
-              padding: "0 9px",
-              borderRadius: 9,
-              border: "none",
-              background: kind === entry.value ? "#634FDB" : "transparent",
-              color: kind === entry.value ? "#fff" : "var(--kiri-secondary-label)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              transition: "background 0.14s ease-out, color 0.14s ease-out",
-            }}
-            onMouseEnter={(e) => {
-              if (kind !== entry.value) {
-                e.currentTarget.style.background = "rgba(125,105,245,0.10)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (kind !== entry.value) e.currentTarget.style.background = "transparent";
-            }}
           >
-            {entry.value === "all" ? (
-              <KiriIcon name={entry.icon} size={13} />
-            ) : (
-              <span style={{ fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-                {entry.label}
-              </span>
-            )}
+            <KiriIcon name={entry.icon} size={12} />
+            <span>{entry.label}</span>
           </button>
         ))}
       </div>
       <button
+        type="button"
+        className="library-favorite-filter"
+        data-active={favoritesOnly || undefined}
+        aria-pressed={favoritesOnly}
         onClick={onToggleFavorites}
         title={t("Favorites")}
-        style={{
-          height: 30,
-          minWidth: 30,
-          padding: "0 9px",
-          borderRadius: 9,
-          border: "1px solid",
-          borderColor: favoritesOnly
-            ? "rgba(255,209,41,0.5)"
-            : "var(--kiri-surface-border)",
-          background: favoritesOnly ? "rgba(255,209,41,0.12)" : "transparent",
-          color: favoritesOnly ? "#FFD129" : "var(--kiri-secondary-label)",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          transition: "background 0.14s ease-out, color 0.14s ease-out",
-        }}
-        onMouseEnter={(e) => {
-          if (!favoritesOnly) e.currentTarget.style.color = "#FFD129";
-        }}
-        onMouseLeave={(e) => {
-          if (!favoritesOnly) e.currentTarget.style.color = "var(--kiri-secondary-label)";
-        }}
       >
-        <KiriIcon name="star" size={13} />
+        <KiriIcon name={favoritesOnly ? "star.fill" : "star"} size={12} />
+        <span>{t("Favorites")}</span>
       </button>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          maxWidth: 340,
-          overflowX: "auto",
-          paddingBottom: 1,
-        }}
-      >
+      <div className="library-tag-filter">
         {allTags.length === 0 ? (
-          <span
-            style={{
-              fontSize: 10.5,
-              color: "var(--kiri-disabled-label)",
-              whiteSpace: "nowrap",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              padding: "0 4px",
-            }}
-          >
+          <span className="library-tag-filter__hint">
             <KiriIcon name="tag" size={10} />
-            {t("Tag captures via the ⋯ menu to filter by category")}
+            <span>{t("Tag captures via the ⋯ menu to filter by category")}</span>
           </span>
         ) : (
           allTags.map((tag) => {
             const active = tagFilter?.toLowerCase() === tag.toLowerCase();
             return (
               <button
+                type="button"
                 key={tag}
+                className="library-tag-filter__chip"
+                data-active={active || undefined}
+                aria-pressed={active}
                 onClick={() => onToggleTag(tag)}
                 title={tag}
-                style={{
-                  height: 26,
-                  padding: "0 9px",
-                  borderRadius: 8,
-                  border: "1px solid",
-                  borderColor: active
-                    ? "var(--kiri-accent)"
-                    : "var(--kiri-surface-border)",
-                  background: active
-                    ? "var(--kiri-accent-soft-alpha-10)"
-                    : "transparent",
-                  color: active
-                    ? "var(--kiri-accent)"
-                    : "var(--kiri-secondary-label)",
-                  fontSize: 10.5,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  transition: "background 0.14s ease-out, color 0.14s ease-out",
-                }}
               >
                 <KiriIcon name="tag" size={10} />
                 {tag}
@@ -1744,11 +1671,11 @@ function BatchActionBar(props: {
         gap: 4,
         padding: "6px 8px",
         borderRadius: 16,
-        background: "color-mix(in srgb, var(--kiri-elevated) 82%, transparent)",
-        backdropFilter: "blur(20px) saturate(1.4)",
-        WebkitBackdropFilter: "blur(20px) saturate(1.4)",
+        background: "color-mix(in srgb, var(--kiri-elevated) 94%, transparent)",
+        backdropFilter: "blur(18px)",
+        WebkitBackdropFilter: "blur(18px)",
         border: "1px solid var(--kiri-surface-border)",
-        boxShadow: "0 12px 32px rgba(0,0,0,0.22)",
+        boxShadow: "0 8px 24px rgba(0,0,0,0.14)",
       }}
     >
       <span
@@ -1805,11 +1732,11 @@ function BatchBarButton(props: {
         borderRadius: 10,
         border: "1px solid transparent",
         background: destructive
-          ? "rgba(250,71,110,0.14)"
+          ? "rgba(200,62,54,0.14)"
           : accent
-            ? "rgba(255,209,41,0.14)"
+            ? "var(--kiri-accent-soft-alpha-10)"
             : "transparent",
-        color: destructive ? "#FA476E" : accent ? "#E8B41E" : "var(--kiri-label)",
+        color: destructive ? "var(--kiri-coral)" : accent ? "var(--kiri-accent)" : "var(--kiri-label)",
         font: "600 12px var(--kiri-font-ui)",
         cursor: "pointer",
         whiteSpace: "nowrap",
@@ -1817,16 +1744,16 @@ function BatchBarButton(props: {
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = destructive
-          ? "rgba(250,71,110,0.24)"
+          ? "rgba(200,62,54,0.24)"
           : accent
-            ? "rgba(255,209,41,0.24)"
+            ? "var(--kiri-accent-alpha-18)"
             : "color-mix(in srgb, var(--kiri-group-fill) 70%, transparent)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = destructive
-          ? "rgba(250,71,110,0.14)"
+          ? "rgba(200,62,54,0.14)"
           : accent
-            ? "rgba(255,209,41,0.14)"
+            ? "var(--kiri-accent-soft-alpha-10)"
             : "transparent";
       }}
       onMouseDown={(e) => {
@@ -1847,53 +1774,26 @@ function BatchBarButton(props: {
 
 
 function SegmentedPicker(props: {
-  options: string[];
+  options: { label: string; icon: IconName }[];
   value: number;
   onChange(index: number): void;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        background: "var(--kiri-group-fill)",
-        borderRadius: 11,
-        padding: 3,
-        gap: 2,
-      }}
-    >
+    <nav className="library-section-picker" aria-label={t("Library")}>
       {props.options.map((option, index) => (
         <button
-          key={option}
+          type="button"
+          key={option.label}
+          className="library-section-picker__button"
+          data-active={props.value === index || undefined}
+          aria-pressed={props.value === index}
           onClick={() => props.onChange(index)}
-          style={{
-            height: 30,
-            padding: "0 16px",
-            borderRadius: 9,
-            border: "none",
-            background: props.value === index ? "#634FDB" : "transparent",
-            color: props.value === index ? "#fff" : "var(--kiri-secondary-label)",
-            font: "600 12px var(--kiri-font-ui)",
-            cursor: "pointer",
-            transition: "background 0.14s ease-out, color 0.14s ease-out",
-            boxShadow: props.value === index ? "0 1px 4px rgba(99,79,219,0.3)" : "none",
-          }}
-          onMouseEnter={(e) => {
-            if (props.value !== index) {
-              e.currentTarget.style.background = "rgba(125,105,245,0.10)";
-              e.currentTarget.style.color = "var(--kiri-label)";
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (props.value !== index) {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "var(--kiri-secondary-label)";
-            }
-          }}
         >
-          {option}
+          <KiriIcon name={option.icon} size={12} />
+          <span>{option.label}</span>
         </button>
       ))}
-    </div>
+    </nav>
   );
 }
 
@@ -1933,7 +1833,11 @@ function EmptyState(props: { isTrashEmpty: boolean; shortcutLabel: string }) {
           // Spec (KiriBrandMark): the chibi artwork fills the container.
         }}
       >
-        <img src={brandIcon} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+        <img
+          src={brandIcon}
+          alt=""
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
       </div>
       <div style={{ fontSize: 15, fontWeight: 600 }}>{title}</div>
       {message && (

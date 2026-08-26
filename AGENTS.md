@@ -24,7 +24,7 @@ decisions:
   Both use the platform's native global-hotkey registration; the shortcut does
   not require Input Monitoring permission.
 - The initial overlay offers Screenshot, Record, and OCR.
-- Window hover shows exactly one restrained violet outline without handles,
+- Window hover shows exactly one restrained monochrome outline without handles,
   dimensions, stacked borders, or a following tooltip. A click selects that
   window; a drag creates a custom region. Both selections remain movable and
   resizable with eight handles.
@@ -37,7 +37,7 @@ decisions:
   adjustable diameter and intensity.
 - Recording is Retina/DPI-scale, high-quality MP4. Kiri's recording controls
   and paused time must not appear in the exported video.
-- The optional violet click ripple is visible live and is also captured.
+- The optional monochrome click ripple is visible live and is also captured.
 - The 3-2-1 countdown is centered and compact; it must not dim the selected
   recording region.
 - User-facing UI supports English, Simplified Chinese, and Japanese and follows

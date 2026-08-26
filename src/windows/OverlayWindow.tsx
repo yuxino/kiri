@@ -56,9 +56,10 @@ type Phase =
 
 type Mode = "screenshot" | "record" | "ocr";
 
-const ACCENT = "#7D69F5";
+const ACCENT = "#050505";
 const MODE_SELECTOR_DRAG_THRESHOLD = 4;
 const FLOATING_CONTROL_MARGIN = 8;
+const DEFAULT_HINT_TOP = 102;
 
 type ModeSelectorDrag = {
   pointerId: number;
@@ -806,7 +807,7 @@ export function OverlayWindow() {
         </div>
       )}
 
-      {/* Window hover outline (violet 2pt α0.92) */}
+      {/* Window hover outline: black edge stays legible against the white frozen-screen keyline. */}
       {hoverWindow && !displayRect && (
         <div
           style={{
@@ -821,7 +822,7 @@ export function OverlayWindow() {
         />
       )}
 
-      {/* Selection outline: white 3 + violet 1.5 (4 + 2 while annotating) */}
+      {/* Selection outline: white outer keyline + black inner keyline. */}
       {displayRect && phase !== "annotating" && (
         <>
           <div
@@ -857,7 +858,7 @@ export function OverlayWindow() {
         </>
       )}
 
-      {/* Selection border while annotating: white 4pt + violet 2pt */}
+      {/* Selection border while annotating: heavier white + black keylines. */}
       {displayRect && phase === "annotating" && (
         <>
           <div
@@ -983,15 +984,15 @@ export function OverlayWindow() {
                     ? t("Drag to choose a recording area   ·   Click a window   ·   Esc to cancel")
                     : t("Drag to choose text to recognize   ·   Esc to cancel")
               }
-              top={96}
+              top={DEFAULT_HINT_TOP}
             />
           )}
         </>
       )}
 
       {/* OCR states */}
-      {phase === "ocr-preparing" && <HintLabel text={t("Preparing Text…")} top={96} />}
-      {phase === "ocr-recognizing" && <HintLabel text={t("Recognizing Text…")} top={96} />}
+      {phase === "ocr-preparing" && <HintLabel text={t("Preparing Text…")} top={DEFAULT_HINT_TOP} />}
+      {phase === "ocr-recognizing" && <HintLabel text={t("Recognizing Text…")} top={DEFAULT_HINT_TOP} />}
 
       {/* Drag hint while creating a region (spec §3.2.5: shown when no
           toolbar exists yet and the user is dragging). */}
@@ -1004,7 +1005,7 @@ export function OverlayWindow() {
                 ? t("Release for recording settings")
                 : t("Release to recognize text")
           }
-          top={96}
+          top={DEFAULT_HINT_TOP}
         />
       )}
       {phase === "selecting" && selection && !drag && (
@@ -1016,7 +1017,7 @@ export function OverlayWindow() {
                 ? t("Adjust the region · Recording settings below")
                 : t("Release to recognize text")
           }
-          top={96}
+          top={DEFAULT_HINT_TOP}
         />
       )}
       {phase === "ocr-result" && (
@@ -1127,8 +1128,8 @@ function ModeButton(props: {
       className="kiri-mode-btn"
       data-active={props.active || undefined}
     >
-      <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <KiriIcon name={props.icon} size={16} />
+      <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <KiriIcon name={props.icon} size={14} />
         {props.label}
       </span>
     </button>
@@ -1143,14 +1144,19 @@ function HintLabel(props: { text: string; top: number }) {
         left: "50%",
         top: props.top,
         transform: "translateX(-50%)",
-        background: "rgba(0,0,0,0.72)",
-        border: "1px solid rgba(255,255,255,0.16)",
+        background: "rgba(8,8,8,0.86)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        border: "1px solid rgba(255,255,255,0.24)",
         borderRadius: "999px",
         color: "#fff",
-        padding: "9px 15px",
-        font: "500 12px var(--kiri-font-ui)",
+        padding: "6px 11px",
+        font: "550 11px var(--kiri-font-ui)",
+        letterSpacing: "0.005em",
         whiteSpace: "pre",
         pointerEvents: "none",
+        zIndex: 12,
+        boxShadow: "0 8px 20px rgba(0,0,0,0.16)",
       }}
     >
       {props.text}
@@ -1165,8 +1171,8 @@ function SelectionHandles(props: { rect: Rect }) {
       {ALL_HANDLES.map((handle) => {
         const p = handlePoint(handle, rect);
         return (
-          // Spec §3.2.4: white outer circle (10pt) with an accent inner
-          // circle (6pt) — a white-dot-with-violet-core handle.
+          // White outer circle with a black core remains visible over both
+          // light and dark capture content.
           <div
             key={handle}
             style={{
@@ -1256,8 +1262,8 @@ function OcrPanel(props: {
   // Bubble hugs the recognized region: below it, flipping above when the
   // bottom overflows, then pinned inside the screen. The little tail points
   // at the region (top-right when below, bottom-right when above).
-  const PANEL_W = 336;
-  const PANEL_H = 200;
+  const PANEL_W = 368;
+  const PANEL_H = 276;
   const margin = 8;
   const maxTop = Math.max(margin, bounds.height - PANEL_H - margin);
   const below = anchor.y + anchor.height + 10;
@@ -1270,8 +1276,12 @@ function OcrPanel(props: {
     Math.max(margin, bounds.width - PANEL_W - margin),
   );
   const tailAbove = !belowFits;
-  // Tail tip x: near the region's center (clamped to the bubble width).
-  const tipX = Math.min(Math.max(24, PANEL_W / 2), PANEL_W - 24);
+  // Tail tip x follows the region's center, clamped away from the rounded
+  // corners so the bubble still reads cleanly near a display edge.
+  const tipX = Math.min(
+    Math.max(28, anchor.x + anchor.width / 2 - left),
+    PANEL_W - 28,
+  );
   return (
     <div
       className="kiri-hud"
@@ -1281,64 +1291,104 @@ function OcrPanel(props: {
         left,
         top,
         width: PANEL_W,
-        padding: 16,
-        paddingBottom: 14,
-        borderRadius: 20,
+        padding: 14,
+        boxSizing: "border-box",
+        borderRadius: 16,
         display: "flex",
         flexDirection: "column",
         gap: 10,
-        boxShadow: "0 14px 40px rgba(0,0,0,0.35)",
+        boxShadow: "0 16px 42px rgba(0,0,0,0.22)",
       }}
     >
       {/* Tail pointing at the recognized region. */}
       <div
         style={{
           position: "absolute",
-          [tailAbove ? "bottom" : "top"]: -6,
-          left: tipX,
-          width: 14,
-          height: 14,
-          background: "rgba(30, 27, 40, 0.9)",
+          [tailAbove ? "bottom" : "top"]: -5,
+          left: tipX - 6,
+          width: 12,
+          height: 12,
+          background: "rgba(8, 8, 8, 0.96)",
           transform: "rotate(45deg)",
-          borderRadius: 3,
+          borderRadius: 2,
           zIndex: 0,
-          boxShadow: tailAbove ? "3px 3px 6px rgba(0,0,0,0.18)" : "-3px -3px 6px rgba(0,0,0,0.18)",
         }}
       />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ font: "600 12.5px var(--kiri-font-ui)" }}>
-          {failed ? t("Text Recognition Failed") : t("Recognized Text")}
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span
+            style={{
+              width: 28,
+              height: 28,
+              display: "grid",
+              placeItems: "center",
+              borderRadius: 8,
+              background: "#fff",
+              color: "#000",
+            }}
+          >
+            <KiriIcon name="text.viewfinder" size={15} />
+          </span>
+          <span style={{ font: "700 13px var(--kiri-font-ui)" }}>
+            {failed ? t("Text Recognition Failed") : t("Recognized Text")}
+          </span>
+        </div>
         <button
+          type="button"
+          aria-label={t("Close")}
+          title={t("Close")}
           onClick={onClose}
-          style={{ ...iconButtonStyle, display: "flex", alignItems: "center", justifyContent: "center" }}
+          style={{
+            ...iconButtonStyle,
+            width: 28,
+            height: 28,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px solid rgba(255,255,255,0.15)",
+            background: "rgba(255,255,255,0.055)",
+          }}
         >
           <KiriIcon name="xmark" size={11} />
         </button>
       </div>
       <div
         style={{
-          background: "#fff",
-          color: "#1c1a24",
-          borderRadius: 12,
-          padding: "10px 12px",
-          minHeight: 56,
-          maxHeight: 140,
+          background: "rgba(255,255,255,0.97)",
+          color: "#0a0a0a",
+          borderRadius: 11,
+          padding: "12px 14px",
+          minHeight: 96,
+          maxHeight: 150,
+          boxSizing: "border-box",
           overflow: "auto",
-          font: "400 13px var(--kiri-font-ui)",
+          font: "450 13px/1.48 var(--kiri-font-ui)",
           userSelect: "text",
           whiteSpace: "pre-wrap",
-          boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)",
+          border: "1px solid rgba(255,255,255,0.24)",
+          boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.08)",
         }}
       >
         {text || (failed ? t("Adjust the region and try again") : t("No Text Found"))}
       </div>
       <button
+        type="button"
         className="kiri-primary-button"
         onClick={onCopy}
         disabled={!text}
-        style={{ minHeight: 32, borderRadius: 10, alignSelf: "flex-end", padding: "0 16px" }}
+        style={{
+          minHeight: 38,
+          borderRadius: 10,
+          alignSelf: "flex-end",
+          minWidth: 112,
+          padding: "0 16px",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 7,
+        }}
       >
+        <KiriIcon name="doc.on.doc" size={13} />
         {t("Copy")}
       </button>
     </div>
@@ -1393,12 +1443,12 @@ function RecordOptionsPanel(props: {
     if (key === "showsCursor" && !next.showsCursor) next.highlightsClicks = false;
     onChange(next);
   };
-  // Panel geometry: 336 wide; prefer below the selection, flip above when
-  // the bottom would overflow, and as a last resort pin inside the screen so
-  // a huge selection can never push the panel off-screen. x centered on the
-  // selection, clamped with an 8pt margin.
-  const PANEL_W = 336;
-  const PANEL_H = 400;
+  // Panel geometry follows the visible rows: GIF omits inapplicable audio
+  // controls instead of leaving a tall block of disabled settings. Prefer
+  // below the selection, flip above when needed, and pin inside the screen as
+  // a last resort. Keep x centered on the selection with an 8pt margin.
+  const PANEL_W = 360;
+  const PANEL_H = gifOutput ? 314 : 382;
   const margin = 8;
   const maxTop = Math.max(margin, bounds.height - PANEL_H - margin);
   const centeredTop = Math.max(margin, Math.min(maxTop, bounds.height / 2 - PANEL_H / 2 + 30));
@@ -1427,26 +1477,43 @@ function RecordOptionsPanel(props: {
         position: "absolute",
         left,
         top,
-        padding: 12,
+        padding: 14,
         width: PANEL_W,
+        boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
-        gap: 4,
+        gap: 10,
+        borderRadius: 16,
+        boxShadow: "0 16px 42px rgba(0,0,0,0.22)",
       }}
     >
-      <div style={{ font: "600 12.5px var(--kiri-font-ui)", marginBottom: 6 }}>{t("Record Region")}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span
+          style={{
+            width: 26,
+            height: 26,
+            display: "grid",
+            placeItems: "center",
+            borderRadius: 8,
+            background: "#fff",
+            color: "#000",
+          }}
+        >
+          <KiriIcon name="record.circle" size={14} />
+        </span>
+        <span style={{ font: "700 13px var(--kiri-font-ui)" }}>{t("Record Region")}</span>
+      </div>
       <div
         role="radiogroup"
         aria-label={t("Recording format")}
         style={{
           display: "grid",
           gridTemplateColumns: "1fr 1fr",
-          gap: 3,
-          padding: 3,
-          marginBottom: 4,
-          borderRadius: 10,
-          background: "rgba(255,255,255,0.09)",
-          border: "1px solid rgba(255,255,255,0.1)",
+          gap: 4,
+          padding: 4,
+          borderRadius: 12,
+          background: "rgba(255,255,255,0.08)",
+          border: "1px solid rgba(255,255,255,0.14)",
         }}
       >
         {(["mp4", "gif"] as const).map((format) => {
@@ -1459,15 +1526,15 @@ function RecordOptionsPanel(props: {
               aria-checked={selected}
               onClick={() => onChange({ ...options, outputFormat: format })}
               style={{
-                height: 28,
+                height: 32,
                 border: "none",
-                borderRadius: 7,
-                background: selected ? "rgba(125,105,245,0.38)" : "transparent",
-                color: selected ? "#fff" : "rgba(255,255,255,0.68)",
-                font: "600 11.5px var(--kiri-font-ui)",
+                borderRadius: 9,
+                background: selected ? "#fff" : "transparent",
+                color: selected ? "#000" : "rgba(255,255,255,0.68)",
+                font: "700 11.5px var(--kiri-font-ui)",
                 cursor: "pointer",
-                boxShadow: selected ? "inset 0 0 0 1px rgba(255,255,255,0.13)" : "none",
-                transition: "background 0.14s ease-out, color 0.14s ease-out",
+                boxShadow: selected ? "0 2px 8px rgba(0,0,0,0.2)" : "none",
+                transition: "background 0.16s ease-out, color 0.16s ease-out, box-shadow 0.16s ease-out",
               }}
             >
               {t(format === "mp4" ? "MP4" : "GIF")}
@@ -1477,54 +1544,85 @@ function RecordOptionsPanel(props: {
       </div>
       <div
         style={{
-          minHeight: 27,
-          color: "rgba(255,255,255,0.7)",
-          font: "400 11px/1.35 var(--kiri-font-ui)",
-          marginBottom: 6,
+          color: "rgba(255,255,255,0.72)",
+          font: "500 10.5px/1.4 var(--kiri-font-ui)",
+          padding: "7px 9px",
+          borderRadius: 9,
+          background: "rgba(255,255,255,0.055)",
+          border: "1px solid rgba(255,255,255,0.08)",
         }}
       >
         {gifOutput
           ? t("GIF · 12 fps · 720 px long edge · No audio")
           : t("MP4 · 30 fps · Saved locally · Never uploaded")}
       </div>
-      <ToggleRow
-        label={t("3-second countdown")}
-        checked={options.usesCountdown}
-        onToggle={() => toggle("usesCountdown")}
-      />
-      <ToggleRow
-        label={t("System audio")}
-        checked={!gifOutput && options.capturesSystemAudio}
-        onToggle={() => toggle("capturesSystemAudio")}
-        disabled={gifOutput}
-      />
-      <ToggleRow
-        label={t("Microphone")}
-        suffix={micSupported || gifOutput ? undefined : t("Requires macOS 15")}
-        checked={!gifOutput && options.capturesMicrophone}
-        onToggle={() => toggle("capturesMicrophone")}
-        disabled={gifOutput || !micSupported}
-      />
-      <ToggleRow
-        label={t("Show pointer")}
-        checked={options.showsCursor}
-        onToggle={() => toggle("showsCursor")}
-      />
-      <ToggleRow
-        label={t("Highlight clicks")}
-        checked={options.highlightsClicks}
-        onToggle={() => toggle("highlightsClicks")}
-        disabled={!options.showsCursor}
-      />
-      <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-        <button className="kiri-primary-button" style={{ flex: 1 }} onClick={onStart}>
+      <div
+        style={{
+          overflow: "hidden",
+          borderRadius: 12,
+          border: "1px solid rgba(255,255,255,0.11)",
+          background: "rgba(255,255,255,0.035)",
+        }}
+      >
+        <ToggleRow
+          label={t("3-second countdown")}
+          checked={options.usesCountdown}
+          onToggle={() => toggle("usesCountdown")}
+        />
+        {!gifOutput && (
+          <>
+            <ToggleRow
+              divider
+              label={t("System audio")}
+              checked={options.capturesSystemAudio}
+              onToggle={() => toggle("capturesSystemAudio")}
+            />
+            <ToggleRow
+              divider
+              label={t("Microphone")}
+              suffix={micSupported ? undefined : t("Requires macOS 15")}
+              checked={options.capturesMicrophone}
+              onToggle={() => toggle("capturesMicrophone")}
+              disabled={!micSupported}
+            />
+          </>
+        )}
+        <ToggleRow
+          divider
+          label={t("Show pointer")}
+          checked={options.showsCursor}
+          onToggle={() => toggle("showsCursor")}
+        />
+        <ToggleRow
+          divider
+          label={t("Highlight clicks")}
+          checked={options.highlightsClicks}
+          onToggle={() => toggle("highlightsClicks")}
+          disabled={!options.showsCursor}
+        />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="kiri-primary-button" style={{ flex: 1, minHeight: 38, borderRadius: 10 }} onClick={onStart}>
           {gifOutput ? t("Start GIF Recording") : t("Start Recording")}
         </button>
         <button
-          style={{ ...iconButtonStyle, height: 36, display: "flex", alignItems: "center", justifyContent: "center" }}
+          aria-label={t("Cancel")}
+          title={t("Cancel")}
+          style={{
+            ...iconButtonStyle,
+            width: 38,
+            height: 38,
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: "1px solid rgba(255,255,255,0.18)",
+            background: "rgba(255,255,255,0.06)",
+            borderRadius: 10,
+          }}
           onClick={onCancel}
         >
-          <KiriIcon name="xmark" size={11} />
+          <KiriIcon name="xmark" size={12} />
         </button>
       </div>
     </div>
@@ -1537,20 +1635,39 @@ function ToggleRow(props: {
   onToggle(): void;
   disabled?: boolean;
   suffix?: string;
+  divider?: boolean;
 }) {
   return (
-    <div
-      onClick={props.disabled ? undefined : props.onToggle}
+    <button
+      type="button"
+      role="switch"
+      aria-checked={props.checked}
+      disabled={props.disabled}
+      onClick={props.onToggle}
       style={{
+        width: "100%",
+        minHeight: 34,
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
-        padding: "5px 2px",
+        padding: "5px 10px",
+        border: "none",
+        borderTop: props.divider ? "1px solid rgba(255,255,255,0.08)" : "none",
+        background: "transparent",
+        color: "#fff",
+        textAlign: "left",
         opacity: props.disabled ? 0.4 : 1,
         cursor: props.disabled ? "default" : "pointer",
+        transition: "background 0.14s ease-out, opacity 0.14s ease-out",
+      }}
+      onMouseEnter={(event) => {
+        if (!props.disabled) event.currentTarget.style.background = "rgba(255,255,255,0.055)";
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.background = "transparent";
       }}
     >
-      <span style={{ font: "400 12.5px var(--kiri-font-ui)" }}>
+      <span style={{ font: "550 12px var(--kiri-font-ui)" }}>
         {props.label}
         {props.suffix && (
           <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 10.5, marginLeft: 6 }}>
@@ -1563,9 +1680,11 @@ function ToggleRow(props: {
           width: 34,
           height: 20,
           borderRadius: 10,
-          background: props.checked ? "#634FDB" : "rgba(255,255,255,0.2)",
+          background: props.checked ? "#fff" : "rgba(255,255,255,0.2)",
           position: "relative",
-          transition: "background 0.14s ease-out",
+          flexShrink: 0,
+          boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)",
+          transition: "background 0.16s ease-out",
         }}
       >
         <div
@@ -1576,12 +1695,12 @@ function ToggleRow(props: {
             width: 16,
             height: 16,
             borderRadius: "50%",
-            background: "#fff",
-            transition: "left 0.14s ease-out",
+            background: props.checked ? "#000" : "#fff",
+            transition: "left 0.16s ease-out, background 0.16s ease-out",
           }}
         />
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -1709,7 +1828,7 @@ function Toolbar(props: ToolbarProps) {
           alignItems: "center",
           gap: 3,
           padding: "6px 8px",
-          boxShadow: "0 5px 14px rgba(0,0,0,0.28)",
+          boxShadow: "none",
         }}
       >
         <ToolButton icon="xmark" title={t("Cancel capture · Esc")} onClick={onCancel} />
@@ -1867,19 +1986,11 @@ function ToolButton(props: {
         width: 32,
         height: 32,
         borderRadius: 10,
-        // Spec §7.3: .tool selected = accent 0.18 fill + accent 0.32 border;
-        // .primary = accentStrong fill + white 0.22 border + accent shadow.
-        border: props.primary
-          ? "1px solid rgba(255,255,255,0.22)"
-          : props.active
-            ? "1px solid rgba(125,105,245,0.32)"
-            : "1px solid transparent",
-        background: props.primary
-          ? "#634FDB"
-          : props.active
-            ? "rgba(125,105,245,0.18)"
-            : "transparent",
-        color: props.active ? "#AB94FF" : "#fff",
+        border: props.primary || props.active
+          ? "1px solid #fff"
+          : "1px solid transparent",
+        background: props.primary || props.active ? "#fff" : "transparent",
+        color: props.primary || props.active ? "#000" : "#fff",
         fontSize: 12,
         fontWeight: 600,
         cursor: props.disabled ? "default" : "pointer",
@@ -1887,21 +1998,19 @@ function ToolButton(props: {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        boxShadow: props.primary ? "0 3px 7px rgba(99, 79, 219, 0.25)" : "none",
+        boxShadow: "none",
         transition: "transform 0.14s ease-out, background 0.14s ease-out",
       }}
       onMouseEnter={(e) => {
         if (props.primary && !props.disabled) {
-          e.currentTarget.style.filter = "brightness(1.12)";
-          e.currentTarget.style.boxShadow = "0 5px 12px rgba(99, 79, 219, 0.38)";
+          e.currentTarget.style.opacity = "0.82";
         } else if (!props.active && !props.disabled) {
-          e.currentTarget.style.background = "rgba(125,105,245,0.10)";
+          e.currentTarget.style.background = "rgba(255,255,255,0.10)";
         }
       }}
       onMouseLeave={(e) => {
         if (props.primary) {
-          e.currentTarget.style.filter = "none";
-          e.currentTarget.style.boxShadow = "0 3px 7px rgba(99, 79, 219, 0.25)";
+          e.currentTarget.style.opacity = "1";
         } else if (!props.active) {
           e.currentTarget.style.background = "transparent";
         }
@@ -1993,8 +2102,8 @@ function SegmentedControl(props: {
             padding: "0 7px",
             borderRadius: 6,
             border: "none",
-            background: props.value === index ? "#634FDB" : "transparent",
-            color: "#fff",
+            background: props.value === index ? "#fff" : "transparent",
+            color: props.value === index ? "#000" : "#fff",
             fontSize: 10,
             fontWeight: 500,
             cursor: "pointer",

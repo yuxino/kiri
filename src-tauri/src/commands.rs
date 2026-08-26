@@ -1165,8 +1165,12 @@ pub fn set_tags(app: AppHandle, id: String, tags: Vec<String>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn copy_text(app: AppHandle, text: String) -> Result<(), String> {
+pub fn copy_text(app: AppHandle, window: WebviewWindow, text: String) -> Result<(), String> {
     platform::write_text_to_clipboard(&text).map_err(|e| e.to_string())?;
+    // OCR runs inside a screen-covering always-on-top overlay. Tear that
+    // capture session down before presenting confirmation, otherwise the
+    // resident toast exists but remains hidden until the user closes OCR.
+    cancel_capture(window, app.clone())?;
     emit_notice(&app, "Text Copied".into(), "checkmark.circle.fill".into());
     Ok(())
 }

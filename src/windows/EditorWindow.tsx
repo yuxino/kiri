@@ -157,7 +157,7 @@ export function EditorWindow(props: { id: string }) {
             : null;
 
   return (
-    <div className="kiri-dark" style={{ height: "100%", display: "flex", flexDirection: "column", background: "#15131D" }}>
+    <div className="kiri-dark" style={{ height: "100%", display: "flex", flexDirection: "column", background: "#080808" }}>
       {/* 58pt toolbar */}
       <div
         style={{
@@ -166,8 +166,8 @@ export function EditorWindow(props: { id: string }) {
           alignItems: "center",
           gap: 4,
           padding: "0 10px",
-          borderBottom: "1px solid #40394E",
-          background: "#1E1B28",
+          borderBottom: "1px solid #383838",
+          background: "#101010",
         }}
       >
         {TOOLS.map(({ tool: t2, icon, title }) => (
@@ -179,7 +179,7 @@ export function EditorWindow(props: { id: string }) {
             onClick={() => setTool(t2)}
           />
         ))}
-        <div style={{ width: 1, height: 26, background: "#40394E", margin: "0 4px" }} />
+        <div style={{ width: 1, height: 26, background: "#383838", margin: "0 4px" }} />
         {tool === "text" ? (
           <EditorSegments
             segments={[
@@ -233,14 +233,14 @@ export function EditorWindow(props: { id: string }) {
               onPointerLeave={() => {
                 if (tool === "text") canvasRef.current?.endTextFontSizeAdjustment();
               }}
-              style={{ width: 90, accentColor: "#7D69F5" }}
+              style={{ width: 90, accentColor: "#fff" }}
             />
             <span style={{ width: 28, textAlign: "right", fontSize: 9, fontVariantNumeric: "tabular-nums" }}>
               {slider.value}
             </span>
           </div>
         )}
-        <div style={{ width: 1, height: 26, background: "#40394E", margin: "0 4px" }} />
+        <div style={{ width: 1, height: 26, background: "#383838", margin: "0 4px" }} />
         {COLOR_PRESETS.map((preset) => (
           <EditorSwatch
             key={preset}
@@ -249,7 +249,7 @@ export function EditorWindow(props: { id: string }) {
             onClick={() => setAppearance({ ...appearance, colorPreset: preset })}
           />
         ))}
-        <div style={{ width: 1, height: 26, background: "#40394E", margin: "0 4px" }} />
+        <div style={{ width: 1, height: 26, background: "#383838", margin: "0 4px" }} />
         <EditorToolButton icon="arrow.uturn.backward" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={() => canvasRef.current?.undo()} />
         <EditorToolButton icon="arrow.uturn.forward" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={() => canvasRef.current?.redo()} />
         <EditorToolButton
@@ -326,8 +326,8 @@ function EditorToolButton(props: {
         height: 32,
         borderRadius: 10,
         border: "1px solid transparent",
-        background: props.active ? "rgba(125,105,245,0.32)" : "transparent",
-        color: "#fff",
+        background: props.active ? "#fff" : "transparent",
+        color: props.active ? "#000" : "#fff",
         fontSize: 12,
         fontWeight: 600,
         cursor: props.disabled ? "default" : "pointer",
@@ -393,8 +393,8 @@ function EditorSegments(props: {
             padding: "0 7px",
             borderRadius: 6,
             border: "none",
-            background: props.value === index ? "#634FDB" : "transparent",
-            color: "#fff",
+            background: props.value === index ? "#fff" : "transparent",
+            color: props.value === index ? "#000" : "#fff",
             fontSize: 10,
             cursor: "pointer",
             display: "flex",

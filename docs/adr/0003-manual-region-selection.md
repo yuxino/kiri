@@ -18,7 +18,8 @@ recognition should remain visible, but its hover state must be visually quiet.
 
 Screenshot and recording selection use restrained window recognition:
 
-- Hovering an eligible window displays exactly one violet outline.
+- Hovering an eligible window displays exactly one high-contrast monochrome
+  outline (color styling is governed by ADR 0015).
 - Hover does not display handles, dimensions, a stacked white border, a loupe,
   or a pointer-following tooltip.
 - A click selects the highlighted frontmost window.

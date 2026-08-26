@@ -1,48 +1,47 @@
 /*
  * Shared Kiri visual tokens for the React/Tauri interface.
- * Durable visual decisions live in ADR 0004.
+ * Durable visual decisions live in ADR 0015.
  */
 
 :root {
-  /* Core palette (CaptureUIColors) */
-  --kiri-accent: #7d69f5;
-  --kiri-accent-strong: #634fdb;
-  --kiri-coral: #ff80a8;
+  /* Monochrome action palette. Color is reserved for destructive/error states. */
+  --kiri-accent: #111111;
+  --kiri-accent-strong: #000000;
+  --kiri-on-accent: #ffffff;
+  --kiri-coral: #c83e36;
 
   /* Light scheme */
-  --kiri-canvas: #ffffff;
+  --kiri-canvas: #f6f6f3;
   --kiri-card: #ffffff;
   --kiri-elevated: #ffffff;
-  --kiri-surface-border: #e5dff0;
-  --kiri-group-fill: #f3eff9;
-  --kiri-label: #1c1a24;
-  --kiri-secondary-label: #5b5666;
-  --kiri-disabled-label: #a29dac;
+  --kiri-surface-border: #d8d8d3;
+  --kiri-group-fill: #ececea;
+  --kiri-label: #0a0a0a;
+  --kiri-secondary-label: #5d5d58;
+  --kiri-disabled-label: #9c9c96;
 
   /* Dark scheme */
-  --kiri-canvas-dark: #15131d;
-  --kiri-card-dark: #1e1b28;
-  --kiri-elevated-dark: #282334;
-  --kiri-surface-border-dark: #40394e;
-  --kiri-group-fill-dark: #302a3d;
-  --kiri-label-dark: #f4f2f8;
-  --kiri-secondary-label-dark: #b7b2c2;
-  --kiri-disabled-label-dark: #6f6a7c;
+  --kiri-canvas-dark: #080808;
+  --kiri-card-dark: #101010;
+  --kiri-elevated-dark: #181818;
+  --kiri-surface-border-dark: #383838;
+  --kiri-group-fill-dark: #232323;
+  --kiri-label-dark: #f7f7f4;
+  --kiri-secondary-label-dark: #b7b7b2;
+  --kiri-disabled-label-dark: #70706c;
 
   /* Semantics */
-  --kiri-accent-soft-alpha-10: rgba(125, 105, 245, 0.1);
-  --kiri-accent-alpha-18: rgba(125, 105, 245, 0.18);
-  --kiri-accent-alpha-32: rgba(125, 105, 245, 0.32);
-  --kiri-white-alpha-14: rgba(255, 255, 255, 0.14);
-
+  --kiri-accent-soft-alpha-10: rgba(0, 0, 0, 0.07);
+  --kiri-accent-alpha-18: rgba(0, 0, 0, 0.16);
+  --kiri-accent-alpha-32: rgba(0, 0, 0, 0.3);
   /* Spacing */
   --kiri-space-standard: 14px;
   --kiri-space-page: 24px;
 
   /* Radii */
-  --kiri-radius-control: 11px;
-  --kiri-radius-badge: 9px;
-  --kiri-radius-card: 18px;
+  --kiri-radius-control: 8px;
+  --kiri-radius-badge: 6px;
+  --kiri-radius-card: 14px;
 
   /* Motion */
   --kiri-motion-hover: 0.14s;
@@ -51,9 +50,8 @@
   --kiri-font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
 
-  /* Solid brand color (flat, no gradients) */
+  /* Solid action color (flat, no gradients). */
   --kiri-brand-solid: var(--kiri-accent-strong);
-
 }
 
 /* Editor/capture surfaces are always dark (darkAqua forced in the original). */
@@ -66,6 +64,13 @@
   --kiri-label: var(--kiri-label-dark);
   --kiri-secondary-label: var(--kiri-secondary-label-dark);
   --kiri-disabled-label: var(--kiri-disabled-label-dark);
+  --kiri-accent: #ffffff;
+  --kiri-accent-strong: #ffffff;
+  --kiri-on-accent: #000000;
+  --kiri-accent-soft-alpha-10: rgba(255, 255, 255, 0.09);
+  --kiri-accent-alpha-18: rgba(255, 255, 255, 0.18);
+  --kiri-accent-alpha-32: rgba(255, 255, 255, 0.34);
+  --kiri-brand-solid: #ffffff;
 }
 
 html,
@@ -88,24 +93,24 @@ body,
 
 /* HUD material used by capture overlays (dark, translucent). */
 .kiri-hud {
-  background: rgba(30, 27, 40, 0.86);
-  backdrop-filter: blur(24px) saturate(1.4);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  border: 1px solid var(--kiri-white-alpha-14);
-  border-radius: 13px;
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.2);
+  background: rgba(8, 8, 8, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 14px;
+  box-shadow: none;
   color: #ffffff;
 }
 
 .kiri-primary-button {
   font: 600 12.5px var(--kiri-font-ui);
-  color: #ffffff;
+  color: var(--kiri-on-accent);
   min-height: 36px;
   padding: 0 14px;
   border-radius: var(--kiri-radius-control);
   background: var(--kiri-brand-solid);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 4px 10px rgba(125, 105, 245, 0.24);
+  border: 1px solid var(--kiri-brand-solid);
+  box-shadow: none;
   cursor: pointer;
   transition:
     transform var(--kiri-motion-hover) ease-out,
@@ -115,13 +120,14 @@ body,
 }
 
 .kiri-primary-button:hover:not(:disabled) {
-  filter: brightness(1.08);
-  box-shadow: 0 6px 14px rgba(125, 105, 245, 0.32);
+  filter: none;
+  opacity: 0.82;
+  box-shadow: none;
 }
 
 .kiri-primary-button:active {
   transform: scale(0.97);
-  box-shadow: 0 1px 4px rgba(125, 105, 245, 0.12);
+  box-shadow: none;
 }
 
 .kiri-primary-button:disabled {
@@ -136,19 +142,98 @@ textarea {
   -webkit-user-select: text;
 }
 
+/* Library control deck — global destination controls above, contextual
+   filters in a quieter inset rail below. */
+.library-control-panel {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  padding-bottom: 10px;
+  background: var(--kiri-elevated);
+  border-bottom: 1px solid var(--kiri-surface-border);
+}
+
+.library-control-panel__primary {
+  min-height: 58px;
+  padding: 10px 20px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.library-control-panel__identity {
+  min-width: 136px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.library-control-panel__brand {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  overflow: hidden;
+  border: 1px solid var(--kiri-surface-border);
+  border-radius: 10px;
+  background: var(--kiri-canvas);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
+.library-control-panel__brand img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-control-panel__titles {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library-control-panel__title {
+  color: var(--kiri-label);
+  font: 720 15px/1.15 var(--kiri-font-ui);
+  letter-spacing: -0.015em;
+  white-space: nowrap;
+}
+
+.library-control-panel__subtitle {
+  max-width: 132px;
+  overflow: hidden;
+  color: var(--kiri-secondary-label);
+  font: 500 10.5px/1.25 var(--kiri-font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-control-panel__actions {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .kiri-library-search {
   display: flex;
   align-items: center;
-  gap: 7px;
-  flex: 0 1 228px;
-  min-width: 150px;
-  height: 30px;
-  padding: 0 7px 0 9px;
+  gap: 8px;
+  flex: 1 1 240px;
+  min-width: 160px;
+  max-width: 300px;
+  height: 36px;
+  padding: 0 9px 0 11px;
   box-sizing: border-box;
   color: var(--kiri-secondary-label);
-  background: var(--kiri-group-fill);
-  border: 1px solid transparent;
-  border-radius: 10px;
+  background: color-mix(in srgb, var(--kiri-canvas) 46%, var(--kiri-elevated));
+  border: 1px solid color-mix(in srgb, var(--kiri-surface-border) 66%, transparent);
+  border-radius: 11px;
   transition:
     background var(--kiri-motion-hover) ease-out,
     border-color var(--kiri-motion-hover) ease-out,
@@ -157,8 +242,8 @@ textarea {
 
 .kiri-library-search:focus-within {
   background: var(--kiri-elevated);
-  border-color: var(--kiri-accent);
-  box-shadow: 0 0 0 3px var(--kiri-accent-soft-alpha-10);
+  border-color: color-mix(in srgb, var(--kiri-accent) 72%, var(--kiri-surface-border));
+  box-shadow: 0 0 0 3px var(--kiri-accent-soft-alpha-10), 0 4px 12px rgba(0, 0, 0, 0.055);
 }
 
 .kiri-library-search input {
@@ -202,6 +287,257 @@ textarea {
   background: var(--kiri-accent-soft-alpha-10);
 }
 
+.library-section-picker {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--kiri-surface-border) 74%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--kiri-group-fill) 44%, var(--kiri-elevated));
+}
+
+.library-section-picker__button {
+  position: relative;
+  height: 32px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--kiri-secondary-label);
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  font: 650 11.5px var(--kiri-font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--kiri-motion-hover) ease-out,
+    background var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out,
+    box-shadow var(--kiri-motion-hover) ease-out;
+}
+
+.library-section-picker__button:hover:not([data-active]) {
+  color: var(--kiri-label);
+  background: color-mix(in srgb, var(--kiri-elevated) 84%, transparent);
+}
+
+.library-section-picker__button:active {
+  transform: scale(0.97);
+}
+
+.library-section-picker__button[data-active] {
+  color: var(--kiri-label);
+  background: var(--kiri-elevated);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--kiri-label) 22%, var(--kiri-surface-border)),
+    0 2px 6px rgba(0, 0, 0, 0.055);
+}
+
+.library-section-picker__button::after {
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--kiri-label);
+  content: "";
+  opacity: 0;
+  transform: translateX(-50%) scaleX(0.4);
+  transition:
+    opacity var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out;
+}
+
+.library-section-picker__button[data-active]::after {
+  opacity: 1;
+  transform: translateX(-50%) scaleX(1);
+}
+
+.library-control-panel__filter-rail {
+  min-height: 40px;
+  margin: 0 20px;
+  padding: 4px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--kiri-group-fill) 34%, var(--kiri-elevated));
+  border: 1px solid color-mix(in srgb, var(--kiri-surface-border) 58%, transparent);
+  border-radius: 12px;
+}
+
+.library-filter-bar {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.library-kind-picker {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 1px;
+  padding: 2px;
+  background: var(--kiri-elevated);
+  border: 1px solid color-mix(in srgb, var(--kiri-surface-border) 70%, transparent);
+  border-radius: 9px;
+}
+
+.library-kind-picker__button,
+.library-favorite-filter,
+.library-tag-filter__chip {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: var(--kiri-secondary-label);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  font: 630 10.5px var(--kiri-font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--kiri-motion-hover) ease-out,
+    background var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out,
+    box-shadow var(--kiri-motion-hover) ease-out;
+}
+
+.library-kind-picker__button {
+  min-width: 32px;
+  padding: 0 8px;
+}
+
+.library-kind-picker__button:hover:not([data-active]),
+.library-favorite-filter:hover:not([data-active]),
+.library-tag-filter__chip:hover:not([data-active]) {
+  color: var(--kiri-label);
+  background: var(--kiri-accent-soft-alpha-10);
+}
+
+.library-kind-picker__button:active,
+.library-favorite-filter:active,
+.library-tag-filter__chip:active {
+  transform: scale(0.97);
+}
+
+.library-kind-picker__button[data-active],
+.library-favorite-filter[data-active],
+.library-tag-filter__chip[data-active] {
+  color: var(--kiri-label);
+  background: var(--kiri-elevated);
+  font-weight: 720;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--kiri-label) 26%, var(--kiri-surface-border)),
+    0 1px 3px rgba(0, 0, 0, 0.045);
+}
+
+.library-favorite-filter {
+  flex: 0 0 auto;
+  padding: 0 9px;
+  background: var(--kiri-elevated);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kiri-surface-border) 70%, transparent);
+}
+
+.library-favorite-filter[data-active] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--kiri-label) 26%, var(--kiri-surface-border)),
+    0 1px 3px rgba(0, 0, 0, 0.045);
+}
+
+.library-tag-filter {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  border-left: 1px solid color-mix(in srgb, var(--kiri-surface-border) 80%, transparent);
+  padding-left: 8px;
+  scrollbar-width: none;
+}
+
+.library-tag-filter::-webkit-scrollbar {
+  display: none;
+}
+
+.library-tag-filter__hint {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--kiri-disabled-label);
+  font: 500 10.5px var(--kiri-font-ui);
+  white-space: nowrap;
+}
+
+.library-tag-filter__hint > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.library-tag-filter__chip {
+  flex: 0 0 auto;
+  padding: 0 8px;
+  background: color-mix(in srgb, var(--kiri-elevated) 74%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--kiri-surface-border) 66%, transparent);
+}
+
+.library-tag-filter__chip[data-active] {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--kiri-label) 26%, var(--kiri-surface-border)),
+    0 1px 3px rgba(0, 0, 0, 0.045);
+}
+
+@media (max-width: 860px) {
+  .library-control-panel {
+    padding-bottom: 8px;
+  }
+
+  .library-control-panel__primary {
+    min-height: 54px;
+    padding: 8px 16px;
+    gap: 12px;
+  }
+
+  .library-control-panel__identity {
+    min-width: 120px;
+    gap: 8px;
+  }
+
+  .library-control-panel__brand {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+  }
+
+  .library-control-panel__actions {
+    gap: 8px;
+  }
+
+  .kiri-library-search {
+    min-width: 150px;
+    max-width: 230px;
+  }
+
+  .library-section-picker__button {
+    padding: 0 9px;
+    gap: 5px;
+  }
+
+  .library-control-panel__filter-rail {
+    margin: 0 16px;
+  }
+}
+
 *:focus {
   outline: none;
 }
@@ -230,7 +566,7 @@ textarea {
 }
 
 .kiri-button:hover:not(:disabled) {
-  filter: brightness(1.05);
+  filter: none;
 }
 
 .kiri-button:active {
@@ -247,15 +583,15 @@ textarea {
 .kiri-button--primary {
   min-height: 34px;
   padding: 0 14px;
-  color: #fff;
+  color: var(--kiri-on-accent);
   background: var(--kiri-brand-solid);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 3px 8px rgba(125, 105, 245, 0.24);
+  border: 1px solid var(--kiri-brand-solid);
+  box-shadow: none;
 }
 
 .kiri-button--primary:hover {
-  box-shadow: 0 5px 14px rgba(125, 105, 245, 0.32);
-  filter: brightness(1.06);
+  box-shadow: none;
+  opacity: 0.82;
 }
 
 /* Secondary (outline) */
@@ -282,8 +618,8 @@ textarea {
 }
 
 .kiri-button--destructive:hover {
-  background: rgba(250, 71, 110, 0.10);
-  border-color: rgba(250, 71, 110, 0.35);
+  background: rgba(200, 62, 54, 0.1);
+  border-color: rgba(200, 62, 54, 0.35);
 }
 
 /* Icon-only (round) */
@@ -337,17 +673,19 @@ textarea {
   top: 44px; /* below the macOS menu bar + notch safe area */
   transform: translateX(-50%);
   display: flex;
-  gap: 4px;
-  padding: 6px;
+  gap: 2px;
+  padding: 4px;
   align-items: center;
   cursor: grab;
   touch-action: none;
   will-change: left, top;
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
 }
 
 .kiri-mode-select[data-dragging] {
   cursor: grabbing;
-  box-shadow: 0 7px 18px rgba(0, 0, 0, 0.34);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.26);
 }
 
 .kiri-mode-select[data-dragging] .kiri-mode-btn {
@@ -360,25 +698,28 @@ textarea {
   flex-direction: row;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  min-width: 96px;
-  height: 36px;
-  padding: 0 16px;
-  border-radius: 10px;
+  gap: 5px;
+  min-width: 76px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 9px;
   border: 1px solid transparent;
   background: transparent;
   color: rgba(255, 255, 255, 0.66);
-  font: 600 12.5px var(--kiri-font-ui);
+  font: 650 11.5px var(--kiri-font-ui);
   cursor: pointer;
   transition:
     background 0.14s ease-out,
     border-color 0.14s ease-out,
     color 0.14s ease-out,
-    transform 0.08s ease-out;
+    transform 0.14s ease-out,
+    opacity 0.14s ease-out;
 }
 
 .kiri-mode-btn:hover:not([data-active]) {
-  background: rgba(125, 105, 245, 0.1);
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+  transform: translateY(-1px);
 }
 
 .kiri-mode-btn:active {
@@ -386,10 +727,10 @@ textarea {
 }
 
 .kiri-mode-btn[data-active] {
-  border: 1px solid rgba(139, 123, 246, 0.55);
-  background: rgba(125, 105, 245, 0.26);
-  color: #fff;
-  box-shadow: 0 3px 10px rgba(99, 79, 219, 0.28);
+  border: 1px solid #ffffff;
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
 }
 
 /* --- Custom range slider (annotation thickness/size) --- */
@@ -416,8 +757,8 @@ textarea {
   margin-top: -4.5px;
   border-radius: 50%;
   background: #ffffff;
-  border: 2px solid #7d69f5;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  border: 2px solid #000000;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.72);
   transition: transform 0.1s ease-out;
 }
 
