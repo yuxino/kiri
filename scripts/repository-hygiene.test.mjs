@@ -29,6 +29,7 @@ test("the repository has one canonical Tauri and Cargo project", () => {
 
 test("permission-sensitive macOS entry points never allow ad-hoc signing", () => {
   const paths = [
+    ".github/workflows/build.yml",
     ".github/workflows/release.yml",
     "scripts/codesign-identity.sh",
     "scripts/install-app.sh",

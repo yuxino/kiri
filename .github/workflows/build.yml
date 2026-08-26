@@ -18,7 +18,7 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   build-macos:
-    name: Build macOS app (${{ matrix.arch }})
+    name: Compile macOS app (${{ matrix.arch }})
     strategy:
       fail-fast: false
       matrix:
@@ -41,21 +41,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:release-tools
       - run: pnpm icons:verify
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No Developer ID secret is available yet. Make the fallback
-          # explicit so Tauri seals the whole app bundle instead of leaving
-          # a linker-signed executable inside an unsigned bundle.
-          APPLE_SIGNING_IDENTITY: "-"
-        with:
-          args: --bundles dmg
-      - name: Upload macOS bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: kiri-macos-${{ matrix.arch }}
-          path: src-tauri/target/release/bundle/dmg/*.dmg
-          if-no-files-found: error
+      - name: Compile without a runnable macOS bundle
+        run: pnpm tauri build --no-bundle
 
   build-windows:
     name: Build Windows app

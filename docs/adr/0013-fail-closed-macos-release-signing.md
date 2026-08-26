@@ -30,6 +30,9 @@ and Microphone authorization after every upgrade.
   after CI imports one protected certificate into an ephemeral keychain, pins
   its fingerprint in reviewed configuration, and verifies the final app's
   non-ad-hoc designated requirement before publication.
+- Branch and pull-request CI compiles macOS with `--no-bundle`. It does not
+  create or upload a runnable ad-hoc `.app` or `.dmg`; executable bundles are
+  release artifacts and follow the stricter identity rule above.
 - Developer ID plus notarization is preferred. A persistent self-signed release
   identity can preserve TCC continuity but keeps the existing first-launch
   Gatekeeper exception and has no Apple Team ID.
