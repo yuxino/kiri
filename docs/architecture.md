@@ -120,6 +120,17 @@ validated local copy first, otherwise downloads a version-pinned archive,
 checks its SHA-256, validates the executable, and caches it. Library browsing
 and thumbnail generation never trigger that download.
 
+## Update check flow
+
+Settings reads the installed version from Tauri's application metadata. Kiri
+does not run a background updater. A visible **Check for Updates** action asks
+Rust to make one bounded request to the fixed public GitHub latest-release API,
+with redirects and retries disabled, then compares the returned tag as a
+semantic version. The response never supplies an executable path or an
+arbitrary navigation target. When a newer version exists, a separate user
+action opens Kiri's fixed Releases page in the system browser. Kiri does not
+download or install application updates.
+
 ## Persistence boundaries
 
 - macOS library: `~/Library/Application Support/kiri`

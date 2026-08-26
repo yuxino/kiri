@@ -16,6 +16,7 @@ mod record;
 mod remote_ocr;
 mod state;
 mod thumbnail;
+mod updates;
 
 use tauri::{Emitter, Manager};
 
@@ -172,6 +173,8 @@ pub fn run() {
             commands::quit_app,
             commands::get_recording_options,
             commands::set_recording_options,
+            updates::check_for_updates,
+            updates::open_release_page,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

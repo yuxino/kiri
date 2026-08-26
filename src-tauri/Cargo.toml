@@ -46,6 +46,7 @@ secrecy = "0.10"
 sha2 = "0.10"
 tempfile = "3"
 url = "2.5"
+semver = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", features = ["exception"] }

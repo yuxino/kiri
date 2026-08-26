@@ -29,6 +29,8 @@ application or a durable product decision.
   — one clipboard-first completion action without an overflow menu.
 - [`adr/0011-movable-capture-mode-selector.md`](adr/0011-movable-capture-mode-selector.md)
   — a top-centered mode selector that can be moved for the current capture.
+- [`adr/0014-user-initiated-update-checks.md`](adr/0014-user-initiated-update-checks.md)
+  — explicit, bounded update checks without background downloads or installs.
 
 Completed implementation plans and the former Swift migration specifications
 are intentionally not kept in the working tree. Git history and release tags

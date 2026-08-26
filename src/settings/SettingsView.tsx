@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { KiriIcon } from "../components/KiriIcons";
 import { fmt, getLanguage, setLanguage, t, type KiriLanguage } from "../i18n";
 import {
@@ -135,6 +136,8 @@ export function SettingsView() {
             }}
           />
         )}
+
+        <AboutSettingsSection />
       </div>
 
       {editingProfile !== undefined && (
@@ -171,6 +174,126 @@ export function SettingsView() {
         />
       )}
     </main>
+  );
+}
+
+type UpdateState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "upToDate"; currentVersion: string }
+  | { kind: "available"; latestVersion: string }
+  | { kind: "error"; action: "check" | "open"; latestVersion?: string };
+
+function AboutSettingsSection() {
+  const [currentVersion, setCurrentVersion] = useState("");
+  const [updateState, setUpdateState] = useState<UpdateState>({ kind: "idle" });
+
+  useEffect(() => {
+    let active = true;
+    void getVersion()
+      .then((version) => {
+        if (active) setCurrentVersion(version);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const checkForUpdates = async () => {
+    if (updateState.kind === "checking") return;
+    setUpdateState({ kind: "checking" });
+    try {
+      const result = await api.checkForUpdates();
+      setCurrentVersion(result.currentVersion);
+      setUpdateState(
+        result.updateAvailable
+          ? { kind: "available", latestVersion: result.latestVersion }
+          : { kind: "upToDate", currentVersion: result.currentVersion },
+      );
+    } catch {
+      setUpdateState({ kind: "error", action: "check" });
+    }
+  };
+
+  const openUpdate = async (latestVersion: string) => {
+    try {
+      await api.openReleasePage();
+    } catch {
+      setUpdateState({ kind: "error", action: "open", latestVersion });
+    }
+  };
+
+  const opensUpdate =
+    updateState.kind === "available" ||
+    (updateState.kind === "error" && updateState.action === "open");
+  const latestVersion =
+    updateState.kind === "available" || updateState.kind === "error"
+      ? updateState.latestVersion
+      : undefined;
+
+  let status = t("Check GitHub Releases for a newer version.");
+  if (updateState.kind === "checking") {
+    status = t("Checking…");
+  } else if (updateState.kind === "upToDate") {
+    status = fmt("Kiri %@ is up to date.", `v${updateState.currentVersion}`);
+  } else if (updateState.kind === "available") {
+    status = fmt("Kiri %@ is available.", `v${updateState.latestVersion}`);
+  } else if (updateState.kind === "error") {
+    status = t(
+      updateState.action === "open"
+        ? "Couldn't open the update page. Try again."
+        : "Couldn't check for updates. Try again.",
+    );
+  }
+
+  const buttonLabel = updateState.kind === "checking"
+    ? t("Checking…")
+    : opensUpdate
+      ? t("View Update")
+      : t("Check for Updates");
+
+  return (
+    <section className="kiri-settings-section" aria-labelledby="about-settings-title">
+      <div className="kiri-settings-section__heading">
+        <div>
+          <h2 id="about-settings-title">{t("About")}</h2>
+          <p>
+            {t(
+              "Check for updates manually. Kiri never downloads or installs them automatically.",
+            )}
+          </p>
+        </div>
+      </div>
+      <div className="kiri-settings-card kiri-version-row">
+        <div>
+          <div className="kiri-version-title">
+            <strong>Kiri</strong>
+            <span className="kiri-settings-badge">
+              {fmt("Version %@", currentVersion ? `v${currentVersion}` : "—")}
+            </span>
+          </div>
+          <span id="kiri-update-status" role="status" aria-live="polite">
+            {status}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="kiri-button kiri-button--secondary kiri-update-button"
+          disabled={updateState.kind === "checking"}
+          aria-describedby="kiri-update-status"
+          onClick={() => {
+            if (opensUpdate && latestVersion) {
+              void openUpdate(latestVersion);
+            } else {
+              void checkForUpdates();
+            }
+          }}
+        >
+          {buttonLabel}
+        </button>
+      </div>
+    </section>
   );
 }
 

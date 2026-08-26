@@ -137,6 +137,12 @@ export interface PreparedOcrRequestDto {
   profile?: PreparedOcrProfileDto | null;
 }
 
+export interface UpdateCheckDto {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -215,6 +221,8 @@ export const api = {
 
   micSupported: () => invoke<boolean>("mic_supported"),
   getShortcutLabel: () => invoke<string>("get_shortcut_label"),
+  checkForUpdates: () => invoke<UpdateCheckDto>("check_for_updates"),
+  openReleasePage: () => invoke<void>("open_release_page"),
   openSettings: (action: string) => invoke<void>("open_settings", { action }),
   quitApp: () => invoke<void>("quit_app"),
   getRecordingOptions: () => invoke<RecordingOptions>("get_recording_options"),

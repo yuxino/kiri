@@ -8,6 +8,10 @@ Kiri 使用 FFmpeg 在本机完成录屏与 GIF 编码。如果系统与缓存�
 
 macOS 自动下载连接 `ffmpeg.martin-riedl.de`；Windows 连接 `github.com` 上的 `GyanD/codexffmpeg` Release。
 
+## 手动检查更新
+
+Kiri 不会在后台检查应用更新。只有你在设置页明确点击「检查更新」时，Kiri 才会向公开的 `api.github.com/repos/yuxino/kiri/releases/latest` 地址发送一次请求。请求使用标准的 `kiri/<当前版本>` User-Agent，不会携带截屏、录屏、文件名、素材库信息、OCR 数据、凭据或账号标识。Kiri 不会自动重试、下载或安装更新；发现新版本后，是否在浏览器中打开固定的 Kiri Releases 页面仍由你决定。
+
 ## 本地 OCR
 
 Kiri 默认使用 macOS Vision 或 Windows.Media.Ocr 进行本地文字识别。它不需要 API Key 或网络连接，图片像素不会离开设备。

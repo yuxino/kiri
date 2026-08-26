@@ -25,6 +25,7 @@ workspace. Capture overlays stay out of completed screenshots and recordings.
 - **Recording** — region recording with optional audio, pointer, and click highlights; a 3-2-1 countdown, a draggable control bar (Esc to stop), and Retina-quality MP4 output.
 - **GIF** — convert short recordings into looping GIFs with visible conversion progress.
 - **Library** — date-grouped captures with favorites, tags, rename, search, copy, reveal, and a recoverable Trash. The sidebar and filter bar let you browse by type, favorites, and tags.
+- **Updates** — Settings shows the installed version and checks the official GitHub Release only when you click **Check for Updates**. Kiri never downloads or installs an app update automatically.
 
 ## Download
 

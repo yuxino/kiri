@@ -16,6 +16,17 @@ metadata, credentials, or account identifier. Media encoding remains local.
 Automatic downloads come from `ffmpeg.martin-riedl.de` on macOS and the
 `GyanD/codexffmpeg` release repository on `github.com` on Windows.
 
+## Manual update checks
+
+Kiri does not check for application updates in the background. When the user
+clicks **Check for Updates** in Settings, Kiri sends one request to the public
+`api.github.com/repos/yuxino/kiri/releases/latest` endpoint. The request uses a
+standard `kiri/<current-version>` user agent and contains no captures,
+recordings, filenames, library metadata, OCR data, credentials, or account
+identifier. Kiri does not automatically retry the request, download an update,
+or install it. If a newer release exists, the user may explicitly open the
+fixed Kiri Releases page in their browser.
+
 ## Local OCR
 
 Local OCR is enabled by default and uses macOS Vision or Windows.Media.Ocr. It
