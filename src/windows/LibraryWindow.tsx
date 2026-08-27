@@ -1779,7 +1779,11 @@ function SegmentedPicker(props: {
   onChange(index: number): void;
 }) {
   return (
-    <nav className="library-section-picker" aria-label={t("Library")}>
+    <nav
+      key={props.value}
+      className="library-section-picker"
+      aria-label={t("Library")}
+    >
       {props.options.map((option, index) => (
         <button
           type="button"
