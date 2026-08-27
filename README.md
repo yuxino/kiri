@@ -1,96 +1,60 @@
 <div align="center">
-  <img src="src-tauri/icons/128x128.png" width="112" alt="kiri app icon">
-  <h1>kiri</h1>
-  <p>A fast, local-first capture workspace for macOS and Windows.</p>
+  <img src="src-tauri/icons/128x128.png" width="112" alt="Kiri 应用图标">
+  <h1>Kiri</h1>
+  <p>本地优先的截图、标注、OCR 与区域录屏工具。</p>
   <p>
-    <a href="README_ZH.md">简体中文</a>
+    <strong>简体中文</strong>
+    · <a href="README_EN.md">English</a>
     · <a href="README_JA.md">日本語</a>
   </p>
 </div>
 
-`kiri` comes from the Japanese word 「切り取り」—to clip or cut out.
+按下快捷键，选择窗口或区域，就能截图、标注、识别文字或录制屏幕。完成后的内容会复制到剪贴板，并保存在本地素材库。
 
-Capture screenshots, annotate, recognize text, record regions, and keep everything in a local library. No cloud account required; optional remote OCR is always user-controlled.
+Kiri 目前主要在 macOS 上开发和测试。Windows 构建尚未完成真机验收，安装、权限或部分功能可能存在问题。
 
-## Interface
+## 功能
 
-The library, recoverable Trash, filters, and settings live in one compact local
-workspace. Capture overlays stay out of completed screenshots and recordings.
-After a screenshot or recording finishes, a compact preview appears on the
-originating display without taking focus away from the application you were
-using.
+- **截图与标注**：支持窗口和区域截图，以及画笔、图形、箭头、文字、马赛克、撤销与重做。
+- **OCR**：默认在本机识别文字；也可以手动配置远程服务，每次发送前都会明确确认。
+- **录屏与 GIF**：录制指定区域，可选系统声音、麦克风、指针和点击高亮；支持 MP4 与 GIF。
+- **本地素材库**：支持搜索、收藏、标签、重命名和可恢复的回收站。
 
-## Features
+## 下载与安装
 
-- **Screenshots** — window or region capture with precise selection and a movable mode selector; completion copies the result to the clipboard, saves it to the local library, and offers open, copy-again, and recoverable Trash actions in the completion preview.
-- **Annotations** — pen, shapes, arrows, text, and mosaic with undo/redo; existing annotations stay selectable and editable.
-- **OCR** — local text recognition by default (macOS Vision / Windows.Media.Ocr). macOS automatically detects any recognition language supported by Vision; Windows uses the first installed OCR language supported from the user profile. Multiple optional profiles support Alibaba Cloud, OpenAI, or other image-capable services that implement the OpenAI Chat Completions API. Before every remote request, Kiri shows the destination, model, and selected-image details; only an explicit Send or Retry action uploads that selected region. Failures never retry, switch providers, or fall back to another upload automatically.
-- **Recording** — region recording with optional audio, pointer, and click highlights; choose MP4 or GIF before recording, then use the neutral 3-2-1 countdown and draggable control bar (Esc to stop). MP4 output remains Retina-quality with audio when enabled.
-- **GIF** — record directly or convert an existing recording of any duration into a looping, silent GIF at 12 fps with a 720 px long edge. If direct GIF finalization fails, Kiri keeps the valid MP4 instead.
-- **Library** — date-grouped captures with favorites, tags, rename, search, copy, reveal, and a recoverable Trash. Images copy as pixels, while MP4 and GIF captures copy as files. The sidebar and filter bar let you browse by type, favorites, and tags.
-- **Updates** — Settings shows the installed version and checks the official GitHub Release only when you click **Check for Updates**. Kiri never downloads or installs an app update automatically.
+从 [GitHub Releases](https://github.com/yuxino/kiri/releases/latest) 下载最新版本。
 
-## Download
+- **macOS 14+**：按设备下载 Apple Silicon（`arm64`）或 Intel（`x64`）版 `.dmg`，打开后把 `Kiri.app` 拖入“应用程序”。截图与录屏需要“屏幕与系统音频录制”权限；只有启用点击高亮时才需要“输入监控”，只有启用麦克风录制时才需要“麦克风”权限。
+- **Windows**：运行安装包即可，截图不需要额外的系统授权；麦克风权限由 Windows 隐私设置控制。Windows 版本尚未经过真机测试，可能无法正常安装或使用部分功能。
 
-Download the latest build from GitHub Releases.
+> GitHub 发布包目前使用 ad-hoc 签名，因为项目还没有 Apple Developer ID。macOS 可能在升级后重新要求“屏幕录制”权限。第一次启动若被 Gatekeeper 拦截，请按住 Control 点按 `Kiri.app` 并选择“打开”，或前往“系统设置 → 隐私与安全性 → 仍要打开”。不需要关闭 Gatekeeper。
 
-- **macOS 14+**: download the Apple Silicon (`arm64`) or Intel (`x64`) `.dmg`, open it, then drag `Kiri.app` to Applications. Kiri needs **Screen & System Audio Recording** for capture, **Input Monitoring** only when recording with click highlights, and **Microphone** only when microphone recording is enabled. Captures stay on your Mac unless you export them or explicitly send the current OCR selection to a configured provider.
+远程 OCR 完全可选。API Key 保存在 macOS 钥匙串或 Windows 凭据管理器中，不会写入配置文件。创建或选择远程配置不会自动发送图片，每次识别都需要点击“发送”或“重试”。
 
-> **macOS permission note**: GitHub release builds are ad-hoc signed (no Apple Developer ID available), so macOS treats each build as a new app and may re-prompt for **Screen Recording** after an upgrade — grant it once in System Settings → Privacy & Security → Screen Recording, then reopen Kiri. Locally built apps (`./scripts/install-app.sh`) use a stable certificate signature, so the grant persists across reinstalls.
->
-> On first launch, Gatekeeper may block an ad-hoc-signed build. Control-click `Kiri.app` and choose **Open**, or use System Settings → Privacy & Security → **Open Anyway**. You do not need to disable Gatekeeper.
+录屏和 GIF 转换使用 FFmpeg。如果系统中没有可用版本，Kiri 会在第一次录屏或手动转换 GIF 时下载一次并保存到系统缓存。浏览素材库不会触发下载，编码仍在本机完成。
 
-- **Windows**: run the installer; no screen-capture permission is required. If microphone recording is enabled, access is controlled by Windows privacy settings.
+## 从源码运行
 
-Remote OCR is optional. Provider API keys are entered inside Kiri and stored in macOS Keychain or Windows Credential Manager, never in the profile JSON. Local OCR remains the initial engine. Creating or selecting a profile sends nothing; each selected image still requires an explicit Send or Retry action.
-
-Recording and GIF conversion use FFmpeg. If a usable copy is not already available, Kiri downloads it once when you first record or explicitly convert a video to GIF, then keeps it in the operating-system cache. Browsing the library never triggers the download. The request contains no screenshot, recording, library, or account data; encoding remains local afterward.
-
-## Build from source
-
-Requires Rust 1.88+, Node.js 20.19+ (or 22.12+), and pnpm.
+需要 Rust 1.88+、Node.js 20.19+（或 22.12+）和 pnpm。macOS 打包还需要 Xcode Command Line Tools。
 
 ```bash
 git clone https://github.com/yuxino/kiri.git
 cd kiri
 pnpm install
-cargo test --manifest-path src-tauri/Cargo.toml
-pnpm tauri dev                # development with frontend hot reload
-pnpm tauri build --no-bundle   # or ./scripts/package-app.sh for signed macOS installers
+pnpm tauri dev
+pnpm tauri build --no-bundle
 ```
 
-The transparent desktop icon master is `src-tauri/icons/app-icon-source.png`.
-After changing it, run `pnpm icons:generate`; both development and production
-builds run `pnpm icons:verify` and reject opaque-corner PNG, ICNS, or ICO assets.
+macOS 开发版必须使用稳定签名。`pnpm tauri dev` 会使用独立的开发标识符，并在找不到稳定签名身份时直接报错。不要直接运行 `cargo build` 生成的二进制；它不包含前端资源，会显示空白窗口。
 
-On macOS, `pnpm tauri dev` signs each rebuilt debug executable with a stable
-certificate and the dedicated development identifier `io.yuxino.kiri.dev`. This keeps Screen
-Recording grants—and Input Monitoring when click highlights are used—stable
-across Rust rebuilds. It uses an
-installed Apple Development / Developer ID certificate, or an existing local
-development certificate; set `KIRI_DEV_SIGNING_IDENTITY` to choose one explicitly.
-The command fails clearly when no stable identity is available instead of
-silently using an ad-hoc signature that would trigger repeated permission
-prompts.
+## 快捷键
 
-> Running the binary produced by a plain `cargo build` shows a blank window:
-> frontend assets are embedded by `pnpm tauri build` and served by Vite during
-> `pnpm tauri dev`.
+- **⇧⌘A**（macOS）/ **Shift+Ctrl+A**（Windows）：打开 Kiri
+- **Esc**：取消截图；录屏时停止录制
+- **Return**：确认截图
+- **⌘F**（macOS）/ **Ctrl+F**（Windows）：搜索素材库
+- **⌘Z / ⇧⌘Z**（macOS）/ **Ctrl+Z / Shift+Ctrl+Z**（Windows）：撤销 / 重做
 
-macOS packaging also requires Xcode Command Line Tools.
-
-## Shortcuts
-
-- **⇧⌘A** (macOS) / **Shift+Ctrl+A** (Windows) — open Kiri
-- **Esc** — cancel capture
-- **Return** — copy capture
-- **V** — select / move annotations
-- **P / R / L / A / T / M** — pen / rectangle / line / arrow / text / mosaic
-- **Delete** — delete selected annotation
-- **Esc** (while recording) — stop
-- **⌘F** (macOS) / **Ctrl+F** (Windows) — search the library
-- **⌘Z / ⇧⌘Z** (macOS) / **Ctrl+Z / Shift+Ctrl+Z** (Windows) — undo / redo
-
-See [PRIVACY.md](PRIVACY.md), [ROADMAP.md](ROADMAP.md), [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [documentation index](docs/README.md).
+另见 [隐私说明](PRIVACY_ZH.md)、[路线图](ROADMAP.md)、[贡献指南](CONTRIBUTING.md)、[安全策略](SECURITY.md) 与[文档索引](docs/README.md)。
 
 [MIT](LICENSE) © 2026 yuxino

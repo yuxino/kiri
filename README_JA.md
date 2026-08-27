@@ -3,12 +3,12 @@
   <h1>kiri</h1>
   <p>macOS と Windows 対応の、高速でローカル優先のキャプチャワークスペース。</p>
   <p>
-    <a href="README.md">English</a>
-    · <a href="README_ZH.md">简体中文</a>
+    <a href="README.md">简体中文</a>
+    · <a href="README_EN.md">English</a>
   </p>
 </div>
 
-> **注記:** この日本語版は、最新の設定画面と任意のリモート OCR の説明をまだ完全には反映していません。最新の機能とプライバシー境界は [English README](README.md) を参照してください。
+> **注記:** この日本語版は、最新の設定画面と任意のリモート OCR の説明をまだ完全には反映していません。最新の機能とプライバシー境界は [English README](README_EN.md) を参照してください。
 
 `kiri` の名前は、日本語の「切り取り」に由来します。
 
