@@ -2,9 +2,9 @@
 // the ENTIRE primary display (not just the library window) and shows a
 // centered card, so irreversible operations like emptying the trash or
 // permanently deleting a capture are unmistakable. Esc / Cancel closes;
-// Confirm runs the action and closes.
+// Confirm closes only after the action succeeds.
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "../lib/ipc";
 import { t } from "../i18n";
@@ -18,6 +18,9 @@ interface ConfirmProps {
 }
 
 export function ConfirmWindow(props: ConfirmProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const close = () => {
     void getCurrentWindow().close();
   };
@@ -25,25 +28,42 @@ export function ConfirmWindow(props: ConfirmProps) {
   // Esc cancels the dialog.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !busy) {
         e.preventDefault();
         close();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [busy]);
 
-  const confirm = () => {
+  const confirm = async () => {
+    if (busy) return;
+    let action: Promise<void> | null = null;
     if (props.kind === "emptyTrash") {
-      void api.emptyTrash().catch(() => {});
+      action = api.emptyTrash();
     } else if (props.kind === "batchDelete") {
-      void api.batchPermanentlyDelete(props.ids ?? []).catch(() => {});
+      action = api.batchPermanentlyDelete(props.ids ?? []);
     } else if (props.kind.startsWith("delete:")) {
       const id = props.kind.slice("delete:".length);
-      void api.permanentlyDelete(id).catch(() => {});
+      action = api.permanentlyDelete(id);
+    } else if (props.kind.startsWith("removeMissing:")) {
+      const id = props.kind.slice("removeMissing:".length);
+      action = api.removeMissingAsset(id);
     }
-    close();
+    if (!action) {
+      close();
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await action;
+      close();
+    } catch {
+      setError("Couldn't complete this action");
+      setBusy(false);
+    }
   };
 
   return (
@@ -71,24 +91,40 @@ export function ConfirmWindow(props: ConfirmProps) {
         <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>
           {t(props.title)}
         </div>
-        <div
-          style={{
-            fontSize: 12.5,
-            color: "var(--kiri-secondary-label)",
-            marginBottom: 16,
-            lineHeight: 1.4,
-          }}
-        >
-          {t(props.message)}
-        </div>
+        {props.message && (
+          <div
+            style={{
+              fontSize: 12.5,
+              color: "var(--kiri-secondary-label)",
+              marginBottom: 16,
+              lineHeight: 1.4,
+            }}
+          >
+            {t(props.message)}
+          </div>
+        )}
+        {error && (
+          <div
+            role="alert"
+            style={{
+              fontSize: 12.5,
+              color: "var(--kiri-coral)",
+              marginBottom: 16,
+            }}
+          >
+            {t(error)}
+          </div>
+        )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button className="kiri-secondary-button" onClick={close}>
+          <button type="button" className="kiri-secondary-button" disabled={busy} onClick={close}>
             {t("Cancel")}
           </button>
           <button
+            type="button"
             className="kiri-primary-button"
             style={{ background: "var(--kiri-coral)" }}
-            onClick={confirm}
+            disabled={busy}
+            onClick={() => void confirm()}
           >
             {t(props.confirmLabel)}
           </button>

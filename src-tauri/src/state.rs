@@ -17,16 +17,20 @@ use crate::core::annotation::AnnotationDocument;
 use crate::core::asset::CaptureAsset;
 use crate::core::geometry::Rect;
 use crate::core::library::AssetLibrary;
+use crate::core::library_location::LibraryContext;
 use crate::core::policy::RecordingOptions;
+use crate::core::recording_recovery::RecordingRecoveryStore;
 use crate::record::SegmentEncoder;
 
 pub struct AppState {
-    pub library: std::sync::Mutex<AssetLibrary>,
+    pub library: std::sync::Mutex<LibraryContext>,
+    pub library_transition: std::sync::Mutex<()>,
     pub capture: std::sync::Mutex<CaptureFlow>,
     pub recording: std::sync::Mutex<RecordingFlow>,
     pub ffmpeg_path: std::sync::OnceLock<PathBuf>,
     pub saved_recording_options: std::sync::Mutex<RecordingOptions>,
-    pub library_root: PathBuf,
+    pub recording_recovery: std::sync::Mutex<RecordingRecoveryStore>,
+    pub recording_recovery_transition: std::sync::Mutex<()>,
     pub gif_conversion_ids: std::sync::Mutex<HashSet<uuid::Uuid>>,
     /// Active click monitor (ripple source), installed only for recordings
     /// that explicitly enable click highlights and removed when they finish.
@@ -333,19 +337,24 @@ pub enum RecoveryAction {
 
 impl AppState {
     pub fn new(app: &AppHandle) -> anyhow::Result<Self> {
-        let (library, root) = open_library()?;
-        let ocr_providers = app
-            .path()
-            .app_config_dir()
-            .map(|path| Arc::new(crate::ocr_controller::OcrProviderManager::open(&path)))
-            .unwrap_or_else(|_| Arc::new(crate::ocr_controller::OcrProviderManager::unavailable()));
+        let config_dir = app.path().app_config_dir()?;
+        let default_root = AssetLibrary::default_root_url()
+            .or_else(|| dirs::data_local_dir().map(|dir| dir.join("kiri")))
+            .ok_or_else(|| anyhow::anyhow!("the default Kiri library path is unavailable"))?;
+        let library = LibraryContext::open(default_root, config_dir.clone())?;
+        let recording_recovery = RecordingRecoveryStore::new(
+            app.path().app_local_data_dir()?.join("Recording Recovery"),
+        );
+        let ocr_providers = Arc::new(crate::ocr_controller::OcrProviderManager::open(&config_dir));
         Ok(Self {
             library: std::sync::Mutex::new(library),
+            library_transition: std::sync::Mutex::new(()),
             capture: Default::default(),
             recording: Default::default(),
             ffmpeg_path: std::sync::OnceLock::new(),
             saved_recording_options: std::sync::Mutex::new(RecordingOptions::default()),
-            library_root: root,
+            recording_recovery: std::sync::Mutex::new(recording_recovery),
+            recording_recovery_transition: std::sync::Mutex::new(()),
             gif_conversion_ids: Default::default(),
             click_monitor: std::sync::Mutex::new(None),
             ocr_providers,
@@ -365,10 +374,6 @@ impl AppState {
         Ok(path)
     }
 
-    pub fn asset_file_url(&self, asset: &CaptureAsset) -> PathBuf {
-        self.library_root.join("Assets").join(&asset.filename)
-    }
-
     /// Remote OCR is opt-in, so avoid constructing TLS/proxy connection pools
     /// for the common local-only path. A failed initialization is cached too,
     /// preventing repeated setup work during one app session.
@@ -377,14 +382,6 @@ impl AppState {
             .get_or_init(|| crate::remote_ocr::RemoteOcrClient::new().ok())
             .clone()
     }
-}
-
-fn open_library() -> anyhow::Result<(AssetLibrary, PathBuf)> {
-    let root = AssetLibrary::default_root_url()
-        .or_else(|| dirs::data_local_dir().map(|dir| dir.join("kiri")))
-        .unwrap_or_else(|| std::env::temp_dir().join("kiri-library"));
-    let library = AssetLibrary::open(root.clone())?;
-    Ok((library, root))
 }
 
 // ---------------------------------------------------------------------------

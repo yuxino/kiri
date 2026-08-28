@@ -2,6 +2,8 @@ pub mod annotation;
 pub mod asset;
 pub mod geometry;
 pub mod library;
+pub mod library_location;
 pub mod ocr_provider;
 pub mod policy;
+pub mod recording_recovery;
 pub mod shortcut;

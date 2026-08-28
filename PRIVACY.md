@@ -5,14 +5,25 @@ capture library stay on the device unless the user exports them or explicitly
 sends a selected OCR region to a configured remote provider. Kiri has no
 account system, analytics, advertising, or telemetry.
 
+## Library storage
+
+Kiri keeps one managed library in the operating-system application-data
+location by default. Settings can copy it to another local directory or
+external disk and switch to that copy; the previous copy is retained. The
+selected location contains the library index, captures, and editable screenshot
+projects.
+
+If a completed recording cannot be imported into the active library, Kiri
+keeps it in a local recovery area until a later import succeeds.
+
 ## Editable screenshot projects
 
 For annotations created by current Kiri builds, the local library keeps the
 shareable flattened screenshot together with a clean source image and a small
 annotation document. The clean source can still contain pixels hidden by
 mosaic, text backgrounds, or shapes in the flattened result. These project
-files stay in Kiri's application-data directory, are never uploaded by the
-editing feature, and remain recoverable when the screenshot is moved to Trash.
+files stay in Kiri's active library, are never uploaded by the editing feature,
+and remain recoverable when the screenshot is moved to Trash.
 They are removed when that screenshot is permanently deleted. Older flattened
 screenshots do not contain reconstructable annotation data; starting a new edit
 uses the current flattened image as its source.

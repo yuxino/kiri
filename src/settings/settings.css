@@ -73,7 +73,8 @@
 }
 
 .kiri-language-row,
-.kiri-version-row {
+.kiri-version-row,
+.kiri-storage-row {
   min-height: 72px;
   padding: 14px 16px;
   box-sizing: border-box;
@@ -84,7 +85,8 @@
 }
 
 .kiri-language-row > div:first-child,
-.kiri-version-row > div:first-child {
+.kiri-version-row > div:first-child,
+.kiri-storage-copy {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -92,6 +94,7 @@
 
 .kiri-language-row strong,
 .kiri-version-row strong,
+.kiri-storage-row strong,
 .ocr-engine-copy strong {
   font-size: 13px;
   line-height: 1.25;
@@ -99,10 +102,45 @@
 
 .kiri-language-row span,
 .kiri-version-row > div:first-child > span,
+.kiri-storage-copy > span,
 .ocr-engine-copy > span:not(.ocr-engine-title-row) {
   color: var(--kiri-secondary-label);
   font-size: 11.5px;
   line-height: 1.4;
+}
+
+.kiri-storage-copy {
+  min-width: 0;
+}
+
+.kiri-storage-title,
+.kiri-storage-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.kiri-storage-copy > span:not(.kiri-storage-error) {
+  max-width: 390px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kiri-storage-copy > .kiri-storage-error {
+  color: var(--kiri-coral);
+}
+
+.kiri-storage-actions {
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.kiri-storage-actions .kiri-button {
+  min-height: 30px;
+  padding: 0 10px;
+  white-space: nowrap;
 }
 
 .kiri-version-title {
@@ -504,7 +542,8 @@
 @media (max-width: 560px) {
   .kiri-settings-section__heading,
   .kiri-language-row,
-  .kiri-version-row {
+  .kiri-version-row,
+  .kiri-storage-row {
     align-items: stretch;
     flex-direction: column;
   }
@@ -519,6 +558,10 @@
 
   .kiri-update-button {
     align-self: flex-start;
+  }
+
+  .kiri-storage-actions {
+    justify-content: flex-start;
   }
 
   .kiri-settings-form-grid {

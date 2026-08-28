@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { KiriIcon } from "../components/KiriIcons";
 import { fmt, getLanguage, setLanguage, t, type KiriLanguage } from "../i18n";
 import {
   api,
+  onLibraryChanged,
+  type LibraryStatusDto,
   type OcrEngineRef,
   type OcrProviderProfileDto,
   type OcrProviderSettingsDto,
@@ -88,7 +90,6 @@ export function SettingsView() {
         <header className="kiri-settings__intro">
           <div className="kiri-settings__eyebrow">kiri</div>
           <h1 id="settings-page-title">{t("Settings")}</h1>
-          <p>{t("Keep capture preferences simple and choose where text recognition runs.")}</p>
         </header>
 
         <GeneralSettingsSection />
@@ -299,6 +300,35 @@ function AboutSettingsSection() {
 
 function GeneralSettingsSection() {
   const [language, setCurrentLanguage] = useState<KiriLanguage>(getLanguage());
+  const [libraryStatus, setLibraryStatus] = useState<LibraryStatusDto | null>(null);
+  const [libraryLoadError, setLibraryLoadError] = useState(false);
+  const [libraryBusy, setLibraryBusy] = useState(false);
+  const [libraryOperationError, setLibraryOperationError] = useState<string | null>(null);
+  const libraryStatusGeneration = useRef(0);
+
+  const loadLibraryStatus = useCallback(async (clearOperationErrorOnSuccess = false) => {
+    const generation = ++libraryStatusGeneration.current;
+    try {
+      const status = await api.getLibraryStatus();
+      if (generation !== libraryStatusGeneration.current) return;
+      setLibraryStatus(status);
+      setLibraryLoadError(false);
+      if (clearOperationErrorOnSuccess) setLibraryOperationError(null);
+    } catch {
+      if (generation !== libraryStatusGeneration.current) return;
+      setLibraryLoadError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadLibraryStatus();
+    const subscription = onLibraryChanged(() => {
+      void loadLibraryStatus();
+    });
+    return () => {
+      void subscription.then((dispose) => dispose()).catch(() => {});
+    };
+  }, [loadLibraryStatus]);
 
   const switchTo = (next: KiriLanguage) => {
     setCurrentLanguage(next);
@@ -306,12 +336,44 @@ function GeneralSettingsSection() {
     void api.setLanguage(next).catch(() => {});
   };
 
+  const runLibraryAction = async (
+    action: () => Promise<unknown>,
+    errorMessage: "Couldn't open folder" | "Couldn't update location",
+  ) => {
+    if (libraryBusy) return;
+    setLibraryBusy(true);
+    setLibraryOperationError(null);
+    try {
+      await action();
+      await loadLibraryStatus(true);
+    } catch {
+      setLibraryOperationError(errorMessage);
+      await loadLibraryStatus();
+    } finally {
+      setLibraryBusy(false);
+    }
+  };
+
+  const statusLabel = libraryLoadError
+    ? t("Unavailable")
+    : libraryStatus?.availability === "migrating"
+      ? t("Moving…")
+      : libraryStatus?.availability === "unavailable"
+        ? t("Unavailable")
+        : null;
+  const locationLabel = libraryStatus
+    ? libraryStatus.isDefault
+      ? t("Default")
+      : libraryStatus.locationLabel
+    : libraryLoadError
+      ? t("Couldn't load location")
+      : "—";
+
   return (
     <section className="kiri-settings-section" aria-labelledby="general-settings-title">
       <div className="kiri-settings-section__heading">
         <div>
           <h2 id="general-settings-title">{t("General")}</h2>
-          <p>{t("Choose the language used throughout Kiri.")}</p>
         </div>
       </div>
       <div className="kiri-settings-card kiri-language-row">
@@ -333,6 +395,93 @@ function GeneralSettingsSection() {
               {item === "en" ? "EN" : item === "zh-Hans" ? "中文" : "日本語"}
             </button>
           ))}
+        </div>
+      </div>
+      <div className="kiri-settings-card kiri-storage-row">
+        <div className="kiri-storage-copy">
+          <div className="kiri-storage-title">
+            <strong>{t("Library Location")}</strong>
+            {statusLabel && <span className="kiri-settings-badge">{statusLabel}</span>}
+          </div>
+          <span title={locationLabel}>{locationLabel}</span>
+          {libraryOperationError && (
+            <span className="kiri-storage-error" role="alert">
+              {t(libraryOperationError)}
+            </span>
+          )}
+        </div>
+        <div className="kiri-storage-actions">
+          {libraryLoadError ? (
+            <button
+              type="button"
+              className="kiri-button kiri-button--secondary"
+              disabled={libraryBusy}
+              onClick={() => {
+                setLibraryOperationError(null);
+                void loadLibraryStatus(true);
+              }}
+            >
+              {t("Retry")}
+            </button>
+          ) : libraryStatus?.availability === "ready" ? (
+            <>
+              <button
+                type="button"
+                className="kiri-button kiri-button--secondary"
+                disabled={libraryBusy}
+                onClick={() =>
+                  void runLibraryAction(api.revealLibrary, "Couldn't open folder")
+                }
+              >
+                {t("Open Folder")}
+              </button>
+              <button
+                type="button"
+                className="kiri-button kiri-button--secondary"
+                disabled={libraryBusy}
+                onClick={() =>
+                  void runLibraryAction(api.chooseLibraryLocation, "Couldn't update location")
+                }
+              >
+                {t("Change…")}
+              </button>
+              {!libraryStatus.isDefault && (
+                <button
+                  type="button"
+                  className="kiri-button kiri-button--secondary"
+                  disabled={libraryBusy}
+                  onClick={() =>
+                    void runLibraryAction(api.restoreDefaultLibrary, "Couldn't update location")
+                  }
+                >
+                  {t("Restore Default")}
+                </button>
+              )}
+            </>
+          ) : libraryStatus?.availability === "unavailable" ? (
+            <>
+              <button
+                type="button"
+                className="kiri-button kiri-button--secondary"
+                disabled={libraryBusy}
+                onClick={() =>
+                  void runLibraryAction(api.retryLibrary, "Couldn't update location")
+                }
+              >
+                {t("Retry")}
+              </button>
+              <button
+                type="button"
+                className="kiri-button kiri-button--secondary"
+                disabled={libraryBusy}
+                onClick={() =>
+                  void runLibraryAction(api.locateLibrary, "Couldn't update location")
+                }
+              >
+                {t("Locate…")}
+              </button>
+            </>
+          ) : null}
         </div>
       </div>
     </section>

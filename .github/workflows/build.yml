@@ -68,6 +68,7 @@ jobs:
           node-version: 22
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:release-tools
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

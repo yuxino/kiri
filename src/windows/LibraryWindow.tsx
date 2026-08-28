@@ -11,7 +11,9 @@ import {
   onLibraryChanged,
   onNotice,
   type AssetDto,
+  type AssetAvailability,
   type ErrorDto,
+  type LibraryStatusDto,
   type NoticeDto,
 } from "../lib/ipc";
 import { t, fmt } from "../i18n";
@@ -67,6 +69,12 @@ export function LibraryWindow() {
   const [destination, setDestination] = useState<Destination>("captures");
   const [query, setQuery] = useState("");
   const [loaded, setLoaded] = useState(false);
+  const [libraryStatus, setLibraryStatus] = useState<LibraryStatusDto | null>(null);
+  const [libraryStatusError, setLibraryStatusError] = useState(false);
+  const [libraryRecoveryBusy, setLibraryRecoveryBusy] = useState(false);
+  const [pendingRecordingCount, setPendingRecordingCount] = useState(0);
+  const [pendingRetryBusy, setPendingRetryBusy] = useState(false);
+  const [assetAvailability, setAssetAvailability] = useState<Record<string, AssetAvailability>>({});
   const [thumbnailRevisions, setThumbnailRevisions] = useState<Record<string, number>>({});
   const [notice, setNotice] = useState<NoticeDto | null>(null);
   const [error, setError] = useState<ErrorDto | null>(null);
@@ -267,10 +275,34 @@ export function LibraryWindow() {
 
   const refresh = useCallback(async () => {
     const generation = ++refreshGenerationRef.current;
-    const list = await api.listAssets(queryRef.current.trim(), showingTrashRef.current);
-    if (generation !== refreshGenerationRef.current) return;
-    setAssets(list);
-    setLoaded(true);
+    try {
+      const status = await api.getLibraryStatus();
+      if (generation !== refreshGenerationRef.current) return;
+      setLibraryStatus(status);
+      setLibraryStatusError(false);
+
+      if (status.availability !== "ready") {
+        setAssets([]);
+        setPendingRecordingCount(0);
+        return;
+      }
+
+      const [list, pending] = await Promise.all([
+        api.listAssets(queryRef.current.trim(), showingTrashRef.current),
+        api.listPendingRecordings().catch(() => []),
+      ]);
+      if (generation !== refreshGenerationRef.current) return;
+      setAssets(list);
+      setPendingRecordingCount(pending.length);
+      setAssetAvailability({});
+    } catch {
+      if (generation !== refreshGenerationRef.current) return;
+      setLibraryStatusError(true);
+      setAssets([]);
+      setPendingRecordingCount(0);
+    } finally {
+      if (generation === refreshGenerationRef.current) setLoaded(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -287,6 +319,7 @@ export function LibraryWindow() {
           ...revisions,
           [assetId]: (revisions[assetId] ?? 0) + 1,
         }));
+        setAssetAvailability((current) => ({ ...current, [assetId]: "ready" }));
       }),
       onGifConversionState(({ id, isConverting }) => {
         setGifConversionIds((current) => {
@@ -361,6 +394,9 @@ export function LibraryWindow() {
     query.trim().length > 0 || kindFilter !== "all" || favoritesOnly || tagFilter !== null;
   const isEmpty = assets.length === 0 && loaded && !hasActiveFilter;
   const isFilterEmpty = filteredAssets.length === 0 && loaded && hasActiveFilter;
+  const libraryUnavailable =
+    loaded && (libraryStatusError || libraryStatus?.availability === "unavailable");
+  const libraryMigrating = loaded && libraryStatus?.availability === "migrating";
 
   const openMenu = (id: string, x: number, y: number) => {
     if (menuFor === id) {
@@ -430,6 +466,50 @@ export function LibraryWindow() {
     });
   }, []);
 
+  const restoreMissing = useCallback(async (id: string) => {
+    setError(null);
+    try {
+      const restored = await api.restoreMissingAsset(id);
+      if (!restored) return;
+      setAssetAvailability((current) => ({ ...current, [id]: "ready" }));
+      setThumbnailRevisions((revisions) => ({
+        ...revisions,
+        [id]: (revisions[id] ?? 0) + 1,
+      }));
+      await refresh();
+    } catch {
+      setError({ message: "Couldn't restore this file", recovery: null });
+    }
+  }, [refresh]);
+
+  const runLibraryRecovery = useCallback(async (action: () => Promise<unknown>) => {
+    if (libraryRecoveryBusy) return;
+    setLibraryRecoveryBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch {
+      setError({ message: "Couldn't update location", recovery: null });
+    } finally {
+      await refresh().catch(() => {});
+      setLibraryRecoveryBusy(false);
+    }
+  }, [libraryRecoveryBusy, refresh]);
+
+  const retryPendingRecordings = useCallback(async () => {
+    if (pendingRetryBusy) return;
+    setPendingRetryBusy(true);
+    setError(null);
+    try {
+      await api.retryPendingRecordings();
+    } catch {
+      setError({ message: "Could not save the recording.", recovery: null });
+    } finally {
+      await refresh().catch(() => {});
+      setPendingRetryBusy(false);
+    }
+  }, [pendingRetryBusy, refresh]);
+
   const itemMenu = useCallback(
     (asset: AssetDto) => (
       <div
@@ -454,7 +534,12 @@ export function LibraryWindow() {
         }}
       >
         {asset.kind === "image" && (
-          <MenuRow icon="doc.on.doc" label={t("Copy")} onClick={run(() => void api.copyAsset(asset.id).catch(() => {}))} />
+          <MenuRow
+            icon="doc.on.doc"
+            label={t("Copy")}
+            disabled={assetAvailability[asset.id] !== undefined && assetAvailability[asset.id] !== "ready"}
+            onClick={run(() => void api.copyAsset(asset.id).catch(() => {}))}
+          />
         )}
         <MenuRow
           icon="character.textbox"
@@ -473,6 +558,7 @@ export function LibraryWindow() {
         <MenuRow
           icon={asset.kind === "image" ? "pencil.tip" : "photo.on.rectangle"}
           label={t(asset.kind === "image" ? "Edit" : "Open")}
+          disabled={assetAvailability[asset.id] !== undefined && assetAvailability[asset.id] !== "ready"}
           onClick={run(() =>
             void (asset.kind === "image"
               ? api.openEditor(asset.id)
@@ -480,14 +566,44 @@ export function LibraryWindow() {
             ).catch(() => {}),
           )}
         />
-        <MenuRow icon="folder" label={t("Show in Finder")} onClick={run(() => void api.revealAsset(asset.id).catch(() => {}))} />
+        <MenuRow
+          icon="folder"
+          label={t("Show in Folder")}
+          disabled={assetAvailability[asset.id] === "missing"}
+          onClick={run(() => void api.revealAsset(asset.id).catch(() => {}))}
+        />
         {asset.gifEligible && (
           <MenuRow
             icon="sparkles.rectangle.stack"
             label={gifConversionIds.has(asset.id) ? t("Creating GIF…") : t("Convert to GIF")}
-            disabled={gifConversionIds.has(asset.id)}
+            disabled={
+              gifConversionIds.has(asset.id) ||
+              (assetAvailability[asset.id] !== undefined && assetAvailability[asset.id] !== "ready")
+            }
             onClick={run(() => startGifConversion(asset.id))}
           />
+        )}
+        {assetAvailability[asset.id] === "missing" && !showingTrash && (
+          <>
+            <MenuRow
+              icon="folder"
+              label={t("Restore File…")}
+              onClick={run(() => void restoreMissing(asset.id).catch(() => {}))}
+            />
+            <MenuRow
+              icon="trash.fill"
+              label={t("Remove Record")}
+              destructive
+              onClick={run(() =>
+                void api.showConfirmDialog(
+                  `removeMissing:${asset.id}`,
+                  t("Remove this record?"),
+                  "",
+                  t("Remove Record"),
+                ),
+              )}
+            />
+          </>
         )}
         <div style={{ height: 1, background: "var(--kiri-surface-border)", margin: "5px 8px", opacity: 0.8 }} />
         {showingTrash ? (
@@ -520,7 +636,15 @@ export function LibraryWindow() {
         )}
       </div>
     ),
-    [gifConversionIds, menuStyle, run, showingTrash, startGifConversion],
+    [
+      assetAvailability,
+      gifConversionIds,
+      menuStyle,
+      restoreMissing,
+      run,
+      showingTrash,
+      startGifConversion,
+    ],
   );
 
   return (
@@ -546,14 +670,20 @@ export function LibraryWindow() {
               </span>
               <span className="library-control-panel__subtitle">
                 {destination === "settings"
-                  ? t("Language and text recognition")
-                  : fmt(assets.length === 1 ? "%d capture" : "%d captures", assets.length)}
+                  ? t("Language, storage, and text recognition")
+                  : libraryUnavailable
+                    ? t("Unavailable")
+                    : libraryMigrating
+                      ? t("Moving…")
+                      : fmt(assets.length === 1 ? "%d capture" : "%d captures", assets.length)}
               </span>
             </div>
           </div>
 
           <div className="library-control-panel__actions">
-            {destination === "captures" && (
+            {destination === "captures" &&
+              !libraryStatusError &&
+              libraryStatus?.availability === "ready" && (
               <div className="kiri-library-search">
                 <KiriIcon name="magnifyingglass" size={14} />
                 <input
@@ -610,7 +740,9 @@ export function LibraryWindow() {
           </div>
         </div>
 
-        {destination === "captures" && (
+        {destination === "captures" &&
+          !libraryStatusError &&
+          libraryStatus?.availability === "ready" && (
           <div className="library-control-panel__filter-rail">
             <FilterBar
               kind={kindFilter}
@@ -645,6 +777,37 @@ export function LibraryWindow() {
 
       {destination === "captures" ? (
         <>
+      {libraryUnavailable ? (
+        <LibraryUnavailableState
+          status={libraryStatus}
+          busy={libraryRecoveryBusy}
+          onRetry={() => void runLibraryRecovery(api.retryLibrary)}
+          onLocate={() => void runLibraryRecovery(api.locateLibrary)}
+        />
+      ) : libraryMigrating ? (
+        <LibraryStatusState title={t("Moving Library…")} />
+      ) : (
+        <>
+      {!showingTrash && pendingRecordingCount > 0 && (
+        <div className="library-recovery-banner" role="status">
+          <span>
+            {fmt(
+              pendingRecordingCount === 1
+                ? "%d recording is waiting to save"
+                : "%d recordings are waiting to save",
+              pendingRecordingCount,
+            )}
+          </span>
+          <button
+            type="button"
+            className="kiri-button kiri-button--secondary"
+            disabled={pendingRetryBusy}
+            onClick={() => void retryPendingRecordings().catch(() => {})}
+          >
+            {t("Retry")}
+          </button>
+        </div>
+      )}
       {/* Grid */}
       {selectionIds.length > 0 && (
         <BatchActionBar
@@ -788,6 +951,7 @@ export function LibraryWindow() {
                   <AssetCard
                     key={asset.id}
                     asset={asset}
+                    availability={assetAvailability[asset.id]}
                     thumbnailRevision={thumbnailRevisions[asset.id] ?? 0}
                     menuOpen={menuFor === asset.id}
                     onMenu={(x, y) => openMenu(asset.id, x, y)}
@@ -799,11 +963,24 @@ export function LibraryWindow() {
                       if (el) cardElsRef.current.set(asset.id, el);
                       else cardElsRef.current.delete(asset.id);
                     }}
+                    onAvailability={(availability) => {
+                      setAssetAvailability((current) => ({
+                        ...current,
+                        [asset.id]: availability,
+                      }));
+                      if (availability === "libraryUnavailable") {
+                        void refresh().catch(() => {});
+                      }
+                    }}
+                    onRestoreMissing={() => restoreMissing(asset.id)}
                     onDoubleClick={() =>
-                      void (asset.kind === "image"
-                        ? api.openEditor(asset.id)
-                        : api.openAsset(asset.id)
-                      ).catch(() => {})
+                      assetAvailability[asset.id] === undefined ||
+                      assetAvailability[asset.id] === "ready"
+                        ? void (asset.kind === "image"
+                            ? api.openEditor(asset.id)
+                            : api.openAsset(asset.id)
+                          ).catch(() => {})
+                        : undefined
                     }
                   />
                 ))}
@@ -811,6 +988,8 @@ export function LibraryWindow() {
             </div>
           ))}
         </div>
+      )}
+        </>
       )}
         </>
       ) : (
@@ -953,6 +1132,49 @@ export function LibraryWindow() {
   );
 }
 
+function LibraryStatusState(props: { title: string; children?: React.ReactNode }) {
+  return (
+    <div className="library-status-state" role="status">
+      <strong>{props.title}</strong>
+      {props.children}
+    </div>
+  );
+}
+
+function LibraryUnavailableState(props: {
+  status: LibraryStatusDto | null;
+  busy: boolean;
+  onRetry(): void;
+  onLocate(): void;
+}) {
+  const locationLabel = props.status?.isDefault
+    ? t("Default")
+    : props.status?.locationLabel;
+  return (
+    <LibraryStatusState title={t("Library unavailable")}>
+      {locationLabel && <span>{locationLabel}</span>}
+      <div className="library-status-state__actions">
+        <button
+          type="button"
+          className="kiri-button kiri-button--secondary"
+          disabled={props.busy}
+          onClick={props.onRetry}
+        >
+          {t("Retry")}
+        </button>
+        <button
+          type="button"
+          className="kiri-button kiri-button--secondary"
+          disabled={props.busy}
+          onClick={props.onLocate}
+        >
+          {t("Locate…")}
+        </button>
+      </div>
+    </LibraryStatusState>
+  );
+}
+
 function recoveryLabel(recovery: string): string {
   switch (recovery) {
     case "openSettings":
@@ -970,6 +1192,7 @@ function recoveryLabel(recovery: string): string {
 
 function AssetCard(props: {
   asset: AssetDto;
+  availability?: AssetAvailability;
   thumbnailRevision: number;
   menuOpen: boolean;
   onMenu(x: number, y: number): void;
@@ -979,9 +1202,12 @@ function AssetCard(props: {
   onSelect(): void;
   onToggleSelect(): void;
   registerRef(el: HTMLDivElement | null): void;
+  onAvailability(availability: AssetAvailability): void;
+  onRestoreMissing(): Promise<void>;
 }) {
   const {
     asset,
+    availability,
     thumbnailRevision,
     menuOpen,
     onMenu,
@@ -991,11 +1217,53 @@ function AssetCard(props: {
     onSelect,
     onToggleSelect,
     registerRef,
+    onAvailability,
+    onRestoreMissing,
   } = props;
   const [hovered, setHovered] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
   const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewRetry, setPreviewRetry] = useState(0);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+
+  const checkAvailability = async (mediaFailed = false) => {
+    try {
+      const next = (await api.getAssetAvailability(asset.id)).status;
+      onAvailability(next);
+      setPreviewFailed(mediaFailed && next === "ready");
+      return next;
+    } catch {
+      setPreviewFailed(true);
+      return null;
+    }
+  };
+
+  const retryPreview = async () => {
+    if (previewBusy) return;
+    setPreviewBusy(true);
+    try {
+      const next = await checkAvailability();
+      if (next === "ready") {
+        setPreviewFailed(false);
+        setPreviewRetry((revision) => revision + 1);
+      }
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+
+  const restoreAsset = async () => {
+    if (restoreBusy) return;
+    setRestoreBusy(true);
+    try {
+      await onRestoreMissing();
+    } finally {
+      setRestoreBusy(false);
+    }
+  };
 
   // Keep only previews near the viewport mounted. Native lazy-loading delays
   // the first decode, but does not release images after the user scrolls past
@@ -1071,6 +1339,7 @@ function AssetCard(props: {
     transform: hovered ? "scale(1.018)" : "scale(1)",
     transition: "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)",
   };
+  const contentAvailable = availability === undefined || availability === "ready";
   return (
     <div
       ref={registerRef}
@@ -1137,13 +1406,67 @@ function AssetCard(props: {
           justifyContent: "center",
         }}
       >
-        {previewVisible && (asset.kind === "image" ? (
+        {previewVisible && previewFailed ? (
+          <div className="library-asset-unavailable">
+            <span>{t("Preview unavailable")}</span>
+            <button
+              type="button"
+              className="kiri-button kiri-button--secondary"
+              disabled={previewBusy}
+              onClick={(event) => {
+                event.stopPropagation();
+                void retryPreview();
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+            >
+              {t("Retry")}
+            </button>
+          </div>
+        ) : previewVisible && availability === "missing" ? (
+          <div className="library-asset-unavailable">
+            <span>{t("File missing")}</span>
+            <button
+              type="button"
+              className="kiri-button kiri-button--secondary"
+              disabled={restoreBusy}
+              onClick={(event) => {
+                event.stopPropagation();
+                void restoreAsset();
+              }}
+              onDoubleClick={(event) => event.stopPropagation()}
+            >
+              {t("Restore File…")}
+            </button>
+          </div>
+        ) : previewVisible && availability && availability !== "ready" ? (
+          <div className="library-asset-unavailable">
+            <span>
+              {t(availability === "libraryUnavailable" ? "Library unavailable" : "Can't read this file")}
+            </span>
+            {availability !== "libraryUnavailable" && (
+              <button
+                type="button"
+                className="kiri-button kiri-button--secondary"
+                disabled={previewBusy}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void retryPreview();
+                }}
+                onDoubleClick={(event) => event.stopPropagation()}
+              >
+                {t("Retry")}
+              </button>
+            )}
+          </div>
+        ) : previewVisible && (asset.kind === "image" ? (
           <img
+            key={`${asset.id}:${thumbnailRevision}:${previewRetry}`}
             src={thumbnailUrl(asset.id, thumbnailRevision)}
             alt=""
             draggable={false}
             loading="lazy"
             decoding="async"
+            onError={() => void checkAvailability(true)}
             // Scaled-to-fit keeps the whole capture visible; the neutral
             // stage and tighter height stop wide captures floating in a void.
             // never cropped.
@@ -1152,11 +1475,13 @@ function AssetCard(props: {
         ) : asset.kind === "video" ? (
           <div style={{ position: "relative", width: "100%", height: "100%" }}>
             <img
+              key={`${asset.id}:${thumbnailRevision}:${previewRetry}`}
               src={thumbnailUrl(asset.id, thumbnailRevision)}
               alt=""
               draggable={false}
               loading="lazy"
               decoding="async"
+              onError={() => void checkAvailability(true)}
               style={previewImageStyle}
             />
             <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1169,11 +1494,13 @@ function AssetCard(props: {
         ) : (
           <div style={{ position: "relative", width: "100%", height: "100%" }}>
             <img
+              key={`${asset.id}:${thumbnailRevision}:${previewRetry}`}
               src={thumbnailUrl(asset.id, thumbnailRevision)}
               alt=""
               draggable={false}
               loading="lazy"
               decoding="async"
+              onError={() => void checkAvailability(true)}
               style={previewImageStyle}
             />
             <div style={{ position: "absolute", left: 8, bottom: 8, background: "rgba(0,0,0,0.6)", color: "#fff", borderRadius: 6, padding: "2px 6px", fontSize: 10, fontWeight: 600 }}>
@@ -1291,21 +1618,22 @@ function AssetCard(props: {
           <button
             className="kiri-icon-button"
             title={t("View")}
+            disabled={!contentAvailable}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
-              void api.openAsset(asset.id).catch(() => {});
+              if (contentAvailable) void api.openAsset(asset.id).catch(() => {});
             }}
             onDoubleClick={(e) => {
               e.stopPropagation();
-              void api.openAsset(asset.id).catch(() => {});
+              if (contentAvailable) void api.openAsset(asset.id).catch(() => {});
             }}
             style={{
               width: 26,
               height: 26,
               borderRadius: 8,
               fontSize: 13,
-              cursor: "pointer",
+              cursor: contentAvailable ? "pointer" : "default",
             }}
           >
             <KiriIcon name="eye" size={14} />
@@ -1313,22 +1641,23 @@ function AssetCard(props: {
           <button
             className="kiri-icon-button"
             title={t("Copy")}
+            disabled={!contentAvailable}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
-              void api.copyAsset(asset.id).catch(() => {});
+              if (contentAvailable) void api.copyAsset(asset.id).catch(() => {});
             }}
             onDoubleClick={(e) => {
               // A rapid double-click on Copy must copy, not open the asset.
               e.stopPropagation();
-              void api.copyAsset(asset.id).catch(() => {});
+              if (contentAvailable) void api.copyAsset(asset.id).catch(() => {});
             }}
             style={{
               width: 26,
               height: 26,
               borderRadius: 8,
               fontSize: 13,
-              cursor: "pointer",
+              cursor: contentAvailable ? "pointer" : "default",
             }}
           >
             <KiriIcon name="doc.on.doc" size={14} />

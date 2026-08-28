@@ -373,14 +373,6 @@ impl OcrProviderManager {
         }
     }
 
-    pub fn unavailable() -> Self {
-        Self {
-            state: Mutex::new(ProviderManagerState::Unavailable),
-            secrets: Arc::new(SystemSecretStore),
-            journal: None,
-        }
-    }
-
     fn reconcile_pending_journal(&self, store: &OcrProviderStore) -> Result<(), OcrManagerError> {
         let journal = self
             .journal

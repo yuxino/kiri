@@ -14,7 +14,11 @@ use crate::core::annotation::{AnnotationDocument, AnnotationPixelSize};
 use crate::core::asset::{CaptureAsset, CaptureKind};
 use crate::core::geometry::Rect;
 use crate::core::library::{AssetLibraryError, EditorAnnotationState};
+use crate::core::library_location::{
+    self, LibraryAvailability, LibraryLocationError, LibraryStatusSnapshot,
+};
 use crate::core::policy::{RecordingOptions, RecordingOutputFormat};
+use crate::core::recording_recovery::PendingRecording;
 use crate::core::shortcut::KIRI_CAPTURE;
 use crate::platform;
 #[cfg(target_os = "macos")]
@@ -87,6 +91,37 @@ pub struct AssetDto {
     pub gif_eligible: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryStatusDto {
+    location_label: String,
+    is_default: bool,
+    availability: LibraryAvailability,
+}
+
+impl From<LibraryStatusSnapshot> for LibraryStatusDto {
+    fn from(status: LibraryStatusSnapshot) -> Self {
+        Self {
+            location_label: status.location_label,
+            is_default: status.is_default,
+            availability: status.availability,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetAvailabilityDto {
+    status: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingRecordingDto {
+    id: String,
+    created_at: f64,
+}
+
 fn asset_dto(asset: &CaptureAsset) -> AssetDto {
     AssetDto {
         id: asset.id.to_string(),
@@ -135,7 +170,8 @@ pub fn list_assets(
     showing_trash: bool,
 ) -> Result<Vec<AssetDto>, String> {
     let state = app.state::<AppState>();
-    let library = state.library.lock().unwrap();
+    let mut context = state.library.lock().unwrap();
+    let library = context.library().map_err(|error| error.to_string())?;
     let assets = library.search(&query, showing_trash);
     Ok(assets.iter().map(asset_dto).collect())
 }
@@ -147,9 +183,10 @@ fn with_asset_mutation(
 ) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(id).map_err(|e| e.to_string())?;
     let state = app.state::<AppState>();
-    let mut library = state.library.lock().unwrap();
-    mutation(&mut library, &parsed)?;
-    drop(library);
+    let mut context = state.library.lock().unwrap();
+    let library = context.library_mut().map_err(|error| error.to_string())?;
+    mutation(library, &parsed)?;
+    drop(context);
     emit_library_changed(app);
     Ok(())
 }
@@ -194,10 +231,20 @@ pub fn permanently_delete(app: AppHandle, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let state = app.state::<AppState>();
     let store = app.state::<crate::protocol::ProtocolStore>();
-    let result = crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
-        state.library.lock().unwrap().permanently_delete(&parsed)
-    });
-    if result.is_ok() || matches!(&result, Err(AssetLibraryError::CleanupFailed { .. })) {
+    let result: Result<(), LibraryLocationError> =
+        crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
+            let mut context = state.library.lock().unwrap();
+            context.library_mut()?.permanently_delete(&parsed)?;
+            Ok(())
+        });
+    if result.is_ok()
+        || matches!(
+            &result,
+            Err(LibraryLocationError::Library(
+                AssetLibraryError::CleanupFailed { .. }
+            ))
+        )
+    {
         emit_library_changed(&app);
     }
     result.map_err(|error| error.to_string())?;
@@ -208,19 +255,31 @@ pub fn permanently_delete(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn empty_trash(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let removed_ids = state
-        .library
-        .lock()
-        .unwrap()
-        .all_assets(true)
-        .into_iter()
-        .map(|asset| asset.id)
-        .collect::<Vec<_>>();
+    let removed_ids = {
+        let mut context = state.library.lock().unwrap();
+        context
+            .library()
+            .map_err(|error| error.to_string())?
+            .all_assets(true)
+            .into_iter()
+            .map(|asset| asset.id)
+            .collect::<Vec<_>>()
+    };
     let store = app.state::<crate::protocol::ProtocolStore>();
-    let result = crate::protocol::with_thumbnail_invalidations(&store, &removed_ids, || {
-        state.library.lock().unwrap().empty_trash()
-    });
-    if result.is_ok() || matches!(&result, Err(AssetLibraryError::CleanupFailed { .. })) {
+    let result: Result<(), LibraryLocationError> =
+        crate::protocol::with_thumbnail_invalidations(&store, &removed_ids, || {
+            let mut context = state.library.lock().unwrap();
+            context.library_mut()?.empty_trash()?;
+            Ok(())
+        });
+    if result.is_ok()
+        || matches!(
+            &result,
+            Err(LibraryLocationError::Library(
+                AssetLibraryError::CleanupFailed { .. }
+            ))
+        )
+    {
         emit_library_changed(&app);
     }
     result.map_err(|error| error.to_string())?;
@@ -240,8 +299,10 @@ pub fn batch_move_to_trash(app: AppHandle, ids: Vec<String>) -> Result<(), Strin
     let parsed = parse_ids(&ids)?;
     {
         let state = app.state::<AppState>();
-        let mut library = state.library.lock().unwrap();
-        library
+        let mut context = state.library.lock().unwrap();
+        context
+            .library_mut()
+            .map_err(|error| error.to_string())?
             .batch_move_to_trash(&parsed)
             .map_err(|e| e.to_string())?;
     }
@@ -254,8 +315,12 @@ pub fn batch_restore(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     let parsed = parse_ids(&ids)?;
     {
         let state = app.state::<AppState>();
-        let mut library = state.library.lock().unwrap();
-        library.batch_restore(&parsed).map_err(|e| e.to_string())?;
+        let mut context = state.library.lock().unwrap();
+        context
+            .library_mut()
+            .map_err(|error| error.to_string())?
+            .batch_restore(&parsed)
+            .map_err(|e| e.to_string())?;
     }
     emit_library_changed(&app);
     Ok(())
@@ -266,14 +331,20 @@ pub fn batch_permanently_delete(app: AppHandle, ids: Vec<String>) -> Result<(), 
     let parsed = parse_ids(&ids)?;
     let state = app.state::<AppState>();
     let store = app.state::<crate::protocol::ProtocolStore>();
-    let result = crate::protocol::with_thumbnail_invalidations(&store, &parsed, || {
-        state
-            .library
-            .lock()
-            .unwrap()
-            .batch_permanently_delete(&parsed)
-    });
-    if result.is_ok() || matches!(&result, Err(AssetLibraryError::CleanupFailed { .. })) {
+    let result: Result<(), LibraryLocationError> =
+        crate::protocol::with_thumbnail_invalidations(&store, &parsed, || {
+            let mut context = state.library.lock().unwrap();
+            context.library_mut()?.batch_permanently_delete(&parsed)?;
+            Ok(())
+        });
+    if result.is_ok()
+        || matches!(
+            &result,
+            Err(LibraryLocationError::Library(
+                AssetLibraryError::CleanupFailed { .. }
+            ))
+        )
+    {
         emit_library_changed(&app);
     }
     result.map_err(|error| error.to_string())
@@ -284,8 +355,10 @@ pub fn batch_set_favorite(app: AppHandle, ids: Vec<String>, favorite: bool) -> R
     let parsed = parse_ids(&ids)?;
     {
         let state = app.state::<AppState>();
-        let mut library = state.library.lock().unwrap();
-        library
+        let mut context = state.library.lock().unwrap();
+        context
+            .library_mut()
+            .map_err(|error| error.to_string())?
             .batch_set_favorite(favorite, &parsed)
             .map_err(|e| e.to_string())?;
     }
@@ -297,13 +370,18 @@ pub fn batch_set_favorite(app: AppHandle, ids: Vec<String>, favorite: bool) -> R
 pub fn copy_asset(app: AppHandle, window: WebviewWindow, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let state = app.state::<AppState>();
-    let library = state.library.lock().unwrap();
-    let asset = library
-        .asset_by_id(&parsed)
-        .cloned()
-        .ok_or_else(|| "The capture could not be found.".to_string())?;
-    let path = state.asset_file_url(&asset);
-    drop(library);
+    let (asset, path) = {
+        let mut context = state.library.lock().unwrap();
+        let library = context.library().map_err(|error| error.to_string())?;
+        let asset = library
+            .asset_by_id(&parsed)
+            .cloned()
+            .ok_or_else(|| "The capture could not be found.".to_string())?;
+        let path = library
+            .readable_asset_url(&asset)
+            .map_err(|error| error.to_string())?;
+        (asset, path)
+    };
     match asset.kind {
         CaptureKind::Image => {
             let data = std::fs::read(&path).map_err(|e| e.to_string())?;
@@ -327,13 +405,15 @@ pub fn copy_asset(app: AppHandle, window: WebviewWindow, id: String) -> Result<(
 pub fn open_asset(app: AppHandle, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let state = app.state::<AppState>();
-    let library = state.library.lock().unwrap();
-    let asset = library
+    let mut context = state.library.lock().unwrap();
+    let asset = context
+        .library()
+        .map_err(|error| error.to_string())?
         .asset_by_id(&parsed)
         .cloned()
         .ok_or_else(|| "The capture could not be found.".to_string())?;
     let (width, height) = (asset.pixel_width, asset.pixel_height);
-    drop(library);
+    drop(context);
 
     // In-app viewer window (image preview / video player), Esc to close.
     let label = format!("viewer-{}", asset.id.to_string().to_lowercase());
@@ -370,16 +450,17 @@ pub fn open_editor(app: AppHandle, id: String) -> Result<(), String> {
     let parsed =
         uuid::Uuid::parse_str(&id).map_err(|_| "The capture id is invalid.".to_string())?;
     let state = app.state::<AppState>();
-    let asset = state
-        .library
-        .lock()
-        .unwrap()
+    let mut context = state.library.lock().unwrap();
+    let asset = context
+        .library()
+        .map_err(|error| error.to_string())?
         .asset_by_id(&parsed)
         .cloned()
         .ok_or_else(|| "The capture could not be found.".to_string())?;
     if asset.kind != CaptureKind::Image {
         return Err("Only image captures can be edited.".into());
     }
+    drop(context);
 
     let label = format!("editor-{}", asset.id.to_string().to_lowercase());
     if let Some(window) = app.get_webview_window(&label) {
@@ -407,7 +488,8 @@ pub fn open_editor(app: AppHandle, id: String) -> Result<(), String> {
 pub fn get_asset(app: AppHandle, id: String) -> Result<AssetDto, String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let state = app.state::<AppState>();
-    let library = state.library.lock().unwrap();
+    let mut context = state.library.lock().unwrap();
+    let library = context.library().map_err(|error| error.to_string())?;
     let asset = library
         .asset_by_id(&parsed)
         .cloned()
@@ -419,15 +501,572 @@ pub fn get_asset(app: AppHandle, id: String) -> Result<AssetDto, String> {
 pub fn reveal_asset(app: AppHandle, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let state = app.state::<AppState>();
-    let library = state.library.lock().unwrap();
-    let asset = library
-        .asset_by_id(&parsed)
-        .cloned()
-        .ok_or_else(|| "The capture could not be found.".to_string())?;
-    let path = state.asset_file_url(&asset);
-    drop(library);
+    let path = {
+        let mut context = state.library.lock().unwrap();
+        let library = context.library().map_err(|error| error.to_string())?;
+        let asset = library
+            .asset_by_id(&parsed)
+            .cloned()
+            .ok_or_else(|| "The capture could not be found.".to_string())?;
+        library
+            .readable_asset_url(&asset)
+            .map_err(|error| error.to_string())?
+    };
     platform::reveal_path(&path);
     Ok(())
+}
+
+#[tauri::command]
+pub fn get_library_status(app: AppHandle) -> LibraryStatusDto {
+    let state = app.state::<AppState>();
+    let status = state.library.lock().unwrap().status();
+    status.into()
+}
+
+#[tauri::command]
+pub fn get_asset_availability(app: AppHandle, id: String) -> Result<AssetAvailabilityDto, String> {
+    let parsed = uuid::Uuid::parse_str(&id).map_err(|error| error.to_string())?;
+    let state = app.state::<AppState>();
+    let mut context = state.library.lock().unwrap();
+    let status = match context.library() {
+        Ok(library) => match library
+            .asset_availability(&parsed)
+            .map_err(|error| error.to_string())?
+        {
+            crate::core::library::AssetAvailability::Ready => "ready",
+            crate::core::library::AssetAvailability::Missing => "missing",
+            crate::core::library::AssetAvailability::Unreadable => "unreadable",
+        },
+        Err(LibraryLocationError::Unavailable | LibraryLocationError::Migrating) => {
+            "libraryUnavailable"
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    Ok(AssetAvailabilityDto { status })
+}
+
+#[tauri::command]
+pub fn reveal_library(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let root = {
+        let mut context = state.library.lock().unwrap();
+        context.library().map_err(|error| error.to_string())?;
+        context.root().to_path_buf()
+    };
+    platform::reveal_path(&root);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn retry_library(app: AppHandle) -> Result<LibraryStatusDto, String> {
+    let state = app.state::<AppState>();
+    let mut context = state.library.lock().unwrap();
+    context.retry().map_err(|error| error.to_string())?;
+    let status = context.status().into();
+    drop(context);
+    crate::protocol::clear_thumbnails(&app.state::<crate::protocol::ProtocolStore>());
+    emit_library_changed(&app);
+    Ok(status)
+}
+
+async fn pick_library_folder(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let dialog_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .blocking_pick_folder()
+            .and_then(|path| path.into_path().ok())
+    })
+    .await
+    .map_err(|error| format!("Could not open the folder picker: {error}"))
+}
+
+fn ensure_library_location_change_idle(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if state.capture.lock().unwrap().session.is_some() {
+        return Err("Finish the current capture before moving the library.".into());
+    }
+    let recording = state.recording.lock().unwrap();
+    if recording.is_starting
+        || recording.is_recording
+        || recording.is_paused
+        || recording.is_transitioning
+        || recording.is_finalizing
+    {
+        return Err("Finish the current recording before moving the library.".into());
+    }
+    Ok(())
+}
+
+async fn migrate_active_library(
+    app: &AppHandle,
+    target_root: PathBuf,
+    replace_same_library: bool,
+) -> Result<LibraryStatusDto, String> {
+    let state = app.state::<AppState>();
+    let transition = state.library_transition.lock().unwrap();
+    ensure_library_location_change_idle(app)?;
+    let source = {
+        let mut context = state.library.lock().unwrap();
+        if context.root_matches(&target_root) {
+            context.retry().map_err(|error| error.to_string())?;
+            return Ok(context.status().into());
+        }
+        context
+            .begin_migration()
+            .map_err(|error| error.to_string())?
+    };
+    drop(transition);
+    emit_library_changed(app);
+    let prepared = tauri::async_runtime::spawn_blocking(move || {
+        library_location::migrate_library(&source, &target_root, replace_same_library)
+    })
+    .await;
+    let state = app.state::<AppState>();
+    let mut context = state.library.lock().unwrap();
+    match prepared {
+        Ok(Ok(prepared)) => {
+            context
+                .activate_prepared(prepared)
+                .map_err(|error| error.to_string())?;
+            let status = context.status().into();
+            drop(context);
+            crate::protocol::clear_thumbnails(&app.state::<crate::protocol::ProtocolStore>());
+            emit_library_changed(app);
+            Ok(status)
+        }
+        Ok(Err(error)) => {
+            context.cancel_migration();
+            drop(context);
+            emit_library_changed(app);
+            Err(error.to_string())
+        }
+        Err(error) => {
+            context.cancel_migration();
+            drop(context);
+            emit_library_changed(app);
+            Err(format!("The library move did not finish: {error}"))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn choose_library_location(app: AppHandle) -> Result<LibraryStatusDto, String> {
+    let Some(container) = pick_library_folder(&app).await? else {
+        return Ok(get_library_status(app));
+    };
+    let target = library_location::target_root_for_container(&container)
+        .map_err(|error| error.to_string())?;
+    if target.exists() {
+        let availability = {
+            let state = app.state::<AppState>();
+            let availability = state.library.lock().unwrap().status().availability;
+            availability
+        };
+        match availability {
+            LibraryAvailability::Ready => migrate_active_library(&app, target, true).await,
+            LibraryAvailability::Unavailable => switch_to_existing_library(&app, target).await,
+            LibraryAvailability::Migrating => Err("library storage is being moved".into()),
+        }
+    } else {
+        migrate_active_library(&app, target, false).await
+    }
+}
+
+#[tauri::command]
+pub async fn restore_default_library(app: AppHandle) -> Result<LibraryStatusDto, String> {
+    let (target, availability) = {
+        let state = app.state::<AppState>();
+        let mut context = state.library.lock().unwrap();
+        if context.is_default() {
+            context.retry().map_err(|error| error.to_string())?;
+            return Ok(context.status().into());
+        }
+        (
+            context.default_root().to_path_buf(),
+            context.status().availability,
+        )
+    };
+    match availability {
+        LibraryAvailability::Ready => migrate_active_library(&app, target, true).await,
+        LibraryAvailability::Unavailable => {
+            Err("Reconnect the library before restoring the default location.".into())
+        }
+        LibraryAvailability::Migrating => Err("library storage is being moved".into()),
+    }
+}
+
+#[tauri::command]
+pub async fn locate_library(app: AppHandle) -> Result<LibraryStatusDto, String> {
+    let Some(selected) = pick_library_folder(&app).await? else {
+        return Ok(get_library_status(app));
+    };
+    switch_to_existing_library(&app, selected).await
+}
+
+async fn switch_to_existing_library(
+    app: &AppHandle,
+    selected: PathBuf,
+) -> Result<LibraryStatusDto, String> {
+    let state = app.state::<AppState>();
+    let transition = state.library_transition.lock().unwrap();
+    ensure_library_location_change_idle(app)?;
+    let (expected_id, expected_generation, expected_root) = {
+        let mut context = state.library.lock().unwrap();
+        if context.status().availability != LibraryAvailability::Unavailable {
+            return Err("Locate is available only while the library is unavailable.".into());
+        }
+        if context.root_matches(&selected) {
+            context.retry().map_err(|error| error.to_string())?;
+            return Ok(context.status().into());
+        }
+        context
+            .begin_locating()
+            .map_err(|error| error.to_string())?;
+        (
+            context.expected_library_id(),
+            context.expected_library_generation(),
+            context.root().to_path_buf(),
+        )
+    };
+    drop(transition);
+    emit_library_changed(app);
+    let prepared = tauri::async_runtime::spawn_blocking(move || {
+        library_location::prepare_existing_location(
+            &selected,
+            expected_id,
+            expected_generation,
+            &expected_root,
+        )
+    })
+    .await;
+    let state = app.state::<AppState>();
+    let mut context = state.library.lock().unwrap();
+    match prepared {
+        Ok(Ok(prepared)) => {
+            context
+                .activate_prepared(prepared)
+                .map_err(|error| error.to_string())?;
+            let status = context.status().into();
+            drop(context);
+            crate::protocol::clear_thumbnails(&app.state::<crate::protocol::ProtocolStore>());
+            emit_library_changed(app);
+            Ok(status)
+        }
+        Ok(Err(error)) => {
+            context.cancel_locating();
+            drop(context);
+            emit_library_changed(app);
+            Err(error.to_string())
+        }
+        Err(error) => {
+            context.cancel_locating();
+            drop(context);
+            emit_library_changed(app);
+            Err(format!(
+                "The selected library could not be checked: {error}"
+            ))
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn restore_missing_asset(app: AppHandle, id: String) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let parsed = uuid::Uuid::parse_str(&id).map_err(|error| error.to_string())?;
+    let (filter_label, extension, expected_asset) = {
+        let state = app.state::<AppState>();
+        let mut context = state.library.lock().unwrap();
+        let library = context.library().map_err(|error| error.to_string())?;
+        let asset = library
+            .asset_by_id(&parsed)
+            .cloned()
+            .ok_or_else(|| "The capture could not be found.".to_string())?;
+        if library
+            .asset_availability(&parsed)
+            .map_err(|error| error.to_string())?
+            != crate::core::library::AssetAvailability::Missing
+        {
+            return Err("The capture file is not missing.".into());
+        }
+        let (label, extension) = match asset.kind {
+            CaptureKind::Image => ("PNG image", "png"),
+            CaptureKind::Video => ("MP4 video", "mp4"),
+            CaptureKind::Gif => ("GIF image", "gif"),
+        };
+        (label, extension, asset)
+    };
+    let dialog_app = app.clone();
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
+            .file()
+            .add_filter(filter_label, &[extension])
+            .blocking_pick_file()
+            .and_then(|path| path.into_path().ok())
+    })
+    .await
+    .map_err(|error| format!("Could not open the file picker: {error}"))?;
+    let Some(selected) = selected else {
+        return Ok(false);
+    };
+    let validation_path = selected.clone();
+    let validation_asset = expected_asset.clone();
+    let proof = tauri::async_runtime::spawn_blocking(move || {
+        let proof =
+            crate::core::library::replacement_file_proof(&validation_path, validation_asset.kind)
+                .map_err(|error| error.to_string())?;
+        validate_replacement_metadata(&validation_asset, &validation_path)?;
+        Ok::<_, String>(proof)
+    })
+    .await
+    .map_err(|error| format!("Could not validate the selected file: {error}"))??;
+    let state = app.state::<AppState>();
+    let mut context = state.library.lock().unwrap();
+    context
+        .library_mut()
+        .map_err(|error| error.to_string())?
+        .restore_missing_asset(&parsed, &selected, &proof)
+        .map_err(|error| error.to_string())?;
+    drop(context);
+    crate::protocol::clear_thumbnail(&app.state::<crate::protocol::ProtocolStore>(), parsed);
+    emit_asset_content_changed(&app, &parsed);
+    emit_library_changed(&app);
+    Ok(true)
+}
+
+fn validate_replacement_metadata(asset: &CaptureAsset, path: &Path) -> Result<(), String> {
+    let (pixel_width, pixel_height, duration) = match asset.kind {
+        CaptureKind::Image => {
+            let reader = image::ImageReader::open(path)
+                .map_err(|_| "The selected PNG could not be read.".to_string())?
+                .with_guessed_format()
+                .map_err(|_| "The selected PNG could not be read.".to_string())?;
+            if reader.format() != Some(image::ImageFormat::Png) {
+                return Err("The selected file is not a PNG image.".into());
+            }
+            let decoded = reader
+                .decode()
+                .map_err(|_| "The selected PNG is invalid.".to_string())?;
+            (
+                i64::from(decoded.width()),
+                i64::from(decoded.height()),
+                None,
+            )
+        }
+        CaptureKind::Video | CaptureKind::Gif => {
+            let ffmpeg = crate::record::existing_ffmpeg()
+                .ok_or_else(|| "A local FFmpeg is required to validate this file.".to_string())?;
+            crate::record::probe_video(&ffmpeg, path)
+                .ok_or_else(|| "The selected media file is invalid.".to_string())?
+        }
+    };
+    if (asset.pixel_width > 0 && pixel_width != asset.pixel_width)
+        || (asset.pixel_height > 0 && pixel_height != asset.pixel_height)
+        || asset
+            .duration
+            .is_some_and(|expected| duration.is_none_or(|actual| (actual - expected).abs() > 0.25))
+    {
+        return Err("The selected file does not match this library item.".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn remove_missing_asset(app: AppHandle, id: String) -> Result<(), String> {
+    let parsed = uuid::Uuid::parse_str(&id).map_err(|error| error.to_string())?;
+    let state = app.state::<AppState>();
+    let store = app.state::<crate::protocol::ProtocolStore>();
+    crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
+        let mut context = state.library.lock().unwrap();
+        context
+            .library_mut()
+            .map_err(|error| error.to_string())?
+            .remove_missing_asset(&parsed)
+            .map_err(|error| error.to_string())
+    })?;
+    emit_library_changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn list_pending_recordings(app: AppHandle) -> Result<Vec<PendingRecordingDto>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let Ok(_transition) = state.recording_recovery_transition.try_lock() else {
+            return Ok(Vec::new());
+        };
+        let pending = state.recording_recovery.lock().unwrap().list();
+        Ok(pending
+            .into_iter()
+            .map(|pending| PendingRecordingDto {
+                id: pending.id.to_string(),
+                created_at: pending.created_at,
+            })
+            .collect())
+    })
+    .await
+    .map_err(|error| format!("Could not check pending recordings: {error}"))?
+}
+
+#[tauri::command]
+pub async fn retry_pending_recordings(app: AppHandle) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || retry_pending_recordings_inner(&app))
+        .await
+        .map_err(|error| format!("Could not retry pending recordings: {error}"))?
+}
+
+fn retry_pending_recordings_inner(app: &AppHandle) -> Result<usize, String> {
+    let state = app.state::<AppState>();
+    let _transition = state
+        .recording_recovery_transition
+        .try_lock()
+        .map_err(|_| "A recording is still being saved.".to_string())?;
+    let pending_items = state.recording_recovery.lock().unwrap().list();
+    if pending_items.is_empty() {
+        return Ok(0);
+    }
+
+    let mut imported_count = 0;
+    let mut completed_count = 0;
+    let mut first_error = None;
+    let mut ffmpeg = None;
+    for mut pending in pending_items {
+        let result = (|| -> Result<bool, String> {
+            let video_path = state
+                .recording_recovery
+                .lock()
+                .unwrap()
+                .validate_video(&pending)
+                .map_err(|error| error.to_string())?;
+            let asset_state = {
+                let store = state.recording_recovery.lock().unwrap();
+                recovery_asset_state(&state, &store, &pending)?
+            };
+            match asset_state {
+                RecoveryAssetState::Matching => {
+                    cleanup_verified_recovery(&state, &mut pending)?;
+                    return Ok(false);
+                }
+                RecoveryAssetState::Conflict => {
+                    return Err(
+                        "The active library contains a different item with this recording id."
+                            .into(),
+                    )
+                }
+                RecoveryAssetState::Absent | RecoveryAssetState::RestorableVideo => {}
+            }
+
+            state
+                .recording_recovery
+                .lock()
+                .unwrap()
+                .prepare_import(&mut pending, CaptureKind::Video, &video_path)
+                .map_err(|error| error.to_string())?;
+            let ffmpeg_path = match &ffmpeg {
+                Some(path) => path,
+                None => ffmpeg.insert(state.ffmpeg().map_err(|error| error.to_string())?),
+            };
+            let (pixel_width, pixel_height, duration) =
+                crate::record::probe_video(ffmpeg_path, &video_path)
+                    .ok_or_else(|| "The pending recording is not a valid MP4.".to_string())?;
+            import_recovery_output(
+                &state,
+                &video_path,
+                &pending,
+                CaptureKind::Video,
+                "mp4",
+                pixel_width,
+                pixel_height,
+                duration.or(pending.duration),
+            )?;
+            cleanup_verified_recovery(&state, &mut pending)?;
+            Ok(true)
+        })();
+
+        match result {
+            Ok(imported) => {
+                completed_count += 1;
+                imported_count += usize::from(imported);
+            }
+            Err(error) => {
+                log::error!("recording recovery {} failed: {error}", pending.id);
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+            }
+        }
+    }
+
+    if imported_count > 0 {
+        emit_library_changed(app);
+    }
+    if completed_count == 0 {
+        return Err(first_error.unwrap_or_else(|| "No recording could be recovered.".into()));
+    }
+    Ok(imported_count)
+}
+
+fn cleanup_verified_recovery(
+    state: &AppState,
+    pending: &mut PendingRecording,
+) -> Result<(), String> {
+    let store = state.recording_recovery.lock().unwrap();
+    let mut context = state.library.lock().unwrap();
+    let library = context.library().map_err(|error| error.to_string())?;
+    store
+        .finish_verified_import(library, pending)
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryAssetState {
+    Absent,
+    RestorableVideo,
+    Matching,
+    Conflict,
+}
+
+fn recovery_asset_state(
+    state: &AppState,
+    store: &crate::core::recording_recovery::RecordingRecoveryStore,
+    pending: &PendingRecording,
+) -> Result<RecoveryAssetState, String> {
+    let mut context = state.library.lock().unwrap();
+    let library = context.library().map_err(|error| error.to_string())?;
+    let Some(asset) = library.asset_by_id(&pending.id) else {
+        return Ok(RecoveryAssetState::Absent);
+    };
+    match library
+        .asset_availability(&asset.id)
+        .map_err(|error| error.to_string())?
+    {
+        crate::core::library::AssetAvailability::Ready => {
+            let path = library
+                .readable_asset_url(asset)
+                .map_err(|error| error.to_string())?;
+            if store
+                .imported_asset_matches(pending, asset, &path)
+                .map_err(|error| error.to_string())?
+            {
+                Ok(RecoveryAssetState::Matching)
+            } else {
+                Ok(RecoveryAssetState::Conflict)
+            }
+        }
+        crate::core::library::AssetAvailability::Missing
+            if asset.kind == CaptureKind::Video
+                && store
+                    .recovery_matches_import_proof(pending)
+                    .map_err(|error| error.to_string())? =>
+        {
+            Ok(RecoveryAssetState::RestorableVideo)
+        }
+        crate::core::library::AssetAvailability::Missing
+        | crate::core::library::AssetAvailability::Unreadable => Ok(RecoveryAssetState::Conflict),
+    }
 }
 
 #[tauri::command]
@@ -435,12 +1074,15 @@ pub fn convert_to_gif(app: AppHandle, window: WebviewWindow, id: String) -> Resu
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let (asset, source_path) = {
         let state = app.state::<AppState>();
-        let library = state.library.lock().unwrap();
+        let mut context = state.library.lock().unwrap();
+        let library = context.library().map_err(|error| error.to_string())?;
         let asset = library
             .asset_by_id(&parsed)
             .cloned()
             .ok_or_else(|| "The capture could not be found.".to_string())?;
-        let source_path = state.asset_file_url(&asset);
+        let source_path = library
+            .readable_asset_url(&asset)
+            .map_err(|error| error.to_string())?;
         (asset, source_path)
     };
     if asset.kind != CaptureKind::Video
@@ -543,20 +1185,25 @@ fn convert_asset_to_gif(
     .map_err(|e| e.to_string())?;
     let (gif_width, gif_height, gif_duration) = crate::record::probe_video(&ffmpeg, &gif_path)
         .unwrap_or((asset.pixel_width, asset.pixel_height, asset.duration));
-    let import_result = state
-        .library
-        .lock()
-        .unwrap()
-        .import_file(
-            &gif_path,
-            CaptureKind::Gif,
-            "gif",
-            gif_width,
-            gif_height,
-            gif_duration.or(asset.duration),
-            asset.source_application.clone(),
-        )
-        .map_err(|e| e.to_string());
+    let import_result = {
+        let mut context = state.library.lock().unwrap();
+        context
+            .library_mut()
+            .map_err(|error| error.to_string())
+            .and_then(|library| {
+                library
+                    .import_file(
+                        &gif_path,
+                        CaptureKind::Gif,
+                        "gif",
+                        gif_width,
+                        gif_height,
+                        gif_duration.or(asset.duration),
+                        asset.source_application.clone(),
+                    )
+                    .map_err(|e| e.to_string())
+            })
+    };
     let _ = std::fs::remove_file(&gif_path);
     let gif_asset = import_result?;
     emit_library_changed(app);
@@ -570,9 +1217,10 @@ fn convert_asset_to_gif(
 #[tauri::command]
 pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
     log::info!("start_capture: beginning capture flow");
+    let state = app.state::<AppState>();
+    let _transition = state.library_transition.lock().unwrap();
 
     {
-        let state = app.state::<AppState>();
         let capture = state.capture.lock().unwrap();
         // The overlay frontend calls start_capture again when it loads; return
         // the existing session context instead of failing.
@@ -597,6 +1245,10 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
         {
             return Err("A recording session is active.".into());
         }
+    }
+    {
+        let mut context = state.library.lock().unwrap();
+        context.library().map_err(|error| error.to_string())?;
     }
 
     // Pre-flight only after ruling out an existing capture session. The
@@ -804,6 +1456,10 @@ fn raise_overlay_window(_window: &tauri::WebviewWindow) {}
 #[tauri::command]
 pub fn cancel_capture(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
+    // Keep the active capture visible to library migration until its bytes are
+    // durably committed. This closes the handoff gap between taking the
+    // session and writing the library entry.
+    let _transition = state.library_transition.lock().unwrap();
     let session = {
         let mut capture = state.capture.lock().unwrap();
         match capture.session.as_ref() {
@@ -979,6 +1635,7 @@ pub fn confirm_capture(
     } else {
         None
     };
+    let _transition = state.library_transition.lock().unwrap();
     let session = {
         let mut capture = state.capture.lock().unwrap();
         if capture.session.as_ref().is_none_or(|session| {
@@ -1047,7 +1704,24 @@ fn confirm_capture_inner(
     };
 
     let (pixel_width, pixel_height) = pixel_size;
-    let mut library = state.library.lock().unwrap();
+    let mut context = state.library.lock().unwrap();
+    let library = match context.library_mut() {
+        Ok(library) => library,
+        Err(error) => {
+            if copied {
+                emit_notice_on_monitor(
+                    app,
+                    "Copied, but could not save".into(),
+                    "exclamationmark.triangle.fill".into(),
+                    completion_monitor,
+                );
+            }
+            return Err(CaptureConfirmationFailure {
+                message: error.to_string(),
+                copied,
+            });
+        }
+    };
     let import_result = match editable_project {
         Some((source, document)) => serde_json::to_value(document)
             .map_err(|_| "The annotation document could not be encoded.".to_string())
@@ -1080,7 +1754,7 @@ fn confirm_capture_inner(
             )
             .map_err(|error| error.to_string()),
     };
-    drop(library);
+    drop(context);
     let asset = match import_result {
         Ok(asset) => asset,
         Err(error) => {
@@ -1268,7 +1942,8 @@ pub async fn save_file_dialog(
     let editor_id = editor_window_id(&window)?;
     {
         let state = app.state::<AppState>();
-        let library = state.library.lock().unwrap();
+        let mut context = state.library.lock().unwrap();
+        let library = context.library().map_err(|error| error.to_string())?;
         let asset = library
             .asset_by_id(&editor_id)
             .ok_or_else(|| "The edited asset could not be found.".to_string())?;
@@ -1424,7 +2099,8 @@ pub fn get_asset_annotation_project(
     require_editor_window(&window, &parsed)?;
     let state = app.state::<AppState>();
     let (snapshot, expected_size) = {
-        let library = state.library.lock().unwrap();
+        let mut context = state.library.lock().unwrap();
+        let library = context.library().map_err(|error| error.to_string())?;
         let asset = library
             .asset_by_id(&parsed)
             .ok_or_else(|| "The edited asset could not be found.".to_string())?;
@@ -1472,7 +2148,8 @@ pub fn prepare_asset_annotation(
         return Err("The editor source revision is invalid.".into());
     }
     let expected_size = {
-        let library = state.library.lock().unwrap();
+        let mut context = state.library.lock().unwrap();
+        let library = context.library().map_err(|error| error.to_string())?;
         let asset = library
             .asset_by_id(&parsed)
             .ok_or_else(|| "The edited asset could not be found.".to_string())?;
@@ -1553,7 +2230,8 @@ pub fn update_asset(
 
     let state = app.state::<AppState>();
     let expected_size = {
-        let library = state.library.lock().unwrap();
+        let mut context = state.library.lock().unwrap();
+        let library = context.library().map_err(|error| error.to_string())?;
         let asset = library
             .asset_by_id(&parsed)
             .ok_or_else(|| "The edited asset could not be found.".to_string())?;
@@ -1577,17 +2255,18 @@ pub fn update_asset(
     let store = app.state::<crate::protocol::ProtocolStore>();
     let document_value = serde_json::to_value(&staged.document)
         .map_err(|_| "The annotation document could not be encoded.".to_string())?;
-    let mutation = commit_editor_update(
+    let mutation: Result<(String, bool), LibraryLocationError> = commit_editor_update(
         || {
             crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
-                let library = state.library.lock().unwrap();
+                let mut context = state.library.lock().unwrap();
+                let library = context.library()?;
                 library.save_editor_snapshot(
                     &parsed,
                     &staged.revision_sha256,
                     png,
                     staged.document.has_marks().then_some(&document_value),
                 )?;
-                Ok::<String, AssetLibraryError>(
+                Ok::<String, LibraryLocationError>(
                     library.load_editor_snapshot(&parsed)?.revision_sha256,
                 )
             })
@@ -1625,7 +2304,7 @@ pub fn update_asset(
     );
     let (revision_sha256, action_succeeded) = match mutation {
         Ok(result) => result,
-        Err(AssetLibraryError::AnnotationRevisionMismatch) => {
+        Err(LibraryLocationError::Library(AssetLibraryError::AnnotationRevisionMismatch)) => {
             return Err(EDITOR_REVISION_MISMATCH_ERROR.into())
         }
         Err(error) => return Err(error.to_string()),
@@ -1645,8 +2324,10 @@ pub fn rename_asset(app: AppHandle, id: String, title: String) -> Result<(), Str
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let trimmed = title.trim().to_string();
     let state = app.state::<AppState>();
-    let mut library = state.library.lock().unwrap();
-    library
+    let mut context = state.library.lock().unwrap();
+    context
+        .library_mut()
+        .map_err(|error| error.to_string())?
         .set_title(
             if trimmed.is_empty() {
                 None
@@ -1656,7 +2337,7 @@ pub fn rename_asset(app: AppHandle, id: String, title: String) -> Result<(), Str
             &parsed,
         )
         .map_err(|e| e.to_string())?;
-    drop(library);
+    drop(context);
     emit_library_changed(&app);
     Ok(())
 }
@@ -1666,9 +2347,13 @@ pub fn rename_asset(app: AppHandle, id: String, title: String) -> Result<(), Str
 pub fn set_tags(app: AppHandle, id: String, tags: Vec<String>) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let state = app.state::<AppState>();
-    let mut library = state.library.lock().unwrap();
-    library.set_tags(tags, &parsed).map_err(|e| e.to_string())?;
-    drop(library);
+    let mut context = state.library.lock().unwrap();
+    context
+        .library_mut()
+        .map_err(|error| error.to_string())?
+        .set_tags(tags, &parsed)
+        .map_err(|e| e.to_string())?;
+    drop(context);
     emit_library_changed(&app);
     Ok(())
 }
@@ -1708,6 +2393,11 @@ pub async fn start_recording_flow(
             return Err("No active capture session.".into());
         }
     }
+    {
+        let state = app.state::<AppState>();
+        let mut context = state.library.lock().unwrap();
+        context.library().map_err(|error| error.to_string())?;
+    }
 
     let saved_options = request.options.normalized();
     let mut options = saved_options;
@@ -1739,15 +2429,13 @@ pub async fn start_recording_flow(
         }
     }
 
-    let (
-        display_id,
-        backing_scale,
-        screen_frame,
-        return_pid,
-        was_kiri_frontmost,
-        completion_monitor,
-    ) = {
+    let (screen_frame, return_pid, was_kiri_frontmost, overlay_labels) = {
         let state = app.state::<AppState>();
+        let _transition = state.library_transition.lock().unwrap();
+        {
+            let mut context = state.library.lock().unwrap();
+            context.library().map_err(|error| error.to_string())?;
+        }
         let mut capture = state.capture.lock().unwrap();
         let Some(session) = capture.session.take() else {
             return Err("No active capture session.".into());
@@ -1757,21 +2445,43 @@ pub async fn start_recording_flow(
             app.get_webview_window(label)
                 .and_then(|window| window.current_monitor().ok().flatten())
         });
+        *state.saved_recording_options.lock().unwrap() = saved_options;
+        let mut recording = state.recording.lock().unwrap();
+        *recording = RecordingFlow {
+            session_id: uuid::Uuid::new_v4(),
+            return_pid: session.return_pid,
+            was_kiri_frontmost: session.was_kiri_frontmost,
+            is_starting: true,
+            completion_monitor,
+            configuration: Some(RecordingConfiguration {
+                display_id: session.display.display_id,
+                region: Rect::new(
+                    request.region.x,
+                    request.region.y,
+                    request.region.width,
+                    request.region.height,
+                ),
+                screen_frame: session.display.screen_frame,
+                backing_scale: session.display.backing_scale,
+                options,
+            }),
+            ..Default::default()
+        };
+        emit_recording_state(&app, &recording);
         invalidate_capture_resources(&app, &session);
-        for label in &session.overlay_labels {
-            if let Some(window) = app.get_webview_window(label) {
-                let _ = window.close();
-            }
-        }
         (
-            session.display.display_id,
-            session.display.backing_scale,
             session.display.screen_frame,
             session.return_pid,
             session.was_kiri_frontmost,
-            completion_monitor,
+            session.overlay_labels,
         )
     };
+
+    for label in &overlay_labels {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.close();
+        }
+    }
 
     // Restore focus to the source application (mirrors AppModel.onRecord).
     if !was_kiri_frontmost {
@@ -1781,33 +2491,6 @@ pub async fn start_recording_flow(
     }
 
     crate::state::save_recording_options(&app, &saved_options);
-
-    {
-        let state = app.state::<AppState>();
-        *state.saved_recording_options.lock().unwrap() = saved_options;
-        let mut recording = state.recording.lock().unwrap();
-        *recording = RecordingFlow {
-            session_id: uuid::Uuid::new_v4(),
-            return_pid,
-            was_kiri_frontmost,
-            is_starting: true,
-            completion_monitor,
-            configuration: Some(RecordingConfiguration {
-                display_id,
-                region: Rect::new(
-                    request.region.x,
-                    request.region.y,
-                    request.region.width,
-                    request.region.height,
-                ),
-                screen_frame,
-                backing_scale,
-                options,
-            }),
-            ..Default::default()
-        };
-        emit_recording_state(&app, &recording);
-    }
 
     if !options.uses_countdown {
         // No countdown requested: start recording immediately.
@@ -1936,7 +2619,9 @@ fn recover_completed_recording(
     if completed_segments.is_empty() {
         return Ok(false);
     }
-    finalize_recording(app, completed_segments, RecordingOutputFormat::Mp4).map(|_| true)
+    finalize_recording(app, completed_segments, RecordingOutputFormat::Mp4)
+        .map(|_| true)
+        .map_err(|error| error.to_string())
 }
 
 /// Resets only the startup task that still owns this session. A late download
@@ -2730,6 +3415,15 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
                     ),
                     completion_monitor,
                 ),
+                Err(error) if error.is_queued() => {
+                    log::warn!("recording: final import queued for retry: {error}");
+                    emit_notice_on_monitor(
+                        &handle,
+                        "A recording is waiting to save".into(),
+                        "arrow.clockwise".into(),
+                        completion_monitor,
+                    );
+                }
                 Err(error) => {
                     log::error!("recording: final import failed: {error}");
                     emit_notice_on_monitor(
@@ -2751,6 +3445,25 @@ struct RecordingFinalizeOutcome {
     gif_fallback: bool,
 }
 
+enum RecordingFinalizeError {
+    Queued(String),
+    Failed(String),
+}
+
+impl RecordingFinalizeError {
+    fn is_queued(&self) -> bool {
+        matches!(self, Self::Queued(_))
+    }
+}
+
+impl std::fmt::Display for RecordingFinalizeError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Queued(message) | Self::Failed(message) => formatter.write_str(message),
+        }
+    }
+}
+
 fn import_recording_file(
     state: &AppState,
     path: &std::path::Path,
@@ -2760,12 +3473,41 @@ fn import_recording_file(
     pixel_height: i64,
     duration: Option<f64>,
 ) -> Result<CaptureAsset, String> {
-    state
-        .library
-        .lock()
-        .unwrap()
+    let mut context = state.library.lock().unwrap();
+    context
+        .library_mut()
+        .map_err(|error| error.to_string())?
         .import_file(
             path,
+            kind,
+            extension,
+            pixel_width,
+            pixel_height,
+            duration,
+            None,
+        )
+        .map_err(|error| error.to_string())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn import_recovery_output(
+    state: &AppState,
+    path: &std::path::Path,
+    pending: &PendingRecording,
+    kind: CaptureKind,
+    extension: &str,
+    pixel_width: i64,
+    pixel_height: i64,
+    duration: Option<f64>,
+) -> Result<CaptureAsset, String> {
+    let mut context = state.library.lock().unwrap();
+    context
+        .library_mut()
+        .map_err(|error| error.to_string())?
+        .import_file_with_stable_id(
+            path,
+            pending.id,
+            pending.created_at,
             kind,
             extension,
             pixel_width,
@@ -2780,27 +3522,51 @@ fn finalize_recording(
     app: &AppHandle,
     segments: Vec<PathBuf>,
     output_format: RecordingOutputFormat,
-) -> Result<RecordingFinalizeOutcome, String> {
+) -> Result<RecordingFinalizeOutcome, RecordingFinalizeError> {
     let state = app.state::<AppState>();
+    let _recovery_transition = state.recording_recovery_transition.lock().unwrap();
     let ffmpeg = state
         .ffmpeg_path
         .get()
         .cloned()
-        .ok_or_else(|| "ffmpeg unavailable".to_string())?;
+        .ok_or_else(|| RecordingFinalizeError::Failed("ffmpeg unavailable".into()))?;
     let merged_path = std::env::temp_dir().join(format!(
         "kiri-recording-merged-{}.mp4",
         uuid::Uuid::new_v4().to_string().to_lowercase()
     ));
-    let result = (|| {
+    let mut merge_completed = false;
+    let mut pending = None;
+    let result: Result<RecordingFinalizeOutcome, String> = (|| {
         crate::record::merge_segments(&segments, &merged_path, &ffmpeg)
             .map_err(|e| e.to_string())?;
+        merge_completed = true;
         let (pixel_width, pixel_height, duration) =
             crate::record::probe_video(&ffmpeg, &merged_path).unwrap_or((0, 0, None));
+        match state.recording_recovery.lock().unwrap().persist(
+            &merged_path,
+            pixel_width,
+            pixel_height,
+            duration,
+        ) {
+            Ok(recording) => pending = Some(recording),
+            Err(error) => {
+                log::error!("recording: could not stage finalized MP4 for recovery: {error}")
+            }
+        }
 
         if output_format == RecordingOutputFormat::Mp4 {
-            let asset = import_recording_file(
+            if let Some(pending) = pending.as_mut() {
+                state
+                    .recording_recovery
+                    .lock()
+                    .unwrap()
+                    .prepare_import(pending, CaptureKind::Video, &merged_path)
+                    .map_err(|error| error.to_string())?;
+            }
+            let asset = import_finalized_output(
                 &state,
                 &merged_path,
+                pending.as_ref(),
                 CaptureKind::Video,
                 "mp4",
                 pixel_width,
@@ -2825,9 +3591,18 @@ fn finalize_recording(
                 &ffmpeg, &gif_path,
             )
             .unwrap_or((pixel_width, pixel_height, duration));
-            let import_result = import_recording_file(
+            if let Some(pending) = pending.as_mut() {
+                state
+                    .recording_recovery
+                    .lock()
+                    .unwrap()
+                    .prepare_import(pending, CaptureKind::Gif, &gif_path)
+                    .map_err(|error| error.to_string())?;
+            }
+            let import_result = import_finalized_output(
                 &state,
                 &gif_path,
+                pending.as_ref(),
                 CaptureKind::Gif,
                 "gif",
                 gif_width,
@@ -2847,9 +3622,18 @@ fn finalize_recording(
                 log::warn!(
                     "recording: GIF finalization failed, preserving the MP4 fallback: {gif_error}"
                 );
-                let asset = import_recording_file(
+                if let Some(pending) = pending.as_mut() {
+                    state
+                        .recording_recovery
+                        .lock()
+                        .unwrap()
+                        .prepare_import(pending, CaptureKind::Video, &merged_path)
+                        .map_err(|error| error.to_string())?;
+                }
+                let asset = import_finalized_output(
                     &state,
                     &merged_path,
+                    pending.as_ref(),
                     CaptureKind::Video,
                     "mp4",
                     pixel_width,
@@ -2868,20 +3652,88 @@ fn finalize_recording(
             }
         }
     })();
-    cleanup_finalization_files(&segments, &merged_path, result.is_ok());
+    let recovery_kept = pending.as_ref().is_some_and(|pending| {
+        state
+            .recording_recovery
+            .lock()
+            .unwrap()
+            .validate_video(pending)
+            .is_ok()
+    });
+    let durably_kept = result.is_ok() || recovery_kept;
     if result.is_ok() {
-        emit_library_changed(app);
+        if let Some(mut pending) = pending.take() {
+            if let Err(error) = cleanup_verified_recovery(&state, &mut pending) {
+                log::warn!(
+                    "recording: imported recovery {} could not be cleaned: {error}",
+                    pending.id
+                );
+            }
+        }
     }
-    result
+    cleanup_finalization_files(&segments, &merged_path, merge_completed, durably_kept);
+
+    match result {
+        Ok(outcome) => {
+            emit_library_changed(app);
+            Ok(outcome)
+        }
+        Err(error) if recovery_kept => {
+            emit_library_changed(app);
+            Err(RecordingFinalizeError::Queued(error))
+        }
+        Err(error) => Err(RecordingFinalizeError::Failed(error)),
+    }
 }
 
-fn cleanup_finalization_files(segments: &[PathBuf], merged_path: &std::path::Path, imported: bool) {
-    if imported {
+#[allow(clippy::too_many_arguments)]
+fn import_finalized_output(
+    state: &AppState,
+    path: &std::path::Path,
+    pending: Option<&PendingRecording>,
+    kind: CaptureKind,
+    extension: &str,
+    pixel_width: i64,
+    pixel_height: i64,
+    duration: Option<f64>,
+) -> Result<CaptureAsset, String> {
+    match pending {
+        Some(pending) => import_recovery_output(
+            state,
+            path,
+            pending,
+            kind,
+            extension,
+            pixel_width,
+            pixel_height,
+            duration,
+        ),
+        None => import_recording_file(
+            state,
+            path,
+            kind,
+            extension,
+            pixel_width,
+            pixel_height,
+            duration,
+        ),
+    }
+}
+
+fn cleanup_finalization_files(
+    segments: &[PathBuf],
+    merged_path: &std::path::Path,
+    merge_completed: bool,
+    durably_kept: bool,
+) {
+    if durably_kept {
         for segment in segments {
             let _ = std::fs::remove_file(segment);
         }
+        let _ = std::fs::remove_file(merged_path);
+    } else if !merge_completed {
+        let _ = std::fs::remove_file(merged_path);
     }
-    let _ = std::fs::remove_file(merged_path);
 }
 
 // ---------------------------------------------------------------------------
@@ -3029,10 +3881,12 @@ mod command_security_tests {
         capture_failure_requires_global_error, cleanup_finalization_files, commit_editor_update,
         crop_annotation_source, editor_save_destination, finish_editor_clipboard_copy,
         recording_channels, sanitize_frontend_log, validate_capture_png, validate_editor_action,
-        validate_editor_annotation_document, validate_staged_capture_annotation, write_editor_save,
-        EDITOR_ACTION_REQUIRED_ERROR, EDITOR_CLIPBOARD_ERROR, EDITOR_SAVE_ERROR,
+        validate_editor_annotation_document, validate_replacement_metadata,
+        validate_staged_capture_annotation, write_editor_save, EDITOR_ACTION_REQUIRED_ERROR,
+        EDITOR_CLIPBOARD_ERROR, EDITOR_SAVE_ERROR,
     };
     use crate::core::annotation::AnnotationDocument;
+    use crate::core::asset::{CaptureAsset, CaptureKind};
     use crate::core::geometry::Rect;
     use crate::core::policy::RecordingOptions;
     use crate::state::ApprovedEditorSave;
@@ -3048,6 +3902,37 @@ mod command_security_tests {
         assert!(!sanitized.chars().any(char::is_control));
         assert!(sanitized.len() <= 4 * 1024);
         assert!(sanitized.starts_with("first second "));
+    }
+
+    #[test]
+    fn replacement_png_must_decode_and_match_the_indexed_dimensions() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("replacement.png");
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::new_rgba8(10, 20)
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(&path, encoded.into_inner()).unwrap();
+        let mut asset = CaptureAsset {
+            id: uuid::Uuid::new_v4(),
+            kind: CaptureKind::Image,
+            created_at: 1.0,
+            filename: "missing.png".into(),
+            title: None,
+            tags: Vec::new(),
+            pixel_width: 10,
+            pixel_height: 20,
+            duration: None,
+            source_application: None,
+            is_favorite: false,
+            trashed_at: None,
+        };
+
+        assert!(validate_replacement_metadata(&asset, &path).is_ok());
+        asset.pixel_width = 11;
+        assert!(validate_replacement_metadata(&asset, &path).is_err());
+        std::fs::write(&path, b"\x89PNG\r\n\x1a\ntruncated").unwrap();
+        assert!(validate_replacement_metadata(&asset, &path).is_err());
     }
 
     #[test]
@@ -3070,19 +3955,34 @@ mod command_security_tests {
         std::fs::write(&segment, b"completed segment").unwrap();
         std::fs::write(&merged, b"failed merged output").unwrap();
 
-        cleanup_finalization_files(std::slice::from_ref(&segment), &merged, false);
+        cleanup_finalization_files(std::slice::from_ref(&segment), &merged, true, false);
 
         assert!(segment.exists(), "valid completed segment must be retained");
-        assert!(
-            !merged.exists(),
-            "failed merge output is not recoverable data"
-        );
+        assert!(merged.exists(), "a completed merge remains recoverable");
 
-        cleanup_finalization_files(std::slice::from_ref(&segment), &merged, true);
+        cleanup_finalization_files(std::slice::from_ref(&segment), &merged, true, true);
         assert!(
             !segment.exists(),
-            "durably imported segments may be removed"
+            "durably retained segments may be removed"
         );
+        assert!(
+            !merged.exists(),
+            "the durable copy replaces the merged temp"
+        );
+    }
+
+    #[test]
+    fn failed_merge_removes_only_its_partial_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let segment = directory.path().join("completed.mp4");
+        let merged = directory.path().join("partial-merge.mp4");
+        std::fs::write(&segment, b"completed segment").unwrap();
+        std::fs::write(&merged, b"partial merge").unwrap();
+
+        cleanup_finalization_files(std::slice::from_ref(&segment), &merged, false, false);
+
+        assert!(segment.exists());
+        assert!(!merged.exists());
     }
 
     #[test]

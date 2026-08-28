@@ -39,6 +39,25 @@ export interface AssetDto {
   gifEligible: boolean;
 }
 
+export type LibraryAvailability = "ready" | "unavailable" | "migrating";
+
+export interface LibraryStatusDto {
+  availability: LibraryAvailability;
+  locationLabel: string;
+  isDefault: boolean;
+}
+
+export type AssetAvailability = "ready" | "missing" | "unreadable" | "libraryUnavailable";
+
+export interface AssetAvailabilityDto {
+  status: AssetAvailability;
+}
+
+export interface PendingRecordingDto {
+  id: string;
+  createdAt: number;
+}
+
 export type RecordingOutputFormat = "mp4" | "gif";
 
 export interface RecordingOptions {
@@ -172,6 +191,21 @@ export const api = {
   listAssets: (query: string, showingTrash: boolean) =>
     invoke<AssetDto[]>("list_assets", { query, showingTrash }),
   getAsset: (id: string) => invoke<AssetDto>("get_asset", { id }),
+  getLibraryStatus: () => invoke<LibraryStatusDto>("get_library_status"),
+  chooseLibraryLocation: () => invoke<LibraryStatusDto>("choose_library_location"),
+  locateLibrary: () => invoke<LibraryStatusDto>("locate_library"),
+  restoreDefaultLibrary: () => invoke<LibraryStatusDto>("restore_default_library"),
+  retryLibrary: () => invoke<LibraryStatusDto>("retry_library"),
+  revealLibrary: () => invoke<void>("reveal_library"),
+  getAssetAvailability: (id: string) =>
+    invoke<AssetAvailabilityDto>("get_asset_availability", { id }),
+  restoreMissingAsset: (id: string) =>
+    invoke<boolean>("restore_missing_asset", { id }),
+  removeMissingAsset: (id: string) =>
+    invoke<void>("remove_missing_asset", { id }),
+  listPendingRecordings: () =>
+    invoke<PendingRecordingDto[]>("list_pending_recordings"),
+  retryPendingRecordings: () => invoke<number>("retry_pending_recordings"),
   setFavorite: (id: string, favorite: boolean) =>
     invoke<void>("set_favorite", { id, favorite }),
   renameAsset: (id: string, title: string) =>

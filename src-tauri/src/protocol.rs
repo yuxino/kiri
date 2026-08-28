@@ -153,6 +153,17 @@ pub fn with_thumbnail_invalidations<T, E>(
     result
 }
 
+pub fn clear_thumbnail(store: &ProtocolStore, id: uuid::Uuid) {
+    let _generation = store.thumbnail_generation.lock().unwrap();
+    store.thumbnails.lock().unwrap().remove(&id.to_string());
+}
+
+pub fn clear_thumbnails(store: &ProtocolStore) {
+    let _generation = store.thumbnail_generation.lock().unwrap();
+    *store.thumbnails.lock().unwrap() =
+        ThumbnailCache::with_limits(THUMBNAIL_CACHE_MAX_BYTES, THUMBNAIL_CACHE_MAX_ENTRIES);
+}
+
 pub fn clear_frozen_png_for_capture(store: &ProtocolStore, capture_id: uuid::Uuid) {
     let mut frozen_capture = store.frozen_capture.lock().unwrap();
     if frozen_capture
@@ -212,12 +223,15 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     if host == "thumbnail" {
         if let Ok(id) = uuid::Uuid::parse_str(&path) {
             let (kind, file_path) = {
-                let library = state.library.lock().unwrap();
+                let mut context = state.library.lock().unwrap();
+                let Ok(library) = context.library() else {
+                    return not_found();
+                };
                 match library.asset_by_id(&id).cloned() {
-                    Some(asset) => (
-                        asset.kind,
-                        state.library_root.join("Assets").join(&asset.filename),
-                    ),
+                    Some(asset) => match library.readable_asset_url(&asset) {
+                        Ok(path) => (asset.kind, path),
+                        Err(_) => return not_found(),
+                    },
                     None => return not_found(),
                 }
             };
@@ -263,8 +277,10 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             annotation_source_revision(uri.query()),
         ) {
             let source = {
-                let library = state.library.lock().unwrap();
-                annotation_source_for_revision(&library, &id, &expected_revision)
+                let mut context = state.library.lock().unwrap();
+                context.library().ok().and_then(|library| {
+                    annotation_source_for_revision(library, &id, &expected_revision)
+                })
             };
             if let Some(source) = source {
                 return respond_png(source);
@@ -280,12 +296,15 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             // Resolve the file path while holding the lock, then drop it
             // before running ffmpeg (thumbnail generation can take ~100ms).
             let (kind, file_path) = {
-                let library = state.library.lock().unwrap();
+                let mut context = state.library.lock().unwrap();
+                let Ok(library) = context.library() else {
+                    return not_found();
+                };
                 match library.asset_by_id(&id).cloned() {
-                    Some(asset) => {
-                        let path = state.library_root.join("Assets").join(&asset.filename);
-                        (asset.kind, path)
-                    }
+                    Some(asset) => match library.readable_asset_url(&asset) {
+                        Ok(path) => (asset.kind, path),
+                        Err(_) => return not_found(),
+                    },
                     None => return not_found(),
                 }
             };
@@ -327,19 +346,23 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     if host == "media" {
         let rest = &path.trim_end_matches('/');
         if let Ok(id) = uuid::Uuid::parse_str(rest) {
-            let file_path = {
-                let library = state.library.lock().unwrap();
+            let (kind, file_path) = {
+                let mut context = state.library.lock().unwrap();
+                let Ok(library) = context.library() else {
+                    return not_found();
+                };
                 match library.asset_by_id(&id).cloned() {
-                    Some(asset) => state.library_root.join("Assets").join(&asset.filename),
+                    Some(asset) => match library.readable_asset_url(&asset) {
+                        Ok(path) => (asset.kind, path),
+                        Err(_) => return not_found(),
+                    },
                     None => return not_found(),
                 }
             };
-            let content_type = if file_path.extension().map(|e| e == "png").unwrap_or(false) {
-                "image/png"
-            } else if file_path.extension().map(|e| e == "gif").unwrap_or(false) {
-                "image/gif"
-            } else {
-                "video/mp4"
+            let content_type = match kind {
+                CaptureKind::Image => "image/png",
+                CaptureKind::Gif => "image/gif",
+                CaptureKind::Video => "video/mp4",
             };
             return respond_media(request, &file_path, content_type).unwrap_or_else(not_found);
         }
@@ -570,6 +593,8 @@ fn respond_png(bytes: Vec<u8>) -> Response<Vec<u8>> {
 fn not_found() -> Response<Vec<u8>> {
     Response::builder()
         .status(StatusCode::NOT_FOUND)
+        .header("Access-Control-Allow-Origin", "*")
+        .header("Cache-Control", "no-store")
         .body(Vec::new())
         .unwrap()
 }
@@ -577,6 +602,13 @@ fn not_found() -> Response<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_media_responses_are_never_cached() {
+        let response = not_found();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(response.headers().get("Cache-Control").unwrap(), "no-store");
+    }
 
     #[test]
     fn annotation_source_query_requires_one_exact_revision_hash() {

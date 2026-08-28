@@ -18,9 +18,11 @@ Kiri is primarily developed and tested on macOS. Windows has not completed real-
 - **Screenshots and re-editable annotation**: click a window or drag a region, then use pen, shapes, arrows, text, mosaic, undo, and redo. Annotations created by current `main` can be reopened from the completion card or library; marks flattened into older screenshots cannot be reconstructed.
 - **OCR**: recognize text locally with macOS Vision or Windows.Media.Ocr by default; optional remote OCR asks before every upload.
 - **Recording and GIF**: record a region with optional system audio, microphone, pointer, and click highlights; save as MP4 or GIF.
-- **Local library**: search, favorite, tag, rename, and move captures to recoverable Trash.
+- **Local library**: search, favorite, tag, rename, and move captures to recoverable Trash. Settings can use another local directory or external disk for the library.
 
-> Editable screenshot projects are now on `main`; the current v1.4.4 download does not include this feature yet.
+> Editable screenshot projects and library location/recovery are now on `main`; the current v1.4.4 download does not include these features yet.
+
+If the library is offline, retry or locate it again. Choose a file to replace a missing asset. Recordings that could not be imported are kept for retry.
 
 ## Download and install
 

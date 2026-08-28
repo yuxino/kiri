@@ -44,6 +44,8 @@ history.
 - [x] Interactive screenshot and recording completion preview with open, copy, recoverable Trash, and Undo actions
 - [x] Re-editable local screenshot annotations with completion-card and library editor entry points
 - [x] Explicit MP4/GIF recording output choice; direct GIF is silent and preserves the MP4 when GIF finalization fails
+- [x] One managed library that can move to another local directory or external disk
+- [x] Offline-library, missing-asset, and interrupted recording-import recovery
 
 Release validation still open:
 
@@ -62,4 +64,4 @@ Release validation still open:
 - [ ] Inline video and GIF playback
 - [ ] Recording duration and file-size safeguards
 - [ ] Smart collections
-- [ ] Optional user-controlled sync
+- [ ] Adopt an existing managed library after local settings are reset

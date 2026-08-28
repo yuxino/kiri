@@ -14,6 +14,8 @@ boundary.
 - `src-tauri/` is the only Rust workspace and the only Tauri application.
 - `src-tauri/src/core/` contains portable geometry, policy, library, and OCR
   profile models.
+- `src-tauri/src/core/library_location.rs` owns the active library marker,
+  availability, and whole-library migration rules.
 - `src-tauri/src/capture/` and `src-tauri/src/platform/` contain platform
   implementations.
 - `scripts/` contains release checks, icon generation, and stable macOS signing.
@@ -98,6 +100,33 @@ rollback for ordinary write failures. Any intervening flat, document, or source
 change rejects the stale save. Native Save As destinations are likewise
 represented in the WebView by a single-use token rather than a filesystem path.
 
+## Managed library flow
+
+`AppState` owns one mutex-guarded library context containing the active root,
+library UUID, copy generation, availability, and loaded `AssetLibrary`.
+Commands and custom protocol reads resolve metadata and files through that
+same context.
+
+The default root is created in the operating-system application-data location
+only when no saved library exists. After that, any remembered root is accepted
+only when its marker matches the saved library. If the root is unavailable, the
+context stays offline; Kiri neither creates a replacement there nor silently
+opens another library. Capture and recording starts are blocked until the user
+retries or locates the existing library. Returning to the default location
+requires the active library to be available and uses the same verified
+migration path.
+
+Changing location uses a native folder picker, copies the index, assets, and
+annotation projects into a staged library, validates the result, then switches
+the saved location and context. The destination receives a new copy generation,
+so the unchanged source cannot later be mistaken for the current copy.
+
+Asset availability is checked separately from media playback. The viewer has
+distinct loading, missing, unreadable, and playback-failed states. Restoring a
+missing asset uses a native file picker and atomically copies a validated file
+back to its managed filename; removing the record is allowed only while the
+file is still missing.
+
 ## OCR flow
 
 Local OCR is the default and runs through macOS Vision or Windows.Media.Ocr.
@@ -163,6 +192,11 @@ re-encodes are not constrained by a short total timeout. Kiri control windows
 are excluded from exported frames, while an enabled click-ripple window is
 intentionally included.
 
+If a valid finalized MP4 cannot be imported because the active library is
+unavailable or rejects the write, Kiri moves it into a local recovery area
+with a manifest. The library exposes the pending count and a retry action.
+Recovery files are removed only after a durable import.
+
 The countdown is a single background-free 3-2-1 numeral in system display
 typography. It has no ring, disc, panel, hint pill, blur, or shadow, remains
 centered without dimming the selected region, supports Escape cancellation and
@@ -207,8 +241,12 @@ display without taking focus and is protected/excluded from subsequent captures.
 
 ## Persistence boundaries
 
-- macOS library: `~/Library/Application Support/kiri`
-- Windows library: `%APPDATA%\\kiri`
+- The default macOS library is `~/Library/Application Support/kiri`; the
+  default Windows library is `%APPDATA%\\kiri`. Settings may move the one active
+  library to another local directory or external disk.
+- The active root contains a schema/version marker, library UUID, and copy
+  generation. A saved custom location must match that marker before Kiri loads
+  its index; each migration changes the generation while preserving lineage.
 - Assets are indexed by `library.json`; Trash is recoverable and never empties
   automatically.
 - Editable screenshot state is stored only in `Annotations/`. Moving to Trash
@@ -224,6 +262,9 @@ display without taking focus and is protected/excluded from subsequent captures.
   never appear in that JSON, IPC responses, or logs.
 - Credential replacement and deletion use a non-secret journal so interrupted
   Keychain/Credential Manager updates can be reconciled on startup.
+- Completed recordings awaiting import live in a local recovery area outside
+  the active library and retain only the media plus the metadata needed to
+  retry the import.
 - Video playback requires a valid single byte range and reads at most 1 MiB
   per protocol response; missing or malformed ranges are rejected instead of
   materializing an entire recording. The library mounts only near-viewport,

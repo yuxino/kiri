@@ -21,6 +21,14 @@ pub enum AssetLibraryError {
     AssetNotFound,
     #[error("invalid filename")]
     InvalidFilename,
+    #[error("library index contains duplicate asset ids or filenames")]
+    DuplicateIndexEntry,
+    #[error("the asset file is missing")]
+    AssetFileMissing,
+    #[error("the asset file is still present")]
+    AssetFileStillPresent,
+    #[error("the selected replacement does not match the asset type")]
+    InvalidReplacementFile,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("library index is corrupted: {0}")]
@@ -60,6 +68,14 @@ pub enum EditorAnnotationState {
     None,
     Valid,
     Invalid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AssetAvailability {
+    Ready,
+    Missing,
+    Unreadable,
 }
 
 /// One content-addressed editor baseline. `source` is the exact image the
@@ -108,22 +124,46 @@ pub struct AssetLibrary {
 
 impl AssetLibrary {
     pub fn open(root_url: PathBuf) -> Result<Self> {
+        Self::open_with_creation(root_url, true)
+    }
+
+    pub fn open_existing(root_url: PathBuf) -> Result<Self> {
+        Self::open_with_creation(root_url, false)
+    }
+
+    fn open_with_creation(root_url: PathBuf, allow_creation: bool) -> Result<Self> {
         let assets_url = root_url.join("Assets");
         let thumbnails_url = root_url.join("Thumbnails");
         let annotations_url = root_url.join("Annotations");
         let index_url = root_url.join("library.json");
 
-        std::fs::create_dir_all(&assets_url)?;
-        std::fs::create_dir_all(&thumbnails_url)?;
-        std::fs::create_dir_all(&annotations_url)?;
-
-        let index = if index_url.exists() {
-            let data = std::fs::read(&index_url)?;
-            serde_json::from_slice::<Vec<CaptureAsset>>(&data)
-                .map_err(AssetLibraryError::CorruptIndex)?
+        if allow_creation {
+            std::fs::create_dir_all(&root_url)?;
+            ensure_directory(&root_url)?;
+            ensure_or_create_directory(&assets_url)?;
+            ensure_or_create_directory(&thumbnails_url)?;
+            ensure_or_create_directory(&annotations_url)?;
         } else {
-            Vec::new()
+            ensure_directory(&root_url)?;
+            ensure_directory(&assets_url)?;
+            ensure_directory(&thumbnails_url)?;
+            ensure_directory(&annotations_url)?;
+        }
+
+        let index = match std::fs::symlink_metadata(&index_url) {
+            Ok(_) => {
+                ensure_regular_file(&index_url)?;
+                let data = std::fs::read(&index_url)?;
+                serde_json::from_slice::<Vec<CaptureAsset>>(&data)
+                    .map_err(AssetLibraryError::CorruptIndex)?
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && allow_creation => {
+                atomic_write(&index_url, b"[]")?;
+                Vec::new()
+            }
+            Err(error) => return Err(AssetLibraryError::Io(error)),
         };
+        validate_index(&index)?;
 
         Ok(Self {
             assets_url,
@@ -144,8 +184,71 @@ impl AssetLibrary {
         dirs::data_dir().map(|dir| dir.join("kiri"))
     }
 
+    /// Revalidates the on-disk library boundary after startup. Custom-library
+    /// volumes can disappear or be replaced while Kiri is running, so callers
+    /// must not rely only on the checks performed by `open_existing`.
+    pub fn validate_storage_layout(&self) -> Result<()> {
+        let root_url = self
+            .index_url
+            .parent()
+            .ok_or(AssetLibraryError::InvalidFilename)?;
+        ensure_directory(root_url)?;
+        ensure_directory(&self.assets_url)?;
+        ensure_directory(&self.thumbnails_url)?;
+        ensure_directory(&self.annotations_url)?;
+        ensure_regular_file(&self.index_url)?;
+        Ok(())
+    }
+
     pub fn asset_url(&self, asset: &CaptureAsset) -> PathBuf {
         self.assets_url.join(&asset.filename)
+    }
+
+    pub fn asset_availability(&self, id: &uuid::Uuid) -> Result<AssetAvailability> {
+        self.validate_storage_layout()?;
+        let asset = self
+            .asset_by_id(id)
+            .ok_or(AssetLibraryError::AssetNotFound)?;
+        Ok(asset_file_availability(&self.asset_url(asset)))
+    }
+
+    pub fn readable_asset_url(&self, asset: &CaptureAsset) -> Result<PathBuf> {
+        self.validate_storage_layout()?;
+        let path = self.asset_url(asset);
+        match asset_file_availability(&path) {
+            AssetAvailability::Ready => Ok(path),
+            AssetAvailability::Missing => Err(AssetLibraryError::AssetFileMissing),
+            AssetAvailability::Unreadable => Err(AssetLibraryError::Io(std::io::Error::other(
+                "asset is not a readable regular file",
+            ))),
+        }
+    }
+
+    pub fn restore_missing_asset(
+        &self,
+        id: &uuid::Uuid,
+        source: &Path,
+        proof: &ReplacementFileProof,
+    ) -> Result<CaptureAsset> {
+        let asset = self
+            .asset_by_id(id)
+            .cloned()
+            .ok_or(AssetLibraryError::AssetNotFound)?;
+        if self.asset_availability(id)? != AssetAvailability::Missing {
+            return Err(AssetLibraryError::AssetFileStillPresent);
+        }
+        if proof.kind != asset.kind {
+            return Err(AssetLibraryError::InvalidReplacementFile);
+        }
+        atomic_copy_missing(source, &self.asset_url(&asset), Some(proof))?;
+        Ok(asset)
+    }
+
+    pub fn remove_missing_asset(&mut self, id: &uuid::Uuid) -> Result<()> {
+        if self.asset_availability(id)? != AssetAvailability::Missing {
+            return Err(AssetLibraryError::AssetFileStillPresent);
+        }
+        self.permanently_delete(id)
     }
 
     /// Mirrors `AssetLibrary.allAssets(includeTrashed:)`.
@@ -251,6 +354,7 @@ impl AssetLibrary {
         created_at: Option<f64>,
         annotation_project: Option<(&[u8], &serde_json::Value)>,
     ) -> Result<CaptureAsset> {
+        self.validate_storage_layout()?;
         if annotation_project.is_some() && kind != CaptureKind::Image {
             return Err(AssetLibraryError::UnsupportedAnnotationAsset);
         }
@@ -299,7 +403,8 @@ impl AssetLibrary {
         source_application: Option<String>,
     ) -> Result<CaptureAsset> {
         let safe_extension = Self::validated_extension(file_extension)?;
-        let asset = Self::make_asset(
+        let asset = Self::make_asset_with_id(
+            uuid::Uuid::new_v4(),
             kind,
             &safe_extension,
             pixel_width,
@@ -308,13 +413,120 @@ impl AssetLibrary {
             source_application,
             Self::normalized_date(now_ms()),
         );
+        self.import_prepared_file(source_url, asset)
+    }
+
+    /// Imports a finalized recording with a stable id. Repeating the same
+    /// operation after a crash returns the already-indexed asset instead of
+    /// creating a duplicate.
+    #[allow(clippy::too_many_arguments)]
+    pub fn import_file_with_stable_id(
+        &mut self,
+        source_url: &Path,
+        id: uuid::Uuid,
+        created_at: f64,
+        kind: CaptureKind,
+        file_extension: &str,
+        pixel_width: i64,
+        pixel_height: i64,
+        duration: Option<f64>,
+        source_application: Option<String>,
+    ) -> Result<CaptureAsset> {
+        if id.is_nil() || !created_at.is_finite() {
+            return Err(AssetLibraryError::InvalidFilename);
+        }
+        let safe_extension = Self::validated_extension(file_extension)?;
+        let asset = match self.asset_by_id(&id).cloned() {
+            Some(existing)
+                if existing.kind == kind
+                    && Path::new(&existing.filename)
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| {
+                            extension.eq_ignore_ascii_case(&safe_extension)
+                        }) =>
+            {
+                // Existing Swift and early Rust indexes keep their original
+                // timestamp-based names. Stable retries reuse that name.
+                existing
+            }
+            Some(_) => return Err(AssetLibraryError::DuplicateIndexEntry),
+            None => Self::make_stable_asset_with_id(
+                id,
+                kind,
+                &safe_extension,
+                pixel_width,
+                pixel_height,
+                duration,
+                source_application,
+                Self::normalized_date(created_at),
+            ),
+        };
+        self.import_prepared_file(source_url, asset)
+    }
+
+    fn import_prepared_file(
+        &mut self,
+        source_url: &Path,
+        asset: CaptureAsset,
+    ) -> Result<CaptureAsset> {
+        self.validate_storage_layout()?;
+        ensure_regular_file(source_url)?;
+        if let Some(existing) = self.asset_by_id(&asset.id).cloned() {
+            if existing.kind != asset.kind || existing.filename != asset.filename {
+                return Err(AssetLibraryError::DuplicateIndexEntry);
+            }
+            match self.asset_availability(&existing.id)? {
+                AssetAvailability::Ready => {
+                    if !files_equal(source_url, &self.asset_url(&existing))? {
+                        return Err(AssetLibraryError::AssetFileStillPresent);
+                    }
+                    return Ok(existing);
+                }
+                AssetAvailability::Missing => {
+                    atomic_copy_missing(source_url, &self.asset_url(&existing), None)?;
+                    return Ok(existing);
+                }
+                AssetAvailability::Unreadable => {
+                    return Err(AssetLibraryError::Io(std::io::Error::other(
+                        "the existing asset file is unreadable",
+                    )))
+                }
+            }
+        }
+        if self
+            .index
+            .iter()
+            .any(|entry| entry.filename.eq_ignore_ascii_case(&asset.filename))
+        {
+            return Err(AssetLibraryError::DuplicateIndexEntry);
+        }
+
         let file_url = self.asset_url(&asset);
-        std::fs::copy(source_url, &file_url)?;
+        let created_file = match std::fs::symlink_metadata(&file_url) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink()
+                    || !metadata.is_file()
+                    || !files_equal(source_url, &file_url)?
+                {
+                    return Err(AssetLibraryError::AssetFileStillPresent);
+                }
+                false
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                copy_new_file(source_url, &file_url)?;
+                true
+            }
+            Err(error) => return Err(AssetLibraryError::Io(error)),
+        };
 
         self.index.push(asset.clone());
         if let Err(error) = self.persist() {
-            let _ = std::fs::remove_file(&file_url);
             self.index.retain(|entry| entry.id != asset.id);
+            if created_file {
+                let _ = std::fs::remove_file(&file_url);
+                let _ = sync_directory(&self.assets_url);
+            }
             return Err(error);
         }
         Ok(asset)
@@ -340,7 +552,7 @@ impl AssetLibrary {
         document: &serde_json::Value,
     ) -> Result<CaptureAsset> {
         let asset = self.annotation_asset(id)?;
-        let asset_url = self.asset_url(&asset);
+        let asset_url = self.readable_asset_url(&asset)?;
         let previous_rendered = std::fs::read(&asset_url)?;
         let existing = self.read_existing_annotation_project(&asset, &previous_rendered)?;
 
@@ -383,7 +595,7 @@ impl AssetLibrary {
     #[cfg(test)]
     fn load_annotation_project(&self, id: &uuid::Uuid) -> Result<Option<LoadedAnnotationProject>> {
         let asset = self.annotation_asset(id)?;
-        let rendered = std::fs::read(self.asset_url(&asset))?;
+        let rendered = std::fs::read(self.readable_asset_url(&asset)?)?;
         let (document_url, source_url) = self.annotation_project_urls(&asset);
         Ok(self
             .read_existing_annotation_project(&asset, &rendered)?
@@ -649,7 +861,7 @@ impl AssetLibrary {
 
     fn read_editor_snapshot_files(&self, id: &uuid::Uuid) -> Result<EditorSnapshotFiles> {
         let asset = self.annotation_asset(id)?;
-        let rendered = std::fs::read(self.asset_url(&asset))?;
+        let rendered = std::fs::read(self.readable_asset_url(&asset)?)?;
         let (document_url, source_url) = self.annotation_project_urls(&asset);
         let encoded = read_optional_file(&document_url)?;
         let source = read_optional_file(&source_url)?;
@@ -822,6 +1034,7 @@ impl AssetLibrary {
     fn persist_index(&self, index: &[CaptureAsset]) -> Result<()> {
         #[cfg(test)]
         self.persist_count.set(self.persist_count.get() + 1);
+        self.validate_storage_layout()?;
         let data = serde_json::to_vec_pretty(index).map_err(AssetLibraryError::CorruptIndex)?;
         atomic_write(&self.index_url, &data)
     }
@@ -852,7 +1065,29 @@ impl AssetLibrary {
         source_application: Option<String>,
         created_at: f64,
     ) -> CaptureAsset {
-        let id = uuid::Uuid::new_v4();
+        Self::make_asset_with_id(
+            uuid::Uuid::new_v4(),
+            kind,
+            file_extension,
+            pixel_width,
+            pixel_height,
+            duration,
+            source_application,
+            created_at,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn make_asset_with_id(
+        id: uuid::Uuid,
+        kind: CaptureKind,
+        file_extension: &str,
+        pixel_width: i64,
+        pixel_height: i64,
+        duration: Option<f64>,
+        source_application: Option<String>,
+        created_at: f64,
+    ) -> CaptureAsset {
         // DateFormatter with en_US_POSIX locale and local timezone.
         let stamp = Local
             .timestamp_millis_opt(created_at as i64)
@@ -875,6 +1110,261 @@ impl AssetLibrary {
             trashed_at: None,
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn make_stable_asset_with_id(
+        id: uuid::Uuid,
+        kind: CaptureKind,
+        file_extension: &str,
+        pixel_width: i64,
+        pixel_height: i64,
+        duration: Option<f64>,
+        source_application: Option<String>,
+        created_at: f64,
+    ) -> CaptureAsset {
+        CaptureAsset {
+            id,
+            kind,
+            created_at,
+            filename: format!("{}.{file_extension}", id.simple()),
+            title: None,
+            tags: Vec::new(),
+            pixel_width,
+            pixel_height,
+            duration,
+            source_application,
+            is_favorite: false,
+            trashed_at: None,
+        }
+    }
+}
+
+fn ensure_or_create_directory(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => ensure_directory(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir(path)?;
+            ensure_directory(path)
+        }
+        Err(error) => Err(AssetLibraryError::Io(error)),
+    }
+}
+
+fn ensure_directory(path: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(AssetLibraryError::Io(std::io::Error::other(
+            "library path is not a regular directory",
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_regular_file(path: &Path) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(AssetLibraryError::Io(std::io::Error::other(
+            "library path is not a regular file",
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn is_safe_library_filename(filename: &str) -> bool {
+    if filename.is_empty() || filename == "." || filename == ".." {
+        return false;
+    }
+    if filename.contains('/') || filename.contains('\\') || filename.contains('\0') {
+        return false;
+    }
+    let mut components = Path::new(filename).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
+}
+
+fn validate_index(index: &[CaptureAsset]) -> Result<()> {
+    let mut ids = HashSet::with_capacity(index.len());
+    let mut filenames = HashSet::with_capacity(index.len());
+    for asset in index {
+        if !is_safe_library_filename(&asset.filename) {
+            return Err(AssetLibraryError::InvalidFilename);
+        }
+        if !ids.insert(asset.id) || !filenames.insert(asset.filename.to_lowercase()) {
+            return Err(AssetLibraryError::DuplicateIndexEntry);
+        }
+    }
+    Ok(())
+}
+
+fn asset_file_availability(path: &Path) -> AssetAvailability {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return AssetAvailability::Missing
+        }
+        Err(_) => return AssetAvailability::Unreadable,
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return AssetAvailability::Unreadable;
+    }
+    match std::fs::File::open(path) {
+        Ok(_) => AssetAvailability::Ready,
+        Err(_) => AssetAvailability::Unreadable,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReplacementFileProof {
+    kind: CaptureKind,
+    byte_len: u64,
+    sha256: [u8; 32],
+}
+
+pub(crate) fn replacement_file_proof(
+    path: &Path,
+    kind: CaptureKind,
+) -> Result<ReplacementFileProof> {
+    ensure_regular_file(path)?;
+    let expected_extension = match kind {
+        CaptureKind::Image => "png",
+        CaptureKind::Video => "mp4",
+        CaptureKind::Gif => "gif",
+    };
+    if !path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(expected_extension))
+    {
+        return Err(AssetLibraryError::InvalidReplacementFile);
+    }
+    let mut prefix = [0_u8; 12];
+    let mut source = std::fs::File::open(path)?;
+    let read = std::io::Read::read(&mut source, &mut prefix)?;
+    let matches_kind = match kind {
+        CaptureKind::Image => read >= 8 && prefix[..8] == *b"\x89PNG\r\n\x1a\n",
+        CaptureKind::Video => read >= 8 && prefix[4..8] == *b"ftyp",
+        CaptureKind::Gif => read >= 6 && (prefix[..6] == *b"GIF87a" || prefix[..6] == *b"GIF89a"),
+    };
+    if !matches_kind {
+        return Err(AssetLibraryError::InvalidReplacementFile);
+    }
+    let metadata = std::fs::symlink_metadata(path)?;
+    Ok(ReplacementFileProof {
+        kind,
+        byte_len: metadata.len(),
+        sha256: sha256_file(path)?,
+    })
+}
+
+fn atomic_copy_missing(
+    source: &Path,
+    destination: &Path,
+    expected: Option<&ReplacementFileProof>,
+) -> Result<()> {
+    if asset_file_availability(destination) != AssetAvailability::Missing {
+        return Err(AssetLibraryError::AssetFileStillPresent);
+    }
+    let parent = destination
+        .parent()
+        .ok_or(AssetLibraryError::InvalidFilename)?;
+    let staged = stage_verified_copy(source, parent, "restore", expected)?;
+    install_staged_new_file(staged, destination)
+}
+
+fn copy_new_file(source: &Path, destination: &Path) -> Result<()> {
+    let parent = destination
+        .parent()
+        .ok_or(AssetLibraryError::InvalidFilename)?;
+    let staged = stage_verified_copy(source, parent, "import", None)?;
+    install_staged_new_file(staged, destination)
+}
+
+fn stage_verified_copy(
+    source: &Path,
+    parent: &Path,
+    label: &str,
+    expected: Option<&ReplacementFileProof>,
+) -> Result<tempfile::NamedTempFile> {
+    ensure_regular_file(source)?;
+    let source_size = std::fs::symlink_metadata(source)?.len();
+    let source_hash = sha256_file(source)?;
+    if expected.is_some_and(|proof| proof.byte_len != source_size || proof.sha256 != source_hash) {
+        return Err(AssetLibraryError::InvalidReplacementFile);
+    }
+    let mut staged = tempfile::Builder::new()
+        .prefix(&format!(".{label}-"))
+        .suffix(".tmp")
+        .tempfile_in(parent)?;
+    let mut input = std::fs::File::open(source)?;
+    let copied = std::io::copy(&mut input, staged.as_file_mut())?;
+    std::io::Write::flush(staged.as_file_mut())?;
+    staged.as_file().sync_all()?;
+    if copied != source_size {
+        return Err(AssetLibraryError::Io(std::io::Error::other(
+            "source file changed while copying",
+        )));
+    }
+    if std::fs::symlink_metadata(staged.path())?.len() != source_size
+        || sha256_file(staged.path())? != source_hash
+    {
+        return Err(AssetLibraryError::Io(std::io::Error::other(
+            "source file changed while copying",
+        )));
+    }
+    Ok(staged)
+}
+
+fn install_staged_new_file(staged: tempfile::NamedTempFile, destination: &Path) -> Result<()> {
+    let parent = destination
+        .parent()
+        .ok_or(AssetLibraryError::InvalidFilename)?;
+    match staged.persist_noclobber(destination) {
+        Ok(_) => {
+            sync_directory_after_commit(parent, "asset file install");
+            Ok(())
+        }
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err(AssetLibraryError::AssetFileStillPresent)
+        }
+        Err(error) => Err(AssetLibraryError::Io(error.error)),
+    }
+}
+
+fn files_equal(left: &Path, right: &Path) -> Result<bool> {
+    let left_metadata = std::fs::symlink_metadata(left)?;
+    let right_metadata = std::fs::symlink_metadata(right)?;
+    if !left_metadata.is_file()
+        || !right_metadata.is_file()
+        || left_metadata.len() != right_metadata.len()
+    {
+        return Ok(false);
+    }
+    Ok(sha256_file(left)? == sha256_file(right)?)
+}
+
+fn sha256_file(path: &Path) -> Result<[u8; 32]> {
+    let mut file = std::fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = std::io::Read::read(&mut file, &mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(digest.finalize().into())
+}
+
+#[cfg(unix)]
+fn sync_directory(path: &Path) -> Result<()> {
+    std::fs::File::open(path)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
 fn now_ms() -> f64 {
@@ -925,8 +1415,13 @@ fn restore_editor_snapshot(snapshot: &EditorSnapshotFiles, asset_url: &Path) {
 }
 
 fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {
-    match std::fs::read(path) {
-        Ok(bytes) => Ok(Some(bytes)),
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            Err(AssetLibraryError::Io(std::io::Error::other(
+                "annotation path is not a regular file",
+            )))
+        }
+        Ok(_) => std::fs::read(path).map(Some).map_err(AssetLibraryError::Io),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(AssetLibraryError::Io(error)),
     }
@@ -1009,33 +1504,27 @@ fn best_effort_restore(path: &Path, previous: Option<&[u8]>) {
     }
 }
 
-/// Write via a temporary file and rename into place. On Windows, rename over
-/// an existing file is retried after removing the target.
+/// Write via a fully-synced temporary file and rename it into place. The
+/// parent directory is synced after the namespace change where supported.
 fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
-    let file_name = path.file_name().ok_or_else(|| {
-        AssetLibraryError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "atomic write target has no filename",
-        ))
-    })?;
-    let mut tmp_name = std::ffi::OsString::from(".");
-    tmp_name.push(file_name);
-    tmp_name.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
-    let tmp = path.with_file_name(tmp_name);
-    std::fs::write(&tmp, data)?;
-    match std::fs::rename(&tmp, path) {
-        Ok(()) => Ok(()),
-        Err(first) => {
-            #[cfg(windows)]
-            {
-                let _ = std::fs::remove_file(path);
-                if std::fs::rename(&tmp, path).is_ok() {
-                    return Ok(());
-                }
-            }
-            let _ = std::fs::remove_file(&tmp);
-            Err(AssetLibraryError::Io(first))
-        }
+    let parent = path.parent().ok_or(AssetLibraryError::InvalidFilename)?;
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".library-write-")
+        .suffix(".tmp")
+        .tempfile_in(parent)?;
+    std::io::Write::write_all(temporary.as_file_mut(), data)?;
+    std::io::Write::flush(temporary.as_file_mut())?;
+    temporary.as_file().sync_all()?;
+    temporary
+        .persist(path)
+        .map_err(|error| AssetLibraryError::Io(error.error))?;
+    sync_directory_after_commit(parent, "atomic write");
+    Ok(())
+}
+
+fn sync_directory_after_commit(path: &Path, operation: &str) {
+    if let Err(error) = sync_directory(path) {
+        log::warn!("{operation} committed but its directory could not be synced: {error}");
     }
 }
 
@@ -1113,6 +1602,410 @@ mod tests {
         assert!(asset.filename.starts_with("2023"));
         assert_eq!(library.all_assets(false).len(), 1);
         assert!(library.asset_url(&asset).exists());
+    }
+
+    #[test]
+    fn stable_recording_import_is_idempotent_across_retries() {
+        let (directory, root) = temp_root();
+        let source = directory.path().join("recovered.mp4");
+        std::fs::write(&source, b"recovered recording").unwrap();
+        let id = uuid::Uuid::new_v4();
+        let created_at = 1_700_000_000_123.0;
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+
+        let first = library
+            .import_file_with_stable_id(
+                &source,
+                id,
+                created_at,
+                CaptureKind::Video,
+                "mp4",
+                1920,
+                1080,
+                Some(3.0),
+                None,
+            )
+            .unwrap();
+        let second = library
+            .import_file_with_stable_id(
+                &source,
+                id,
+                created_at,
+                CaptureKind::Video,
+                "mp4",
+                1920,
+                1080,
+                Some(3.0),
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(first, second);
+        assert_eq!(first.filename, format!("{}.mp4", id.simple()));
+        assert_eq!(library.all_assets(false).len(), 1);
+        drop(library);
+
+        let mut reopened = AssetLibrary::open(root).unwrap();
+        let third = reopened
+            .import_file_with_stable_id(
+                &source,
+                id,
+                created_at,
+                CaptureKind::Video,
+                "mp4",
+                1920,
+                1080,
+                Some(3.0),
+                None,
+            )
+            .unwrap();
+        assert_eq!(third.id, id);
+        assert_eq!(reopened.all_assets(false).len(), 1);
+    }
+
+    #[test]
+    fn stable_import_recovers_a_synced_file_left_before_index_persist() {
+        let (directory, root) = temp_root();
+        let source = directory.path().join("recovered.mp4");
+        std::fs::write(&source, b"recovered recording").unwrap();
+        let id = uuid::Uuid::new_v4();
+        let created_at = 1_700_000_000_123.0;
+        let mut library = AssetLibrary::open(root).unwrap();
+        let prepared = AssetLibrary::make_stable_asset_with_id(
+            id,
+            CaptureKind::Video,
+            "mp4",
+            1920,
+            1080,
+            Some(3.0),
+            None,
+            created_at,
+        );
+        copy_new_file(&source, &library.asset_url(&prepared)).unwrap();
+
+        let imported = library
+            .import_file_with_stable_id(
+                &source,
+                id,
+                created_at,
+                CaptureKind::Video,
+                "mp4",
+                1920,
+                1080,
+                Some(3.0),
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(imported.id, id);
+        assert_eq!(library.all_assets(false), vec![imported]);
+    }
+
+    #[test]
+    fn stable_import_reuses_a_legacy_index_filename() {
+        let (directory, root) = temp_root();
+        let source = directory.path().join("recovered.mp4");
+        std::fs::write(&source, b"recovered recording").unwrap();
+        let id = uuid::Uuid::new_v4();
+        let created_at = 1_700_000_000_123.0;
+        let mut library = AssetLibrary::open(root).unwrap();
+        let legacy = AssetLibrary::make_asset_with_id(
+            id,
+            CaptureKind::Video,
+            "mp4",
+            1920,
+            1080,
+            Some(3.0),
+            None,
+            created_at,
+        );
+        library
+            .import_prepared_file(&source, legacy.clone())
+            .unwrap();
+
+        let retried = library
+            .import_file_with_stable_id(
+                &source,
+                id,
+                created_at,
+                CaptureKind::Video,
+                "mp4",
+                1920,
+                1080,
+                Some(3.0),
+                None,
+            )
+            .unwrap();
+
+        assert_eq!(retried, legacy);
+        assert_ne!(retried.filename, format!("{}.mp4", id.simple()));
+        assert_eq!(library.all_assets(false).len(), 1);
+    }
+
+    #[test]
+    fn stable_import_rejects_ready_content_that_does_not_match_the_source() {
+        let (directory, root) = temp_root();
+        let source = directory.path().join("recovered.mp4");
+        std::fs::write(&source, b"first recording").unwrap();
+        let id = uuid::Uuid::new_v4();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_file_with_stable_id(
+                &source,
+                id,
+                1_700_000_000_123.0,
+                CaptureKind::Video,
+                "mp4",
+                1920,
+                1080,
+                Some(3.0),
+                None,
+            )
+            .unwrap();
+        std::fs::write(&source, b"other recording").unwrap();
+
+        assert!(matches!(
+            library.import_file_with_stable_id(
+                &source,
+                id,
+                1_700_000_000_123.0,
+                CaptureKind::Video,
+                "mp4",
+                1920,
+                1080,
+                Some(3.0),
+                None,
+            ),
+            Err(AssetLibraryError::AssetFileStillPresent)
+        ));
+        assert_eq!(
+            std::fs::read(library.asset_url(&asset)).unwrap(),
+            b"first recording"
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), b"other recording");
+    }
+
+    #[test]
+    fn exclusive_copies_preserve_an_existing_destination_and_the_source() {
+        let (directory, root) = temp_root();
+        let source = directory.path().join("source.mp4");
+        let destination = root.join("destination.mp4");
+        std::fs::write(&source, b"source").unwrap();
+        std::fs::write(&destination, b"winner").unwrap();
+
+        assert!(matches!(
+            copy_new_file(&source, &destination),
+            Err(AssetLibraryError::AssetFileStillPresent)
+        ));
+        assert!(matches!(
+            atomic_copy_missing(&source, &destination, None),
+            Err(AssetLibraryError::AssetFileStillPresent)
+        ));
+        assert_eq!(std::fs::read(&destination).unwrap(), b"winner");
+        assert_eq!(std::fs::read(&source).unwrap(), b"source");
+    }
+
+    #[test]
+    fn rejects_unsafe_and_duplicate_index_entries() {
+        let (_dir, root) = temp_root();
+        let library = AssetLibrary::open(root.clone()).unwrap();
+        let first = AssetLibrary::make_asset(
+            CaptureKind::Image,
+            "png",
+            1,
+            1,
+            None,
+            None,
+            1_700_000_000_000.0,
+        );
+
+        let mut unsafe_asset = first.clone();
+        unsafe_asset.filename = "../outside.png".into();
+        std::fs::write(
+            root.join("library.json"),
+            serde_json::to_vec(&vec![unsafe_asset]).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            AssetLibrary::open(root.clone()),
+            Err(AssetLibraryError::InvalidFilename)
+        ));
+
+        let mut duplicate = first.clone();
+        duplicate.id = uuid::Uuid::new_v4();
+        std::fs::write(
+            root.join("library.json"),
+            serde_json::to_vec(&vec![first, duplicate]).unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            AssetLibrary::open(root),
+            Err(AssetLibraryError::DuplicateIndexEntry)
+        ));
+        drop(library);
+    }
+
+    #[test]
+    fn restores_only_a_still_missing_asset_and_preserves_metadata() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let asset = library
+            .import_data(
+                b"\x89PNG\r\n\x1a\nold",
+                CaptureKind::Image,
+                "png",
+                10,
+                20,
+                None,
+                Some("Safari".into()),
+                None,
+            )
+            .unwrap();
+        std::fs::remove_file(library.asset_url(&asset)).unwrap();
+        assert_eq!(
+            library.asset_availability(&asset.id).unwrap(),
+            AssetAvailability::Missing
+        );
+        let replacement = root.join("replacement.png");
+        std::fs::write(&replacement, b"\x89PNG\r\n\x1a\nrestored").unwrap();
+        let proof = replacement_file_proof(&replacement, CaptureKind::Image).unwrap();
+
+        let restored = library
+            .restore_missing_asset(&asset.id, &replacement, &proof)
+            .unwrap();
+        assert_eq!(restored, asset);
+        assert_eq!(
+            std::fs::read(library.asset_url(&asset)).unwrap(),
+            b"\x89PNG\r\n\x1a\nrestored"
+        );
+        assert!(matches!(
+            library.restore_missing_asset(&asset.id, &replacement, &proof),
+            Err(AssetLibraryError::AssetFileStillPresent)
+        ));
+        assert!(matches!(
+            library.remove_missing_asset(&asset.id),
+            Err(AssetLibraryError::AssetFileStillPresent)
+        ));
+    }
+
+    #[test]
+    fn guarded_remove_succeeds_only_for_a_missing_asset() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = import_test_assets(&mut library, 1).remove(0);
+        std::fs::remove_file(library.asset_url(&asset)).unwrap();
+
+        library.remove_missing_asset(&asset.id).unwrap();
+        assert!(library.asset_by_id(&asset.id).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_asset_is_unreadable_and_never_followed() {
+        use std::os::unix::fs::symlink;
+
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let asset = import_test_assets(&mut library, 1).remove(0);
+        let asset_path = library.asset_url(&asset);
+        std::fs::remove_file(&asset_path).unwrap();
+        let outside = root.join("outside.png");
+        std::fs::write(&outside, b"outside").unwrap();
+        symlink(&outside, &asset_path).unwrap();
+
+        assert_eq!(
+            library.asset_availability(&asset.id).unwrap(),
+            AssetAvailability::Unreadable
+        );
+        assert!(library.readable_asset_url(&asset).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn storage_layout_rejects_a_symlinked_managed_directory() {
+        use std::os::unix::fs::symlink;
+
+        let (_dir, root) = temp_root();
+        let library = AssetLibrary::open(root.clone()).unwrap();
+        let assets = root.join("Assets");
+        std::fs::remove_dir(&assets).unwrap();
+        let outside = root.join("outside-assets");
+        std::fs::create_dir(&outside).unwrap();
+        symlink(&outside, &assets).unwrap();
+
+        assert!(matches!(
+            library.validate_storage_layout(),
+            Err(AssetLibraryError::Io(_))
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn annotation_reads_reject_symlinked_optional_files() {
+        use std::os::unix::fs::symlink;
+
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let asset = library
+            .import_data_with_annotation_project(
+                b"flattened",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+                b"clean-source",
+                &annotation_document("capture"),
+            )
+            .unwrap();
+        let project = library.load_annotation_project(&asset.id).unwrap().unwrap();
+        let outside = root.join("outside.json");
+        std::fs::write(&outside, std::fs::read(&project.document_url).unwrap()).unwrap();
+        std::fs::remove_file(&project.document_url).unwrap();
+        symlink(&outside, &project.document_url).unwrap();
+
+        assert!(matches!(
+            library.load_editor_snapshot(&asset.id),
+            Err(AssetLibraryError::Io(_))
+        ));
+    }
+
+    #[test]
+    fn atomic_write_replaces_existing_content_without_temporary_leaks() {
+        let (_dir, root) = temp_root();
+        let path = root.join("library.json");
+        std::fs::write(&path, b"old").unwrap();
+
+        atomic_write(&path, b"new").unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+            let name = entry.unwrap().file_name();
+            let name = name.to_string_lossy();
+            !name.ends_with(".tmp") && !name.ends_with(".backup")
+        }));
+    }
+
+    #[test]
+    fn atomic_write_cleans_its_temporary_file_when_replacement_fails() {
+        let (_dir, root) = temp_root();
+        let path = root.join("blocked");
+        std::fs::create_dir(&path).unwrap();
+
+        assert!(matches!(
+            atomic_write(&path, b"must not replace the directory"),
+            Err(AssetLibraryError::Io(_))
+        ));
+        assert!(path.is_dir());
+        assert!(std::fs::read_dir(&root).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".blocked.")
+        }));
     }
 
     #[test]
