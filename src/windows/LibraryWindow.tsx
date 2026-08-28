@@ -17,7 +17,10 @@ import {
 import { t, fmt } from "../i18n";
 import brandIcon from "../../src-tauri/icons/128x128.png";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
-import { SettingsView } from "../settings/SettingsView";
+
+const SettingsView = React.lazy(() =>
+  import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })),
+);
 
 type Section = "library" | "trash";
 type Destination = "captures" | "settings";
@@ -779,7 +782,7 @@ export function LibraryWindow() {
                     thumbnailRevision={thumbnailRevisions[asset.id] ?? 0}
                     menuOpen={menuFor === asset.id}
                     onMenu={(x, y) => openMenu(asset.id, x, y)}
-                    menu={itemMenu(asset)}
+                    menu={menuFor === asset.id ? itemMenu(asset) : null}
                     selected={selection.has(asset.id)}
                     onSelect={() => selectSingle(asset.id)}
                     onToggleSelect={() => toggleSelect(asset.id)}
@@ -797,7 +800,24 @@ export function LibraryWindow() {
       )}
         </>
       ) : (
-        <SettingsView />
+        <React.Suspense
+          fallback={
+            <div
+              role="status"
+              style={{
+                flex: 1,
+                display: "grid",
+                placeItems: "center",
+                color: "var(--kiri-secondary-label)",
+                fontSize: 12.5,
+              }}
+            >
+              {t("Loading Settings…")}
+            </div>
+          }
+        >
+          <SettingsView />
+        </React.Suspense>
       )}
 
       {/* Window-level progress and local notices stay in one predictable

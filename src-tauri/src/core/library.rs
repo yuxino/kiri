@@ -2,6 +2,9 @@
 //! Storage layout and JSON schema stay compatible with the Swift app, so an
 //! existing library at ~/Library/Application Support/kiri keeps working.
 
+#[cfg(test)]
+use std::cell::Cell;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use chrono::{Local, TimeZone};
@@ -19,6 +22,8 @@ pub enum AssetLibraryError {
     Io(#[from] std::io::Error),
     #[error("library index is corrupted: {0}")]
     CorruptIndex(#[source] serde_json::Error),
+    #[error("library index was updated, but {failed_files} file(s) could not be removed")]
+    CleanupFailed { failed_files: usize },
 }
 
 pub type Result<T> = std::result::Result<T, AssetLibraryError>;
@@ -28,6 +33,8 @@ pub struct AssetLibrary {
     thumbnails_url: PathBuf,
     index_url: PathBuf,
     index: Vec<CaptureAsset>,
+    #[cfg(test)]
+    persist_count: Cell<usize>,
 }
 
 impl AssetLibrary {
@@ -52,6 +59,8 @@ impl AssetLibrary {
             thumbnails_url,
             index_url,
             index,
+            #[cfg(test)]
+            persist_count: Cell::new(0),
         })
     }
 
@@ -208,6 +217,51 @@ impl AssetLibrary {
         self.update(id, |asset| asset.trashed_at = None)
     }
 
+    pub fn batch_set_favorite(&mut self, favorite: bool, ids: &[uuid::Uuid]) -> Result<()> {
+        self.batch_update(ids, |asset| asset.is_favorite = favorite)
+    }
+
+    pub fn batch_move_to_trash(&mut self, ids: &[uuid::Uuid]) -> Result<()> {
+        let trashed_at = now_ms();
+        self.batch_update(ids, |asset| asset.trashed_at = Some(trashed_at))
+    }
+
+    pub fn batch_restore(&mut self, ids: &[uuid::Uuid]) -> Result<()> {
+        self.batch_update(ids, |asset| asset.trashed_at = None)
+    }
+
+    /// Atomically removes every requested asset from the persisted index, then
+    /// cleans up its files. A cleanup error is reported only after the index is
+    /// committed; callers must treat `CleanupFailed` as a committed mutation.
+    pub fn batch_permanently_delete(&mut self, ids: &[uuid::Uuid]) -> Result<()> {
+        let requested = self.validated_batch_ids(ids)?;
+        if requested.is_empty() {
+            return Ok(());
+        }
+
+        let mut removed = Vec::with_capacity(requested.len());
+        let mut next_index = Vec::with_capacity(self.index.len().saturating_sub(requested.len()));
+        for asset in &self.index {
+            if requested.contains(&asset.id) {
+                removed.push(asset.clone());
+            } else {
+                next_index.push(asset.clone());
+            }
+        }
+
+        self.persist_index(&next_index)?;
+        self.index = next_index;
+
+        let failed_files = removed
+            .iter()
+            .map(|asset| self.cleanup_asset_files(asset))
+            .sum();
+        if failed_files > 0 {
+            return Err(AssetLibraryError::CleanupFailed { failed_files });
+        }
+        Ok(())
+    }
+
     pub fn permanently_delete(&mut self, id: &uuid::Uuid) -> Result<()> {
         let position = self
             .index
@@ -270,11 +324,61 @@ impl AssetLibrary {
         Ok(())
     }
 
+    fn batch_update(
+        &mut self,
+        ids: &[uuid::Uuid],
+        mut mutation: impl FnMut(&mut CaptureAsset),
+    ) -> Result<()> {
+        let requested = self.validated_batch_ids(ids)?;
+        if requested.is_empty() {
+            return Ok(());
+        }
+
+        let mut next_index = self.index.clone();
+        for asset in &mut next_index {
+            if requested.contains(&asset.id) {
+                mutation(asset);
+            }
+        }
+        self.persist_index(&next_index)?;
+        self.index = next_index;
+        Ok(())
+    }
+
+    fn validated_batch_ids(&self, ids: &[uuid::Uuid]) -> Result<HashSet<uuid::Uuid>> {
+        let requested = ids.iter().copied().collect::<HashSet<_>>();
+        if requested.iter().any(|id| self.asset_by_id(id).is_none()) {
+            return Err(AssetLibraryError::AssetNotFound);
+        }
+        Ok(requested)
+    }
+
+    fn cleanup_asset_files(&self, asset: &CaptureAsset) -> usize {
+        let paths = [
+            self.asset_url(asset),
+            self.thumbnails_url
+                .join(format!("{}.jpg", asset.id.to_string().to_lowercase())),
+        ];
+        paths
+            .iter()
+            .filter(|path| match std::fs::remove_file(path) {
+                Ok(()) => false,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+                Err(error) => {
+                    log::error!("could not remove permanently deleted asset file: {error}");
+                    true
+                }
+            })
+            .count()
+    }
+
     fn persist(&self) -> Result<()> {
         self.persist_index(&self.index)
     }
 
     fn persist_index(&self, index: &[CaptureAsset]) -> Result<()> {
+        #[cfg(test)]
+        self.persist_count.set(self.persist_count.get() + 1);
         let data = serde_json::to_vec_pretty(index).map_err(AssetLibraryError::CorruptIndex)?;
         atomic_write(&self.index_url, &data)
     }
@@ -365,6 +469,25 @@ mod tests {
         (dir, path)
     }
 
+    fn import_test_assets(library: &mut AssetLibrary, count: usize) -> Vec<CaptureAsset> {
+        (0..count)
+            .map(|index| {
+                library
+                    .import_data(
+                        format!("asset-{index}").as_bytes(),
+                        CaptureKind::Image,
+                        "png",
+                        1,
+                        1,
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap()
+            })
+            .collect()
+    }
+
     #[test]
     fn imports_and_lists_assets() {
         let (_dir, root) = temp_root();
@@ -448,6 +571,164 @@ mod tests {
         let reopened = AssetLibrary::open(root).unwrap();
         assert!(reopened.asset_by_id(&asset.id).is_some());
         assert!(reopened.asset_url(&asset).exists());
+    }
+
+    #[test]
+    fn batch_mutations_persist_once_for_multiple_assets() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let assets = import_test_assets(&mut library, 3);
+        let ids = assets.iter().map(|asset| asset.id).collect::<Vec<_>>();
+
+        library.persist_count.set(0);
+        library.batch_move_to_trash(&ids).unwrap();
+        assert_eq!(library.persist_count.get(), 1);
+        assert!(ids
+            .iter()
+            .all(|id| library.asset_by_id(id).unwrap().trashed_at.is_some()));
+
+        library.persist_count.set(0);
+        library.batch_restore(&ids).unwrap();
+        assert_eq!(library.persist_count.get(), 1);
+        assert!(ids
+            .iter()
+            .all(|id| library.asset_by_id(id).unwrap().trashed_at.is_none()));
+
+        library.persist_count.set(0);
+        library.batch_set_favorite(true, &ids).unwrap();
+        assert_eq!(library.persist_count.get(), 1);
+        assert!(ids
+            .iter()
+            .all(|id| library.asset_by_id(id).unwrap().is_favorite));
+
+        library.persist_count.set(0);
+        library.batch_permanently_delete(&ids).unwrap();
+        assert_eq!(library.persist_count.get(), 1);
+        assert!(ids.iter().all(|id| library.asset_by_id(id).is_none()));
+        assert!(assets
+            .iter()
+            .all(|asset| !library.asset_url(asset).exists()));
+    }
+
+    #[test]
+    fn batch_validation_failure_has_no_partial_mutation_or_persist() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let assets = import_test_assets(&mut library, 2);
+        let missing = uuid::Uuid::new_v4();
+        let ids = vec![assets[0].id, missing, assets[1].id];
+
+        library.persist_count.set(0);
+        assert!(matches!(
+            library.batch_move_to_trash(&ids),
+            Err(AssetLibraryError::AssetNotFound)
+        ));
+        assert_eq!(library.persist_count.get(), 0);
+        assert!(assets.iter().all(|asset| library
+            .asset_by_id(&asset.id)
+            .unwrap()
+            .trashed_at
+            .is_none()));
+
+        assert!(matches!(
+            library.batch_set_favorite(true, &ids),
+            Err(AssetLibraryError::AssetNotFound)
+        ));
+        assert_eq!(library.persist_count.get(), 0);
+        assert!(assets
+            .iter()
+            .all(|asset| !library.asset_by_id(&asset.id).unwrap().is_favorite));
+
+        for asset in &assets {
+            library.move_to_trash(&asset.id).unwrap();
+        }
+        library.persist_count.set(0);
+        assert!(matches!(
+            library.batch_restore(&ids),
+            Err(AssetLibraryError::AssetNotFound)
+        ));
+        assert_eq!(library.persist_count.get(), 0);
+        assert!(assets.iter().all(|asset| library
+            .asset_by_id(&asset.id)
+            .unwrap()
+            .trashed_at
+            .is_some()));
+
+        assert!(matches!(
+            library.batch_permanently_delete(&ids),
+            Err(AssetLibraryError::AssetNotFound)
+        ));
+        assert_eq!(library.persist_count.get(), 0);
+        assert!(assets
+            .iter()
+            .all(|asset| library.asset_by_id(&asset.id).is_some()));
+        assert!(assets.iter().all(|asset| library.asset_url(asset).exists()));
+    }
+
+    #[test]
+    fn batch_persist_failure_keeps_memory_disk_and_files() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let assets = import_test_assets(&mut library, 2);
+        let ids = assets.iter().map(|asset| asset.id).collect::<Vec<_>>();
+
+        let blocked_index = root.join("blocked-index");
+        std::fs::create_dir(&blocked_index).unwrap();
+        library.index_url = blocked_index;
+
+        library.persist_count.set(0);
+        assert!(matches!(
+            library.batch_move_to_trash(&ids),
+            Err(AssetLibraryError::Io(_))
+        ));
+        assert_eq!(library.persist_count.get(), 1);
+        assert!(assets.iter().all(|asset| library
+            .asset_by_id(&asset.id)
+            .unwrap()
+            .trashed_at
+            .is_none()));
+
+        library.persist_count.set(0);
+        assert!(matches!(
+            library.batch_permanently_delete(&ids),
+            Err(AssetLibraryError::Io(_))
+        ));
+        assert_eq!(library.persist_count.get(), 1);
+        assert!(assets
+            .iter()
+            .all(|asset| library.asset_by_id(&asset.id).is_some()));
+        assert!(assets.iter().all(|asset| library.asset_url(asset).exists()));
+
+        let reopened = AssetLibrary::open(root).unwrap();
+        assert!(assets
+            .iter()
+            .all(|asset| reopened.asset_by_id(&asset.id).is_some()));
+    }
+
+    #[test]
+    fn batch_delete_reports_cleanup_failure_after_committing_index() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let assets = import_test_assets(&mut library, 2);
+        let ids = assets.iter().map(|asset| asset.id).collect::<Vec<_>>();
+        library.batch_move_to_trash(&ids).unwrap();
+
+        let blocked_asset_path = library.asset_url(&assets[0]);
+        std::fs::remove_file(&blocked_asset_path).unwrap();
+        std::fs::create_dir(&blocked_asset_path).unwrap();
+
+        library.persist_count.set(0);
+        assert!(matches!(
+            library.batch_permanently_delete(&ids),
+            Err(AssetLibraryError::CleanupFailed { failed_files: 1 })
+        ));
+        assert_eq!(library.persist_count.get(), 1);
+        assert!(ids.iter().all(|id| library.asset_by_id(id).is_none()));
+        assert!(blocked_asset_path.is_dir());
+        assert!(!library.asset_url(&assets[1]).exists());
+
+        let reopened = AssetLibrary::open(root).unwrap();
+        assert!(ids.iter().all(|id| reopened.asset_by_id(id).is_none()));
     }
 
     #[test]

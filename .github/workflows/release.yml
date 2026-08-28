@@ -10,33 +10,24 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify-version:
     name: Verify release version
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: node scripts/release-version.mjs "$GITHUB_REF_NAME"
 
   build-macos:
-    name: Build macOS app (${{ matrix.arch }})
+    name: Block macOS release packaging
     needs: verify-version
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: arm64
-            runner: macos-15
-          - arch: x64
-            runner: macos-15-intel
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
       - name: Require a persistent macOS release identity
         shell: bash
         run: |
@@ -55,19 +46,20 @@ jobs:
     name: Build Windows app
     needs: verify-version
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - run: npm install -g pnpm@10
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:release-tools
-      - run: pnpm icons:verify
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

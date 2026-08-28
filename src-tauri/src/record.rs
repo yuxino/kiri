@@ -1,5 +1,5 @@
 //! Recording encoder — pipes raw video/audio frames into FFmpeg and produces
-//! the application's H.264/HEVC + AAC MP4 output.
+//! the application's H.264 + AAC MP4 output.
 
 use std::collections::VecDeque;
 use std::io::{Read, Write};

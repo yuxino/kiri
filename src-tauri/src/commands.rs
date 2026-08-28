@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindo
 use crate::capture::current as capture_backend;
 use crate::core::asset::{CaptureAsset, CaptureKind};
 use crate::core::geometry::Rect;
+use crate::core::library::AssetLibraryError;
 use crate::core::policy::{RecordingOptions, RecordingOutputFormat};
 use crate::core::shortcut::KIRI_CAPTURE;
 use crate::platform;
@@ -241,9 +242,9 @@ pub fn batch_move_to_trash(app: AppHandle, ids: Vec<String>) -> Result<(), Strin
     {
         let state = app.state::<AppState>();
         let mut library = state.library.lock().unwrap();
-        for id in &parsed {
-            library.move_to_trash(id).map_err(|e| e.to_string())?;
-        }
+        library
+            .batch_move_to_trash(&parsed)
+            .map_err(|e| e.to_string())?;
     }
     emit_library_changed(&app);
     Ok(())
@@ -255,9 +256,7 @@ pub fn batch_restore(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
     {
         let state = app.state::<AppState>();
         let mut library = state.library.lock().unwrap();
-        for id in &parsed {
-            library.restore(id).map_err(|e| e.to_string())?;
-        }
+        library.batch_restore(&parsed).map_err(|e| e.to_string())?;
     }
     emit_library_changed(&app);
     Ok(())
@@ -268,15 +267,17 @@ pub fn batch_permanently_delete(app: AppHandle, ids: Vec<String>) -> Result<(), 
     let parsed = parse_ids(&ids)?;
     let state = app.state::<AppState>();
     let store = app.state::<crate::protocol::ProtocolStore>();
-    crate::protocol::with_thumbnail_invalidations(&store, &parsed, || {
-        let mut library = state.library.lock().unwrap();
-        for id in &parsed {
-            library.permanently_delete(id).map_err(|e| e.to_string())?;
-        }
-        Ok::<(), String>(())
-    })?;
-    emit_library_changed(&app);
-    Ok(())
+    let result = crate::protocol::with_thumbnail_invalidations(&store, &parsed, || {
+        state
+            .library
+            .lock()
+            .unwrap()
+            .batch_permanently_delete(&parsed)
+    });
+    if result.is_ok() || matches!(&result, Err(AssetLibraryError::CleanupFailed { .. })) {
+        emit_library_changed(&app);
+    }
+    result.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -285,11 +286,9 @@ pub fn batch_set_favorite(app: AppHandle, ids: Vec<String>, favorite: bool) -> R
     {
         let state = app.state::<AppState>();
         let mut library = state.library.lock().unwrap();
-        for id in &parsed {
-            library
-                .set_favorite(favorite, id)
-                .map_err(|e| e.to_string())?;
-        }
+        library
+            .batch_set_favorite(favorite, &parsed)
+            .map_err(|e| e.to_string())?;
     }
     emit_library_changed(&app);
     Ok(())

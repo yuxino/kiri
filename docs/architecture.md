@@ -96,8 +96,8 @@ never remain hidden behind the OCR result surface.
 Platform capture produces BGRA video frames and optional PCM audio. macOS uses
 ScreenCaptureKit. Windows uses Windows Graphics Capture plus WASAPI through
 `cpal`. Rust feeds the actual pixel and audio formats to FFmpeg and first
-produces a 30 fps H.264/HEVC MP4 with AAC audio. Hardware encoding is probed
-first and falls back to `libx264`.
+produces a 30 fps H.264 MP4 with AAC audio. Hardware encoding is probed first
+and falls back to `libx264`.
 
 The recording panel explicitly chooses the final MP4 or GIF output before
 capture starts; existing saved options without this field default to MP4. GIF
@@ -181,6 +181,9 @@ display without taking focus and is protected/excluded from subsequent captures.
 - Windows library: `%APPDATA%\\kiri`
 - Assets are indexed by `library.json`; Trash is recoverable and never empties
   automatically.
+- Batch asset mutations validate every identifier, publish `library.json` once,
+  and update memory only after that write succeeds. Permanent deletion removes
+  files only after the new index is durable.
 - OCR profile metadata is stored in the app configuration directory; secrets
   never appear in that JSON, IPC responses, or logs.
 - Credential replacement and deletion use a non-secret journal so interrupted

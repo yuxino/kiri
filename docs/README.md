@@ -13,7 +13,7 @@ application or a durable product decision.
 - [`../PRIVACY.md`](../PRIVACY.md) and [`../SECURITY.md`](../SECURITY.md) —
   network, credential, and local-data boundaries.
 
-## Accepted decisions
+## Decision records
 
 - [`adr/0003-manual-region-selection.md`](adr/0003-manual-region-selection.md)
   — quiet single-outline window selection.
@@ -32,6 +32,9 @@ application or a durable product decision.
 - [`adr/0012-interactive-completion-and-recording-output.md`](adr/0012-interactive-completion-and-recording-output.md)
   — interactive completion actions, explicit MP4/GIF output, and the neutral
   recording countdown.
+- [`adr/0013-fail-closed-macos-release-signing.md`](adr/0013-fail-closed-macos-release-signing.md)
+  — fail-closed release packaging until CI can prove a persistent macOS
+  signing identity.
 - [`adr/0014-user-initiated-update-checks.md`](adr/0014-user-initiated-update-checks.md)
   — explicit, bounded update checks without background downloads or installs.
 - [`adr/0015-monochrome-workspace-visual-system.md`](adr/0015-monochrome-workspace-visual-system.md)
