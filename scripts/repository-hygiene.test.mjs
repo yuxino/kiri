@@ -17,6 +17,11 @@ function filesUnder(directory, extensions) {
   });
 }
 
+function releaseWindowsJob(source) {
+  const workflow = source.replace(/\r\n?/g, "\n");
+  return workflow.match(/\n  build-windows:\n([\s\S]*)$/)?.[1];
+}
+
 test("the repository has one canonical Tauri and Cargo project", () => {
   for (const obsoletePath of ["Cargo.toml", "Cargo.lock", "crates", "tauri-app"]) {
     assert.equal(
@@ -66,8 +71,8 @@ test("release CI does not create an intentional red light or ad-hoc macOS packag
   const workflow = readFileSync(
     join(repositoryRoot, ".github", "workflows", "release.yml"),
     "utf8",
-  );
-  const windowsJob = workflow.match(/\n  build-windows:\n([\s\S]*)$/)?.[1];
+  ).replace(/\r\n?/g, "\n");
+  const windowsJob = releaseWindowsJob(workflow);
 
   assert.doesNotMatch(workflow, /\bexit\s+1\b/, "policy must not deliberately fail a release");
   assert.doesNotMatch(workflow, /\n  build-macos:/);
@@ -76,6 +81,23 @@ test("release CI does not create an intentional red light or ad-hoc macOS packag
   assert.ok(windowsJob, "release.yml must retain the Windows release job");
   assert.match(windowsJob, /needs: verify-version/);
   assert.match(windowsJob, /releaseDraft:\s*true/);
+});
+
+test("release Windows job parsing accepts LF and CRLF", () => {
+  const fixture = [
+    "jobs:",
+    "  verify-version:",
+    "    runs-on: ubuntu-latest",
+    "  build-windows:",
+    "    needs: verify-version",
+    "    releaseDraft: true",
+  ].join("\n");
+
+  for (const newline of ["\n", "\r\n"]) {
+    const windowsJob = releaseWindowsJob(fixture.replaceAll("\n", newline));
+    assert.match(windowsJob, /needs: verify-version/);
+    assert.match(windowsJob, /releaseDraft:\s*true/);
+  }
 });
 
 test("completed migration material stays in Git history", () => {
