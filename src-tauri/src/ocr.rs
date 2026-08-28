@@ -82,7 +82,9 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
     // Write the pixel bytes into an IBuffer via DataWriter (the windows crate
     // no longer exposes Buffer::as_mut for raw writes).
     let writer = DataWriter::new().map_err(|error| anyhow!("{error}"))?;
-    writer.WriteBytes(&raw).map_err(|error| anyhow!("{error}"))?;
+    writer
+        .WriteBytes(&raw)
+        .map_err(|error| anyhow!("{error}"))?;
     let buffer = writer.DetachBuffer().map_err(|error| anyhow!("{error}"))?;
 
     let bitmap: windows::Graphics::Imaging::SoftwareBitmap =

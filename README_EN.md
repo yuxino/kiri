@@ -9,7 +9,7 @@
   </p>
 </div>
 
-Press the shortcut, select a window or region, then capture, annotate, recognize text, or record the screen. Finished captures are copied to the clipboard and saved in the local library.
+Press the shortcut, select a window or region, then capture, annotate, recognize text, or record the screen. Screenshots are copied to the clipboard automatically; screenshots, MP4 recordings, and GIFs are all saved in the local library.
 
 Kiri is primarily developed and tested on macOS. The Windows build has not completed real-device acceptance testing, so installation, permissions, or some features may not work correctly.
 
@@ -25,9 +25,11 @@ Kiri is primarily developed and tested on macOS. The Windows build has not compl
 Download the latest version from [GitHub Releases](https://github.com/yuxino/kiri/releases/latest).
 
 - **macOS 14+**: download the Apple Silicon (`arm64`) or Intel (`x64`) `.dmg`, open it, and drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording** permission. **Input Monitoring** is needed only for click highlights, and **Microphone** only when microphone recording is enabled.
-- **Windows**: run the installer. Screen capture does not require an extra system permission; microphone access follows Windows privacy settings. The Windows version has not been tested on a real device and may fail to install or use some features.
+- **Windows**: run the installer. Screen capture does not require an extra system permission; microphone access follows Windows privacy settings. The current installer is not Authenticode-signed, so Windows SmartScreen may show a warning. The Windows version has not been tested on a real device and may fail to install or use some features.
 
-> GitHub release builds are currently ad-hoc signed because the project does not have an Apple Developer ID. macOS may request Screen Recording permission again after an upgrade. If Gatekeeper blocks the first launch, Control-click `Kiri.app` and choose **Open**, or use **System Settings → Privacy & Security → Open Anyway**. You do not need to disable Gatekeeper.
+> The currently downloadable macOS GitHub release is ad-hoc signed. macOS may request Screen Recording permission again after an upgrade. If Gatekeeper blocks the first launch, Control-click `Kiri.app` and choose **Open**, or use **System Settings → Privacy & Security → Open Anyway**. You do not need to disable Gatekeeper.
+>
+> To avoid resetting privacy permissions again on later upgrades, new macOS GitHub release builds are paused. They will resume only after CI has a persistent private-key-backed signing identity and verifies the final app identity.
 
 Remote OCR is optional. API keys are stored in macOS Keychain or Windows Credential Manager, not in the profile file. Creating or selecting a remote profile sends nothing; each request requires an explicit **Send** or **Retry** action.
 

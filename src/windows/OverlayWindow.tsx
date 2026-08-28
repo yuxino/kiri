@@ -558,9 +558,16 @@ export function OverlayWindow() {
         setSelection(null);
         selectionRef.current = null;
       }
-      if (phaseRef.current !== "mode-select" && phaseRef.current !== "selecting") return;
+      if (
+        phaseRef.current !== "mode-select" &&
+        phaseRef.current !== "selecting" &&
+        phaseRef.current !== "record-options"
+      ) return;
       const p = clampPoint(toPoint(e), bounds);
-      if (phaseRef.current === "selecting" && selectionRef.current) {
+      if (
+        (phaseRef.current === "selecting" || phaseRef.current === "record-options") &&
+        selectionRef.current
+      ) {
         // Handle or move the existing selection.
         const handle = hitTestHandle(p, selectionRef.current, 10);
         if (handle) {
@@ -584,6 +591,7 @@ export function OverlayWindow() {
       const interactive =
         phaseRef.current === "mode-select" ||
         phaseRef.current === "selecting" ||
+        phaseRef.current === "record-options" ||
         (phaseRef.current === "ocr-result" && !!drag);
       if (!interactive) return;
       // Hover outline while not dragging. OCR mode never hovers windows
@@ -751,7 +759,10 @@ export function OverlayWindow() {
         // frozen image is ready (mirroring the original's freeze behavior).
         background: frozenSrc ? "#141414" : "transparent",
         overflow: "hidden",
-        cursor: phase === "selecting" ? "crosshair" : "default",
+        cursor:
+          phase === "selecting" || phase === "record-options"
+            ? "crosshair"
+            : "default",
       }}
       onPointerDown={phase === "annotating" ? undefined : onPointerDown}
       onPointerMove={phase === "annotating" ? undefined : onPointerMove}

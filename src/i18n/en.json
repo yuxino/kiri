@@ -102,6 +102,8 @@
   "Transparent": "Transparent",
   "Dark": "Dark",
   "Save As…": "Save As…",
+  "Couldn't save the edited image. Try again.": "Couldn't save the edited image. Try again.",
+  "Couldn't copy the edited image. Try again.": "Couldn't copy the edited image. Try again.",
   "Clear Annotations": "Clear Annotations",
   "Release for recording settings": "Release for recording settings",
   "Release to show tools": "Release to show tools",

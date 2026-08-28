@@ -9,7 +9,6 @@
     "countdown",
     "control-panel",
     "ripple",
-    "pin-*",
     "viewer-*",
     "toast",
     "confirm"

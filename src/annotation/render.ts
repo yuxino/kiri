@@ -5,6 +5,7 @@ import type { AnnotationMark, ColorPreset, TextBackgroundStyle } from "./model";
 import { COLOR_HEX, MOSAIC_VIEW_BLOCK_SIZE, arrowHeadPoints, selectionBounds } from "./model";
 import type { Point, Rect } from "./geom";
 import { inset, intersection, maxX, maxY, minX, minY, standardized } from "./geom";
+import { layoutTextLines } from "./text-layout.js";
 
 const FONT_STACK =
   '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif';
@@ -186,46 +187,11 @@ function wrapText(
   maxWidth: number,
   fontSize: number,
 ) {
-  // Spec §5.5: wrap within the rect width. CJK text has no spaces, so
-  // break per character for CJK runs while keeping Latin word wrapping.
   const lineHeight = fontSize * 1.25;
-  let line = "";
-  let lineY = y;
-  const flush = () => {
-    if (line) ctx.fillText(line, x, lineY);
-  };
-  let index = 0;
-  while (index < text.length) {
-    const ch = text[index];
-    const isCjk = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/.test(ch);
-    const candidate = line ? `${line}${ch}` : ch;
-    const tooWide = ctx.measureText(candidate).width > Math.max(1, maxWidth) && line !== "";
-    if (tooWide) {
-      flush();
-      line = "";
-      lineY += lineHeight;
-      continue;
-    }
-    if (isCjk) {
-      line += ch;
-    } else {
-      // Latin: accumulate whole words.
-      const rest = text.slice(index);
-      const wordMatch = rest.match(/^\s*\S+/);
-      const word = wordMatch ? wordMatch[0] : ch;
-      const test = line ? `${line}${word}` : word.trim();
-      if (ctx.measureText(test).width > Math.max(1, maxWidth) && line) {
-        flush();
-        line = "";
-        lineY += lineHeight;
-        continue;
-      }
-      line = test;
-      index += word.length - 1;
-    }
-    index += 1;
+  const lines = layoutTextLines(text, maxWidth, (value) => ctx.measureText(value).width);
+  for (const [index, line] of lines.entries()) {
+    if (line) ctx.fillText(line, x, y + index * lineHeight);
   }
-  flush();
 }
 
 // ---------------------------------------------------------------------------

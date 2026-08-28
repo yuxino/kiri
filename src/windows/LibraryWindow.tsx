@@ -15,7 +15,6 @@ import {
   type NoticeDto,
 } from "../lib/ipc";
 import { t, fmt } from "../i18n";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import brandIcon from "../../src-tauri/icons/128x128.png";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 import { SettingsView } from "../settings/SettingsView";
@@ -28,7 +27,7 @@ function thumbnailUrl(id: string, revision: number): string {
 }
 
 /** Groups assets by calendar day, newest group first. */
-function groupByDay(assets: AssetDto[]): { label: string; assets: AssetDto[] }[] {
+function groupByDay(assets: AssetDto[]): { key: string; label: string; assets: AssetDto[] }[] {
   const groups = new Map<string, AssetDto[]>();
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -55,7 +54,7 @@ function groupByDay(assets: AssetDto[]): { label: string; assets: AssetDto[] }[]
       month: "short",
       day: "numeric",
     });
-    return { label, assets: items };
+    return { key: start, label, assets: items };
   });
 }
 
@@ -536,7 +535,7 @@ export function LibraryWindow() {
               <span className="library-control-panel__subtitle">
                 {destination === "settings"
                   ? t("Language and text recognition")
-                  : fmt("%d captures", assets.length)}
+                  : fmt(assets.length === 1 ? "%d capture" : "%d captures", assets.length)}
               </span>
             </div>
           </div>
@@ -732,7 +731,7 @@ export function LibraryWindow() {
             />
           )}
           {groupByDay(filteredAssets).map((group) => (
-            <div key={group.label} style={{ marginBottom: 22 }}>
+            <div key={group.key} style={{ marginBottom: 22 }}>
               <div
                 style={{
                   display: "flex",
@@ -789,28 +788,6 @@ export function LibraryWindow() {
                       else cardElsRef.current.delete(asset.id);
                     }}
                     onDoubleClick={() => void api.openAsset(asset.id).catch(() => {})}
-                    onDragStart={(e) => {
-                      // Only start a file drag from the thumbnail — dragging
-                      // from the action buttons (Copy / favorite / ⋯) would
-                      // swallow their click (HTML5 drag cancels click).
-                      const target = e.target as HTMLElement | null;
-                      if (target && target.closest("button")) {
-                        e.preventDefault();
-                        return;
-                      }
-                      // Drag-out exports the file (HTML5 drag handled by Tauri).
-                      void (
-                        getCurrentWebview() as unknown as {
-                          startDragging(args: unknown): Promise<void>;
-                        }
-                      )
-                        .startDragging({
-                          type: "files",
-                          files: [asset.filePath],
-                        })
-                        .catch(() => {});
-                      e.preventDefault();
-                    }}
                   />
                 ))}
               </div>
@@ -964,7 +941,6 @@ function AssetCard(props: {
   onMenu(x: number, y: number): void;
   menu: React.ReactNode;
   onDoubleClick(): void;
-  onDragStart(e: React.DragEvent): void;
   selected: boolean;
   onSelect(): void;
   onToggleSelect(): void;
@@ -977,7 +953,6 @@ function AssetCard(props: {
     onMenu,
     menu,
     onDoubleClick,
-    onDragStart,
     selected,
     onSelect,
     onToggleSelect,
@@ -1065,9 +1040,7 @@ function AssetCard(props: {
   return (
     <div
       ref={registerRef}
-      draggable
       data-card={asset.id}
-      onDragStart={onDragStart}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
       onContextMenu={(e) => {
@@ -1284,8 +1257,6 @@ function AssetCard(props: {
           <button
             className="kiri-icon-button"
             title={t("View")}
-            draggable={false}
-            onDragStart={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
@@ -1308,13 +1279,7 @@ function AssetCard(props: {
           <button
             className="kiri-icon-button"
             title={t("Copy")}
-            draggable={false}
-            onDragStart={(e) => e.preventDefault()}
-            onMouseDown={(e) => {
-              // Prevent the draggable card from starting an HTML5 drag when
-              // pressing the button — a drag would swallow the click.
-              e.preventDefault();
-            }}
+            onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
               void api.copyAsset(asset.id).catch(() => {});
@@ -1338,8 +1303,6 @@ function AssetCard(props: {
             className="kiri-icon-button"
             title={asset.isFavorite ? t("Remove Favorite") : t("Favorite")}
             aria-pressed={asset.isFavorite}
-            draggable={false}
-            onDragStart={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
@@ -1370,8 +1333,6 @@ function AssetCard(props: {
           <button
             className="kiri-icon-button"
             title={t("More Actions")}
-            draggable={false}
-            onDragStart={(e) => e.preventDefault()}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();

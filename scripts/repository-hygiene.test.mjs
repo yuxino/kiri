@@ -27,6 +27,17 @@ test("the repository has one canonical Tauri and Cargo project", () => {
   }
 });
 
+test("the default capability does not authorize removed windows", () => {
+  const capability = JSON.parse(
+    readFileSync(join(repositoryRoot, "src-tauri", "capabilities", "default.json"), "utf8"),
+  );
+  assert.equal(
+    capability.windows.includes("pin-*"),
+    false,
+    "the removed pinned-image window must not retain Tauri capabilities",
+  );
+});
+
 test("permission-sensitive macOS entry points never allow ad-hoc signing", () => {
   const paths = [
     ".github/workflows/build.yml",

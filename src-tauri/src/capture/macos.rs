@@ -5,6 +5,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::Weak;
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use block2::RcBlock;
@@ -480,6 +481,41 @@ fn cgimage_to_png(image: &CFRetained<CGImage>) -> Result<(Vec<u8>, i64, i64)> {
     Ok((bytes, width, height))
 }
 
+const SCREENSHOT_CALLBACK_TIMEOUT: Duration = Duration::from_secs(8);
+
+fn receive_screenshot_callback<T>(
+    receiver: &mpsc::Receiver<std::result::Result<T, String>>,
+    timeout: Duration,
+) -> Result<T> {
+    match receiver.recv_timeout(timeout) {
+        Ok(Ok(value)) => Ok(value),
+        Ok(Err(message)) => Err(anyhow!(message)),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            Err(anyhow!("screenshot capture timed out after 8s"))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(anyhow!("screenshot callback disconnected"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod screenshot_callback_tests {
+    use super::*;
+
+    #[test]
+    fn timeout_and_disconnection_have_distinct_errors() {
+        let (_sender, receiver) = mpsc::channel::<std::result::Result<(), String>>();
+        let timeout = receive_screenshot_callback(&receiver, Duration::ZERO).unwrap_err();
+        assert_eq!(timeout.to_string(), "screenshot capture timed out after 8s");
+
+        let (sender, receiver) = mpsc::channel::<std::result::Result<(), String>>();
+        drop(sender);
+        let disconnected = receive_screenshot_callback(&receiver, Duration::ZERO).unwrap_err();
+        assert_eq!(disconnected.to_string(), "screenshot callback disconnected");
+    }
+}
+
 pub fn capture_active_display() -> Result<CapturedDisplay> {
     match check_capture_permission() {
         PermissionState::Authorized => {}
@@ -541,10 +577,7 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
             Some(block_ref),
         );
     }
-    let image = rx
-        .recv()
-        .map_err(|_| anyhow!("screenshot callback dropped"))?
-        .map_err(|message| anyhow!(message))?;
+    let image = receive_screenshot_callback(&rx, SCREENSHOT_CALLBACK_TIMEOUT)?;
 
     let (png_data, pixel_width, pixel_height) = cgimage_to_png(&image)?;
     Ok(CapturedDisplay {

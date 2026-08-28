@@ -35,7 +35,6 @@ export interface AssetDto {
   sourceApplication: string | null;
   isFavorite: boolean;
   trashedAt: number | null;
-  filePath: string;
   gifEligible: boolean;
 }
 

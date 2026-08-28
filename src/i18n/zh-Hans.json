@@ -102,6 +102,8 @@
   "Transparent": "透明",
   "Dark": "深色",
   "Save As…": "另存为…",
+  "Couldn't save the edited image. Try again.": "无法保存编辑后的图片，请重试。",
+  "Couldn't copy the edited image. Try again.": "无法复制编辑后的图片，请重试。",
   "Clear Annotations": "清除标注",
   "Release for recording settings": "松开以设置录屏",
   "Release to show tools": "松开以显示工具",

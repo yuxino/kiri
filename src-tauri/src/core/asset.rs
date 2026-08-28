@@ -76,7 +76,10 @@ pub struct CaptureAsset {
     /// User-assigned labels (metadata only, like the Swift roadmap's Tags).
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tags: Vec<String>,
-    #[serde(serialize_with = "serialize_uuid", deserialize_with = "deserialize_uuid")]
+    #[serde(
+        serialize_with = "serialize_uuid",
+        deserialize_with = "deserialize_uuid"
+    )]
     pub id: uuid::Uuid,
     pub is_favorite: bool,
     pub kind: CaptureKind,
@@ -167,7 +170,11 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["createdAt"], serde_json::json!(1_700_000_000_123.0));
         assert!(parsed.get("sourceApplication").is_none(), "{json}");
-        assert!(parsed["id"].as_str().unwrap().chars().all(|c| c.is_ascii_uppercase() || c == '-' || c.is_ascii_digit()));
+        assert!(parsed["id"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c == '-' || c.is_ascii_digit()));
         let decoded: CaptureAsset = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, asset);
     }

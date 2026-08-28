@@ -1,8 +1,8 @@
 name: release
 
-# Builds macOS (dmg) and Windows (nsis) installers on GitHub Actions and
-# publishes them as a draft GitHub Release when a v* tag is pushed. No local
-# packaging is needed; publish the draft after both platform jobs succeed.
+# A v* tag verifies the source version and lets Windows produce a draft NSIS
+# release. macOS packaging intentionally fails closed until CI has a persistent
+# private-key-backed signing identity and verifies the final app identity.
 
 on:
   push:

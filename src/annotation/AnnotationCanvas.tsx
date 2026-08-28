@@ -26,6 +26,7 @@ import {
   type Tool,
 } from "./model";
 import { renderAll, textFont, type RenderContext } from "./render";
+import { fitTextEditorFrame } from "./text-layout.js";
 import { t } from "../i18n";
 
 export interface AnnotationCanvasHandle {
@@ -72,6 +73,7 @@ interface EditingState {
   index: number | null;
   text: string;
   rect: Rect;
+  maxWidth: number;
   color: ColorPreset;
   background: TextBackgroundStyle;
   fontSize: number;
@@ -141,6 +143,25 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       setMarks(historyRef.current.elements.slice());
       publishHistory();
     }, [publishHistory]);
+
+    const updateEditingText = useCallback((text: string) => {
+      setEditing((current) => (current ? { ...current, text } : current));
+    }, []);
+
+    const updateEditingRect = useCallback((rect: Rect) => {
+      setEditing((current) => {
+        if (
+          !current ||
+          (current.rect.x === rect.x &&
+            current.rect.y === rect.y &&
+            current.rect.width === rect.width &&
+            current.rect.height === rect.height)
+        ) {
+          return current;
+        }
+        return { ...current, rect };
+      });
+    }, []);
 
     const redraw = useCallback(() => {
       const canvas = canvasRef.current;
@@ -266,17 +287,22 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         }
 
         if (t === "text") {
-          const width = Math.min(180, Math.max(96, region.width));
+          const width = Math.max(1, Math.min(180, region.width));
+          const height = Math.max(1, Math.min(34, region.height));
           const frame: Rect = {
-            x: Math.min(p.x, region.width - width),
-            y: Math.min(p.y, region.height - 34),
+            x: Math.min(Math.max(0, p.x), Math.max(0, region.width - width)),
+            y: Math.min(Math.max(0, p.y), Math.max(0, region.height - height)),
             width,
-            height: 34,
+            height,
           };
           setEditing({
-            index: selectedIndex,
+            // The Text tool always creates a new mark. Existing text is edited
+            // only through the Select tool's double-click path below; carrying
+            // a stale selection index here would replace the selected mark.
+            index: null,
             text: "",
             rect: frame,
+            maxWidth: width,
             color: ap.colorPreset,
             background: ap.textBackgroundStyle,
             fontSize: ap.textFontSize,
@@ -313,15 +339,24 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           }
           const mark = current[index];
           if (mark.kind === "text" && e.detail >= 2) {
+            const width = Math.max(1, Math.min(mark.rect.width + 16, region.width));
+            const height = Math.max(1, Math.min(mark.rect.height + 10, region.height));
             setEditing({
               index,
               text: mark.text,
               rect: {
-                x: mark.rect.x - 8,
-                y: mark.rect.y - 5,
-                width: mark.rect.width + 16,
-                height: mark.rect.height + 10,
+                x: Math.min(
+                  Math.max(0, mark.rect.x - 8),
+                  Math.max(0, region.width - width),
+                ),
+                y: Math.min(
+                  Math.max(0, mark.rect.y - 5),
+                  Math.max(0, region.height - height),
+                ),
+                width,
+                height,
               },
+              maxWidth: width,
               color: mark.color,
               background: mark.background,
               fontSize: mark.fontSize,
@@ -764,7 +799,9 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         {editing && (
           <TextEditor
             editing={editing}
-            onTextChange={(text) => setEditing((prev) => (prev ? { ...prev, text } : prev))}
+            bounds={view}
+            onTextChange={updateEditingText}
+            onRectChange={updateEditingRect}
             onCommit={commitText}
             onFinish={onFinishAfterTextCommit}
             onUndo={() => undoRef.current()}
@@ -779,19 +816,27 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
 
 function TextEditor(props: {
   editing: EditingState;
+  bounds: { width: number; height: number };
   onTextChange(text: string): void;
+  onRectChange(rect: Rect): void;
   onCommit(): void;
   onFinish?(): void;
   onUndo(): void;
   onRedo(): void;
   onCancel(): void;
 }) {
-  const { editing, onTextChange, onCommit, onFinish, onUndo, onRedo, onCancel } = props;
+  const {
+    editing,
+    bounds,
+    onTextChange,
+    onRectChange,
+    onCommit,
+    onFinish,
+    onUndo,
+    onRedo,
+    onCancel,
+  } = props;
   const ref = useRef<HTMLTextAreaElement>(null);
-  const [size, setSize] = useState<{ width: number; height: number }>({
-    width: editing.rect.width,
-    height: editing.rect.height,
-  });
 
   // Spec §6.6 resizeTextEditor: min 120×34, grows with text/font, clamped
   // to the right/bottom edges of the region.
@@ -806,17 +851,17 @@ function TextEditor(props: {
     const text = editing.text || t("Type something…");
     // Width follows the longest line (measureText on the whole string with
     // newlines yields a wrong width).
-    const lines = text.split("\n");
-    let maxLineWidth = 0;
-    for (const line of lines) maxLineWidth = Math.max(maxLineWidth, ctx.measureText(line).width);
-    const lineHeight = editing.fontSize * 1.25;
-    const width = Math.min(
-      Math.max(120, Math.ceil(maxLineWidth) + 16 + 2),
-      Math.max(120, editing.rect.width),
-    );
-    const height = Math.max(34, Math.ceil(lines.length * lineHeight) + 10 + 2);
-    setSize((current) =>
-      current.width === width && current.height === height ? current : { width, height },
+    onRectChange(
+      fitTextEditorFrame({
+        text,
+        fontSize: editing.fontSize,
+        x: editing.rect.x,
+        y: editing.rect.y,
+        maxWidth: editing.maxWidth,
+        boundsWidth: bounds.width,
+        boundsHeight: bounds.height,
+        measureText: (value) => ctx.measureText(value).width,
+      }),
     );
     // Focus + select only on first mount; re-running el.select() on every
     // keystroke would yank the caret to the end and break mid-text edits.
@@ -825,7 +870,16 @@ function TextEditor(props: {
       el.focus();
       el.select();
     }
-  }, [editing.text, editing.fontSize]);
+  }, [
+    bounds.height,
+    bounds.width,
+    editing.fontSize,
+    editing.maxWidth,
+    editing.rect.x,
+    editing.rect.y,
+    editing.text,
+    onRectChange,
+  ]);
 
   return (
     <textarea
@@ -859,8 +913,8 @@ function TextEditor(props: {
         position: "absolute",
         left: editing.rect.x,
         top: editing.rect.y,
-        width: size.width,
-        height: size.height,
+        width: editing.rect.width,
+        height: editing.rect.height,
         boxSizing: "border-box",
         padding: "5px 8px",
         font: textFont(editing.fontSize),

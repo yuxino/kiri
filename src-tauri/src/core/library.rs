@@ -91,9 +91,7 @@ impl AssetLibrary {
         let normalized = query.trim().to_lowercase();
         self.all_assets(include_trashed)
             .into_iter()
-            .filter(|asset| {
-                normalized.is_empty() || asset.searchable_text().contains(&normalized)
-            })
+            .filter(|asset| normalized.is_empty() || asset.searchable_text().contains(&normalized))
             .collect()
     }
 
@@ -216,8 +214,11 @@ impl AssetLibrary {
             .iter()
             .position(|asset| &asset.id == id)
             .ok_or(AssetLibraryError::AssetNotFound)?;
-        let asset = self.index.remove(position);
-        self.persist()?;
+        let asset = self.index[position].clone();
+        let mut next_index = self.index.clone();
+        next_index.remove(position);
+        self.persist_index(&next_index)?;
+        self.index = next_index;
         let _ = std::fs::remove_file(self.asset_url(&asset));
         let _ = std::fs::remove_file(
             self.thumbnails_url
@@ -236,8 +237,14 @@ impl AssetLibrary {
         if trashed.is_empty() {
             return Ok(());
         }
-        self.index.retain(|asset| asset.trashed_at.is_none());
-        self.persist()?;
+        let next_index = self
+            .index
+            .iter()
+            .filter(|asset| asset.trashed_at.is_none())
+            .cloned()
+            .collect::<Vec<_>>();
+        self.persist_index(&next_index)?;
+        self.index = next_index;
         for asset in trashed {
             let _ = std::fs::remove_file(self.asset_url(&asset));
             let _ = std::fs::remove_file(
@@ -248,11 +255,7 @@ impl AssetLibrary {
         Ok(())
     }
 
-    fn update(
-        &mut self,
-        id: &uuid::Uuid,
-        mutation: impl FnOnce(&mut CaptureAsset),
-    ) -> Result<()> {
+    fn update(&mut self, id: &uuid::Uuid, mutation: impl FnOnce(&mut CaptureAsset)) -> Result<()> {
         let position = self
             .index
             .iter()
@@ -268,8 +271,11 @@ impl AssetLibrary {
     }
 
     fn persist(&self) -> Result<()> {
-        let data = serde_json::to_vec_pretty(&self.index)
-            .map_err(AssetLibraryError::CorruptIndex)?;
+        self.persist_index(&self.index)
+    }
+
+    fn persist_index(&self, index: &[CaptureAsset]) -> Result<()> {
+        let data = serde_json::to_vec_pretty(index).map_err(AssetLibraryError::CorruptIndex)?;
         atomic_write(&self.index_url, &data)
     }
 
@@ -419,6 +425,32 @@ mod tests {
     }
 
     #[test]
+    fn permanent_delete_keeps_index_and_file_when_persist_fails() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let asset = library
+            .import_data(b"kept", CaptureKind::Image, "png", 1, 1, None, None, None)
+            .unwrap();
+        library.move_to_trash(&asset.id).unwrap();
+        let asset_path = library.asset_url(&asset);
+
+        let blocked_index = root.join("blocked-index");
+        std::fs::create_dir(&blocked_index).unwrap();
+        library.index_url = blocked_index;
+
+        assert!(matches!(
+            library.permanently_delete(&asset.id),
+            Err(AssetLibraryError::Io(_))
+        ));
+        assert!(library.asset_by_id(&asset.id).is_some());
+        assert!(asset_path.exists());
+
+        let reopened = AssetLibrary::open(root).unwrap();
+        assert!(reopened.asset_by_id(&asset.id).is_some());
+        assert!(reopened.asset_url(&asset).exists());
+    }
+
+    #[test]
     fn all_assets_splits_trashed_from_active() {
         let (_dir, root) = temp_root();
         let mut library = AssetLibrary::open(root).unwrap();
@@ -435,11 +467,7 @@ mod tests {
             .into_iter()
             .map(|a| a.id)
             .collect();
-        let trashed_ids: Vec<_> = library
-            .all_assets(true)
-            .into_iter()
-            .map(|a| a.id)
-            .collect();
+        let trashed_ids: Vec<_> = library.all_assets(true).into_iter().map(|a| a.id).collect();
 
         assert_eq!(active_ids, vec![active.id]);
         assert_eq!(trashed_ids, vec![trashed.id]);
@@ -464,6 +492,49 @@ mod tests {
         assert!(library.all_assets(true).is_empty());
         assert_eq!(library.all_assets(false).len(), 1);
         assert_eq!(library.all_assets(false)[0].id, kept.id);
+    }
+
+    #[test]
+    fn empty_trash_keeps_index_and_files_when_persist_fails() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let active = library
+            .import_data(b"active", CaptureKind::Image, "png", 1, 1, None, None, None)
+            .unwrap();
+        let trashed = library
+            .import_data(
+                b"trashed",
+                CaptureKind::Image,
+                "png",
+                1,
+                1,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        library.move_to_trash(&trashed.id).unwrap();
+        let active_path = library.asset_url(&active);
+        let trashed_path = library.asset_url(&trashed);
+
+        let blocked_index = root.join("blocked-index");
+        std::fs::create_dir(&blocked_index).unwrap();
+        library.index_url = blocked_index;
+
+        assert!(matches!(
+            library.empty_trash(),
+            Err(AssetLibraryError::Io(_))
+        ));
+        assert_eq!(library.all_assets(false)[0].id, active.id);
+        assert_eq!(library.all_assets(true)[0].id, trashed.id);
+        assert!(active_path.exists());
+        assert!(trashed_path.exists());
+
+        let reopened = AssetLibrary::open(root).unwrap();
+        assert!(reopened.asset_by_id(&active.id).is_some());
+        assert!(reopened.asset_by_id(&trashed.id).is_some());
+        assert!(reopened.asset_url(&active).exists());
+        assert!(reopened.asset_url(&trashed).exists());
     }
 
     #[test]
@@ -495,7 +566,16 @@ mod tests {
         {
             let mut library = AssetLibrary::open(root.clone()).unwrap();
             library
-                .import_data(b"x", CaptureKind::Video, "mp4", 1920, 1080, Some(3.5), None, None)
+                .import_data(
+                    b"x",
+                    CaptureKind::Video,
+                    "mp4",
+                    1920,
+                    1080,
+                    Some(3.5),
+                    None,
+                    None,
+                )
                 .unwrap();
         }
         let reloaded = AssetLibrary::open(root.clone()).unwrap();
@@ -520,7 +600,10 @@ mod tests {
             None,
             1_700_000_000_000.0,
         );
-        assert_eq!(asset.filename.len(), "20231114-221320-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.png".len());
+        assert_eq!(
+            asset.filename.len(),
+            "20231114-221320-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.png".len()
+        );
         assert!(asset.filename.ends_with(".png"));
         let uuid_part = asset
             .filename
@@ -530,6 +613,8 @@ mod tests {
             .take(5)
             .collect::<Vec<_>>()
             .join("-");
-        assert!(uuid_part.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
+        assert!(uuid_part
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'));
     }
 }

@@ -36,6 +36,7 @@ export function EditorWindow(props: { id: string }) {
   const [appearance, setAppearance] = useState<AppearanceSettings>(DEFAULT_APPEARANCE);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const canvasRef = useRef<AnnotationCanvasHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -129,15 +130,28 @@ export function EditorWindow(props: { id: string }) {
   }
 
   async function complete(copyToClipboard: boolean) {
-    const png = await canvasRef.current?.exportPng();
-    if (!png) return;
+    setActionError(null);
+    const failureMessage = copyToClipboard
+      ? "Couldn't copy the edited image. Try again."
+      : "Couldn't save the edited image. Try again.";
     try {
-      const savePath = copyToClipboard ? null : await api.saveFileDialog(`kiri-${props.id}.png`);
+      const png = await canvasRef.current?.exportPng();
+      if (!png) {
+        setActionError(failureMessage);
+        return;
+      }
+      const savePath = copyToClipboard
+        ? null
+        : await api.saveFileDialog(`kiri-${props.id}.png`);
+      // Cancelling Save As must be a true no-op: do not replace the library
+      // asset when the system file picker returns no destination.
+      if (!copyToClipboard && savePath === null) return;
       await api.updateAsset(props.id, png, {
         copyToClipboard,
-        savePath: savePath ?? null,
+        savePath,
       });
     } catch {
+      setActionError(failureMessage);
       return;
     }
     // Spec: copying finishes and closes the editor; saving keeps it open
@@ -157,7 +171,7 @@ export function EditorWindow(props: { id: string }) {
             : null;
 
   return (
-    <div className="kiri-dark" style={{ height: "100%", display: "flex", flexDirection: "column", background: "#080808" }}>
+    <div className="kiri-dark" style={{ height: "100%", display: "flex", flexDirection: "column", background: "#080808", position: "relative" }}>
       {/* 58pt toolbar */}
       <div
         style={{
@@ -285,6 +299,56 @@ export function EditorWindow(props: { id: string }) {
           {t("Copy")}
         </button>
       </div>
+
+      {actionError && (
+        <div
+          role="alert"
+          style={{
+            position: "absolute",
+            top: 66,
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 20,
+            maxWidth: "min(420px, calc(100% - 24px))",
+            minHeight: 30,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "5px 7px 5px 11px",
+            boxSizing: "border-box",
+            border: "1px solid var(--kiri-surface-border)",
+            borderRadius: 10,
+            background: "var(--kiri-elevated)",
+            color: "var(--kiri-coral)",
+            font: "500 11.5px/16px var(--kiri-font-ui)",
+          }}
+        >
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {t(actionError)}
+          </span>
+          <button
+            type="button"
+            aria-label={t("Close")}
+            title={t("Close")}
+            onClick={() => setActionError(null)}
+            style={{
+              width: 20,
+              height: 20,
+              flexShrink: 0,
+              display: "grid",
+              placeItems: "center",
+              padding: 0,
+              border: "none",
+              borderRadius: 6,
+              background: "transparent",
+              color: "var(--kiri-secondary-label)",
+              cursor: "pointer",
+            }}
+          >
+            <KiriIcon name="xmark" size={9} />
+          </button>
+        </div>
+      )}
 
       {/* Canvas area */}
       <div ref={containerRef} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#141414", position: "relative" }}>

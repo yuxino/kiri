@@ -102,6 +102,8 @@
   "Transparent": "透明",
   "Dark": "ダーク",
   "Save As…": "別名で保存…",
+  "Couldn't save the edited image. Try again.": "編集した画像を保存できませんでした。もう一度お試しください。",
+  "Couldn't copy the edited image. Try again.": "編集した画像をコピーできませんでした。もう一度お試しください。",
   "Clear Annotations": "注釈をクリア",
   "Release for recording settings": "離すと録画設定を表示",
   "Release to show tools": "離すとツールを表示",

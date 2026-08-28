@@ -9,7 +9,7 @@
   </p>
 </div>
 
-按下快捷键，选择窗口或区域，就能截图、标注、识别文字或录制屏幕。完成后的内容会复制到剪贴板，并保存在本地素材库。
+按下快捷键，选择窗口或区域，就能截图、标注、识别文字或录制屏幕。截图会自动复制到剪贴板；截图、MP4 和 GIF 都会保存在本地素材库。
 
 Kiri 目前主要在 macOS 上开发和测试。Windows 构建尚未完成真机验收，安装、权限或部分功能可能存在问题。
 
@@ -25,9 +25,11 @@ Kiri 目前主要在 macOS 上开发和测试。Windows 构建尚未完成真机
 从 [GitHub Releases](https://github.com/yuxino/kiri/releases/latest) 下载最新版本。
 
 - **macOS 14+**：按设备下载 Apple Silicon（`arm64`）或 Intel（`x64`）版 `.dmg`，打开后把 `Kiri.app` 拖入“应用程序”。截图与录屏需要“屏幕与系统音频录制”权限；只有启用点击高亮时才需要“输入监控”，只有启用麦克风录制时才需要“麦克风”权限。
-- **Windows**：运行安装包即可，截图不需要额外的系统授权；麦克风权限由 Windows 隐私设置控制。Windows 版本尚未经过真机测试，可能无法正常安装或使用部分功能。
+- **Windows**：运行安装包即可，截图不需要额外的系统授权；麦克风权限由 Windows 隐私设置控制。当前安装包尚未进行 Authenticode 签名，Windows SmartScreen 可能显示警告；Windows 版本也尚未经过真机测试，可能无法正常安装或使用部分功能。
 
-> GitHub 发布包目前使用 ad-hoc 签名，因为项目还没有 Apple Developer ID。macOS 可能在升级后重新要求“屏幕录制”权限。第一次启动若被 Gatekeeper 拦截，请按住 Control 点按 `Kiri.app` 并选择“打开”，或前往“系统设置 → 隐私与安全性 → 仍要打开”。不需要关闭 Gatekeeper。
+> 当前可下载的 macOS GitHub 发布包使用 ad-hoc 签名。macOS 可能在升级后重新要求“屏幕录制”权限；第一次启动若被 Gatekeeper 拦截，请按住 Control 点按 `Kiri.app` 并选择“打开”，或前往“系统设置 → 隐私与安全性 → 仍要打开”。不需要关闭 Gatekeeper。
+>
+> 为避免后续升级继续重置隐私权限，新的 macOS GitHub 发布构建目前处于暂停状态；只有在 CI 配置持久、带私钥的签名身份并验证最终应用身份后才会恢复。
 
 远程 OCR 完全可选。API Key 保存在 macOS 钥匙串或 Windows 凭据管理器中，不会写入配置文件。创建或选择远程配置不会自动发送图片，每次识别都需要点击“发送”或“重试”。
 

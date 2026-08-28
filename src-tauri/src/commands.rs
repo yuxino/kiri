@@ -2,7 +2,7 @@
 //! Synchronous commands run on the main thread; heavy work is spawned onto
 //! background threads.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use serde::{Deserialize, Serialize};
@@ -80,11 +80,10 @@ pub struct AssetDto {
     pub source_application: Option<String>,
     pub is_favorite: bool,
     pub trashed_at: Option<f64>,
-    pub file_path: String,
     pub gif_eligible: bool,
 }
 
-fn asset_dto(asset: &CaptureAsset, root: &std::path::Path) -> AssetDto {
+fn asset_dto(asset: &CaptureAsset) -> AssetDto {
     AssetDto {
         id: asset.id.to_string(),
         kind: asset.kind.as_str().to_string(),
@@ -98,11 +97,6 @@ fn asset_dto(asset: &CaptureAsset, root: &std::path::Path) -> AssetDto {
         source_application: asset.source_application.clone(),
         is_favorite: asset.is_favorite,
         trashed_at: asset.trashed_at,
-        file_path: root
-            .join("Assets")
-            .join(&asset.filename)
-            .display()
-            .to_string(),
         gif_eligible: asset.kind == CaptureKind::Video
             && crate::core::policy::RecordingPolicy::is_gif_eligible(asset.duration),
     }
@@ -139,8 +133,7 @@ pub fn list_assets(
     let state = app.state::<AppState>();
     let library = state.library.lock().unwrap();
     let assets = library.search(&query, showing_trash);
-    let root = state.library_root.clone();
-    Ok(assets.iter().map(|asset| asset_dto(asset, &root)).collect())
+    Ok(assets.iter().map(asset_dto).collect())
 }
 
 fn with_asset_mutation(
@@ -383,8 +376,7 @@ pub fn get_asset(app: AppHandle, id: String) -> Result<AssetDto, String> {
         .asset_by_id(&parsed)
         .cloned()
         .ok_or_else(|| "The capture could not be found.".to_string())?;
-    let root = state.library_root.clone();
-    Ok(asset_dto(&asset, &root))
+    Ok(asset_dto(&asset))
 }
 
 #[tauri::command]
@@ -602,7 +594,16 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
     // Give the system a beat to settle after hiding Kiri windows.
     std::thread::sleep(std::time::Duration::from_millis(120));
 
-    let display = capture_backend::capture_active_display().map_err(|e| e.to_string())?;
+    let display = match capture_backend::capture_active_display() {
+        Ok(display) => display,
+        Err(error) => {
+            restore_capture_origin(&app, &hidden_windows, was_kiri_frontmost, pid);
+            let message = format!("Screen capture could not start: {error}");
+            log::error!("start_capture: display capture failed: {error}");
+            emit_error(&app, message.clone(), None);
+            return Err(message);
+        }
+    };
 
     let context = CaptureContextDto {
         display_width: display.screen_frame.width,
@@ -678,6 +679,34 @@ fn hide_library_windows(app: &AppHandle) -> Vec<String> {
         }
     }
     hidden
+}
+
+fn restore_capture_origin(
+    app: &AppHandle,
+    hidden_windows: &[String],
+    was_kiri_frontmost: bool,
+    return_pid: Option<u32>,
+) {
+    for label in hidden_windows {
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.show();
+        }
+    }
+
+    if was_kiri_frontmost {
+        let focus_label = hidden_windows
+            .iter()
+            .find(|label| label.as_str() == "library")
+            .or_else(|| hidden_windows.first());
+        if let Some(window) = focus_label.and_then(|label| app.get_webview_window(label)) {
+            let _ = window.set_focus();
+        }
+    } else if let Some(pid) = return_pid {
+        // Showing a previously visible Kiri window may activate the process on
+        // some systems. Restore the original external app after all windows
+        // have returned to their pre-capture visibility.
+        platform::activate_application(pid);
+    }
 }
 
 fn create_overlay_window(
@@ -775,16 +804,12 @@ pub(crate) fn teardown_cancelled_capture(
             }
         }
     }
-    if session.was_kiri_frontmost {
-        for label in &session.hidden_windows {
-            if let Some(window) = app.get_webview_window(label) {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        }
-    } else if let Some(pid) = session.return_pid {
-        platform::activate_application(pid);
-    }
+    restore_capture_origin(
+        app,
+        &session.hidden_windows,
+        session.was_kiri_frontmost,
+        session.return_pid,
+    );
 }
 
 fn invalidate_capture_resources(app: &AppHandle, session: &CaptureSession) {
@@ -1025,23 +1050,38 @@ pub async fn save_file_dialog(
 }
 
 fn restore_focus(app: &AppHandle, session: &CaptureSession) {
-    if session.was_kiri_frontmost {
-        for label in &session.hidden_windows {
-            if let Some(window) = app.get_webview_window(label) {
-                let _ = window.show();
-            }
-        }
-        if let Some(window) = app.get_webview_window("library") {
-            let _ = window.set_focus();
-        }
-    } else if let Some(pid) = session.return_pid {
-        platform::activate_application(pid);
-    }
+    restore_capture_origin(
+        app,
+        &session.hidden_windows,
+        session.was_kiri_frontmost,
+        session.return_pid,
+    );
 }
 
 // ---------------------------------------------------------------------------
 // Editor command
 // ---------------------------------------------------------------------------
+
+const EDITOR_ACTION_REQUIRED_ERROR: &str =
+    "The editor action must copy the image or save it to a file.";
+const EDITOR_SAVE_ERROR: &str = "The edited image could not be saved to the selected file.";
+const EDITOR_CLIPBOARD_ERROR: &str = "The edited image could not be copied to the clipboard.";
+
+fn validate_editor_action(copy_to_clipboard: bool, save_path: Option<&str>) -> Result<(), String> {
+    if copy_to_clipboard || save_path.is_some() {
+        Ok(())
+    } else {
+        Err(EDITOR_ACTION_REQUIRED_ERROR.into())
+    }
+}
+
+fn write_editor_save(path: &Path, png: &[u8]) -> Result<(), String> {
+    std::fs::write(path, png).map_err(|_| EDITOR_SAVE_ERROR.to_string())
+}
+
+fn finish_editor_clipboard_copy(result: anyhow::Result<()>) -> Result<(), String> {
+    result.map_err(|_| EDITOR_CLIPBOARD_ERROR.to_string())
+}
 
 #[tauri::command]
 pub fn update_asset(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
@@ -1070,6 +1110,7 @@ pub fn update_asset(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<
                 .and_then(decode_save_path_header)
         })
         .transpose()?;
+    validate_editor_action(copy_to_clipboard, save_path.as_deref())?;
     let png = match request.body() {
         tauri::ipc::InvokeBody::Raw(bytes) if !bytes.is_empty() => bytes.as_slice(),
         tauri::ipc::InvokeBody::Raw(_) => return Err("The edited image is empty.".into()),
@@ -1092,15 +1133,18 @@ pub fn update_asset(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<
     if validate_capture_png(png, expected_size.0, expected_size.1)? != expected_size {
         return Err("The edited image dimensions changed unexpectedly.".into());
     }
+    if let Some(save_path) = &save_path {
+        write_editor_save(Path::new(save_path), png)?;
+    }
+    if copy_to_clipboard {
+        finish_editor_clipboard_copy(platform::write_image_to_clipboard(png))?;
+    }
     let store = app.state::<crate::protocol::ProtocolStore>();
     crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
         state.library.lock().unwrap().replace_data(png, &parsed)
     })
     .map_err(|e| e.to_string())?;
-    if let Some(save_path) = &save_path {
-        let _ = std::fs::write(save_path, png);
-    }
-    if copy_to_clipboard && platform::write_image_to_clipboard(png).is_ok() {
+    if copy_to_clipboard {
         emit_notice(
             &app,
             "Copied to Clipboard".into(),
@@ -2517,8 +2561,9 @@ pub fn quit_app(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod command_security_tests {
     use super::{
-        cleanup_finalization_files, decode_save_path_header, recording_channels,
-        sanitize_frontend_log, validate_capture_png,
+        cleanup_finalization_files, decode_save_path_header, finish_editor_clipboard_copy,
+        recording_channels, sanitize_frontend_log, validate_capture_png, validate_editor_action,
+        write_editor_save, EDITOR_ACTION_REQUIRED_ERROR, EDITOR_CLIPBOARD_ERROR, EDITOR_SAVE_ERROR,
     };
     use crate::core::policy::RecordingOptions;
     use std::io::Cursor;
@@ -2592,6 +2637,34 @@ mod command_security_tests {
         );
         assert!(decode_save_path_header("/tmp/raw+path.png").is_err());
         assert!(decode_save_path_header("path&extra=value").is_err());
+    }
+
+    #[test]
+    fn editor_action_requires_copy_or_save_destination() {
+        assert_eq!(
+            validate_editor_action(false, None).unwrap_err(),
+            EDITOR_ACTION_REQUIRED_ERROR
+        );
+        assert!(validate_editor_action(true, None).is_ok());
+        assert!(validate_editor_action(false, Some("/tmp/capture.png")).is_ok());
+    }
+
+    #[test]
+    fn editor_save_and_clipboard_failures_return_stable_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = directory.path().join("capture.png");
+        write_editor_save(&output, b"png").unwrap();
+        assert_eq!(std::fs::read(&output).unwrap(), b"png");
+
+        assert_eq!(
+            write_editor_save(directory.path(), b"png").unwrap_err(),
+            EDITOR_SAVE_ERROR
+        );
+        assert_eq!(
+            finish_editor_clipboard_copy(Err(anyhow::anyhow!("private platform error")))
+                .unwrap_err(),
+            EDITOR_CLIPBOARD_ERROR
+        );
     }
 }
 
