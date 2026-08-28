@@ -8,8 +8,11 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use chrono::{Local, TimeZone};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+use crate::core::annotation::AnnotationDocument;
 use crate::core::asset::{CaptureAsset, CaptureKind};
 
 #[derive(Debug, Error)]
@@ -24,27 +27,95 @@ pub enum AssetLibraryError {
     CorruptIndex(#[source] serde_json::Error),
     #[error("library index was updated, but {failed_files} file(s) could not be removed")]
     CleanupFailed { failed_files: usize },
+    #[error("annotation projects are available only for image assets")]
+    UnsupportedAnnotationAsset,
+    #[error("annotation project already exists")]
+    AnnotationProjectAlreadyExists,
+    #[error("annotation project files are incomplete")]
+    IncompleteAnnotationProject,
+    #[error("annotation project is corrupted: {0}")]
+    CorruptAnnotationProject(String),
+    #[error("annotation project no longer matches the stored image")]
+    StaleAnnotationProject,
+    #[error("annotation editor snapshot changed before it could be saved")]
+    AnnotationRevisionMismatch,
 }
 
 pub type Result<T> = std::result::Result<T, AssetLibraryError>;
 
+const ANNOTATION_PROJECT_VERSION: u32 = 1;
+
+/// Test-only view of a validated annotation project.
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq)]
+struct LoadedAnnotationProject {
+    document: serde_json::Value,
+    document_url: PathBuf,
+    source_url: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EditorAnnotationState {
+    None,
+    Valid,
+    Invalid,
+}
+
+/// One content-addressed editor baseline. `source` is the exact image the
+/// editor must display: the immutable clean source for a valid project, or the
+/// current flattened image when no usable project exists.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadedEditorSnapshot {
+    pub revision_sha256: String,
+    pub state: EditorAnnotationState,
+    pub document: Option<serde_json::Value>,
+    pub source: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StoredAnnotationProject {
+    project_version: u32,
+    source_sha256: String,
+    rendered_sha256: String,
+    document: serde_json::Value,
+}
+
+struct EditorSnapshotFiles {
+    asset: CaptureAsset,
+    rendered: Vec<u8>,
+    encoded: Option<Vec<u8>>,
+    source: Option<Vec<u8>>,
+    document_url: PathBuf,
+    source_url: PathBuf,
+    revision_sha256: String,
+    state: EditorAnnotationState,
+    valid_project: Option<StoredAnnotationProject>,
+}
+
 pub struct AssetLibrary {
     assets_url: PathBuf,
     thumbnails_url: PathBuf,
+    annotations_url: PathBuf,
     index_url: PathBuf,
     index: Vec<CaptureAsset>,
     #[cfg(test)]
     persist_count: Cell<usize>,
+    #[cfg(test)]
+    annotation_replace_fail_at_write: Cell<Option<usize>>,
 }
 
 impl AssetLibrary {
     pub fn open(root_url: PathBuf) -> Result<Self> {
         let assets_url = root_url.join("Assets");
         let thumbnails_url = root_url.join("Thumbnails");
+        let annotations_url = root_url.join("Annotations");
         let index_url = root_url.join("library.json");
 
         std::fs::create_dir_all(&assets_url)?;
         std::fs::create_dir_all(&thumbnails_url)?;
+        std::fs::create_dir_all(&annotations_url)?;
 
         let index = if index_url.exists() {
             let data = std::fs::read(&index_url)?;
@@ -57,10 +128,13 @@ impl AssetLibrary {
         Ok(Self {
             assets_url,
             thumbnails_url,
+            annotations_url,
             index_url,
             index,
             #[cfg(test)]
             persist_count: Cell::new(0),
+            #[cfg(test)]
+            annotation_replace_fail_at_write: Cell::new(None),
         })
     }
 
@@ -121,6 +195,65 @@ impl AssetLibrary {
         source_application: Option<String>,
         created_at: Option<f64>,
     ) -> Result<CaptureAsset> {
+        self.import_data_inner(
+            data,
+            kind,
+            file_extension,
+            pixel_width,
+            pixel_height,
+            duration,
+            source_application,
+            created_at,
+            None,
+        )
+    }
+
+    /// Imports a flattened image together with its immutable clean source and
+    /// frontend-owned annotation document. The Swift-compatible index remains
+    /// unchanged; the project lives entirely under `Annotations/`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn import_data_with_annotation_project(
+        &mut self,
+        rendered_data: &[u8],
+        kind: CaptureKind,
+        file_extension: &str,
+        pixel_width: i64,
+        pixel_height: i64,
+        duration: Option<f64>,
+        source_application: Option<String>,
+        created_at: Option<f64>,
+        clean_source: &[u8],
+        document: &serde_json::Value,
+    ) -> Result<CaptureAsset> {
+        self.import_data_inner(
+            rendered_data,
+            kind,
+            file_extension,
+            pixel_width,
+            pixel_height,
+            duration,
+            source_application,
+            created_at,
+            Some((clean_source, document)),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn import_data_inner(
+        &mut self,
+        data: &[u8],
+        kind: CaptureKind,
+        file_extension: &str,
+        pixel_width: i64,
+        pixel_height: i64,
+        duration: Option<f64>,
+        source_application: Option<String>,
+        created_at: Option<f64>,
+        annotation_project: Option<(&[u8], &serde_json::Value)>,
+    ) -> Result<CaptureAsset> {
+        if annotation_project.is_some() && kind != CaptureKind::Image {
+            return Err(AssetLibraryError::UnsupportedAnnotationAsset);
+        }
         let safe_extension = Self::validated_extension(file_extension)?;
         let persisted_created_at = Self::normalized_date(created_at.unwrap_or_else(now_ms));
         let asset = Self::make_asset(
@@ -133,12 +266,21 @@ impl AssetLibrary {
             persisted_created_at,
         );
         let file_url = self.asset_url(&asset);
-        std::fs::write(&file_url, data)?;
+        atomic_write(&file_url, data)?;
+
+        if let Some((clean_source, document)) = annotation_project {
+            if let Err(error) =
+                self.write_new_annotation_project_files(&asset, clean_source, data, document)
+            {
+                let _ = std::fs::remove_file(&file_url);
+                return Err(error);
+            }
+        }
 
         self.index.push(asset.clone());
         if let Err(error) = self.persist() {
-            let _ = std::fs::remove_file(&file_url);
             self.index.retain(|entry| entry.id != asset.id);
+            let _ = self.cleanup_asset_files(&asset);
             return Err(error);
         }
         Ok(asset)
@@ -178,16 +320,138 @@ impl AssetLibrary {
         Ok(asset)
     }
 
-    /// Mirrors `AssetLibrary.replaceData(_:for:)`.
-    pub fn replace_data(&mut self, data: &[u8], id: &uuid::Uuid) -> Result<CaptureAsset> {
+    #[cfg(test)]
+    fn replace_data(&mut self, data: &[u8], id: &uuid::Uuid) -> Result<CaptureAsset> {
         let asset = self
             .index
             .iter()
             .find(|asset| &asset.id == id)
             .ok_or(AssetLibraryError::AssetNotFound)?
             .clone();
-        std::fs::write(self.asset_url(&asset), data)?;
+        atomic_write(&self.asset_url(&asset), data)?;
         Ok(asset)
+    }
+
+    #[cfg(test)]
+    fn save_annotation_project(
+        &self,
+        id: &uuid::Uuid,
+        rendered: &[u8],
+        document: &serde_json::Value,
+    ) -> Result<CaptureAsset> {
+        let asset = self.annotation_asset(id)?;
+        let asset_url = self.asset_url(&asset);
+        let previous_rendered = std::fs::read(&asset_url)?;
+        let existing = self.read_existing_annotation_project(&asset, &previous_rendered)?;
+
+        match existing {
+            Some(existing) => {
+                let (document_url, _) = self.annotation_project_urls(&asset);
+                let previous_encoded = std::fs::read(&document_url)?;
+                let next = StoredAnnotationProject {
+                    project_version: ANNOTATION_PROJECT_VERSION,
+                    source_sha256: existing.source_sha256,
+                    rendered_sha256: sha256_hex(rendered),
+                    document: document.clone(),
+                };
+                let encoded = encode_annotation_project(&next)?;
+                atomic_write(&document_url, &encoded)?;
+                if let Err(error) = atomic_write(&asset_url, rendered) {
+                    best_effort_restore(&document_url, Some(&previous_encoded));
+                    best_effort_restore(&asset_url, Some(&previous_rendered));
+                    return Err(error);
+                }
+            }
+            None => {
+                self.write_new_annotation_project_files(
+                    &asset,
+                    &previous_rendered,
+                    rendered,
+                    document,
+                )?;
+                if let Err(error) = atomic_write(&asset_url, rendered) {
+                    let _ = self.cleanup_annotation_project_files(&asset);
+                    best_effort_restore(&asset_url, Some(&previous_rendered));
+                    return Err(error);
+                }
+            }
+        }
+
+        Ok(asset)
+    }
+
+    #[cfg(test)]
+    fn load_annotation_project(&self, id: &uuid::Uuid) -> Result<Option<LoadedAnnotationProject>> {
+        let asset = self.annotation_asset(id)?;
+        let rendered = std::fs::read(self.asset_url(&asset))?;
+        let (document_url, source_url) = self.annotation_project_urls(&asset);
+        Ok(self
+            .read_existing_annotation_project(&asset, &rendered)?
+            .map(|stored| LoadedAnnotationProject {
+                document: stored.document,
+                document_url,
+                source_url,
+            }))
+    }
+
+    /// Loads the exact content-addressed baseline used by the screenshot
+    /// editor. Invalid projects fail open only to the current flattened image;
+    /// their untrusted documents and sources are never applied.
+    pub fn load_editor_snapshot(&self, id: &uuid::Uuid) -> Result<LoadedEditorSnapshot> {
+        let EditorSnapshotFiles {
+            rendered,
+            source,
+            revision_sha256,
+            state,
+            valid_project,
+            ..
+        } = self.read_editor_snapshot_files(id)?;
+        let document = valid_project.map(|project| project.document);
+        let source = match state {
+            EditorAnnotationState::Valid => {
+                source.ok_or(AssetLibraryError::IncompleteAnnotationProject)?
+            }
+            EditorAnnotationState::None | EditorAnnotationState::Invalid => rendered,
+        };
+        Ok(LoadedEditorSnapshot {
+            revision_sha256,
+            state,
+            document,
+            source,
+        })
+    }
+
+    /// Compare-and-save for editor output. `Some(document)` persists an
+    /// editable project; `None` updates the flattened image and removes project
+    /// files. The expected revision must be the one returned at editor open.
+    pub fn save_editor_snapshot(
+        &self,
+        id: &uuid::Uuid,
+        expected_revision_sha256: &str,
+        rendered: &[u8],
+        document: Option<&serde_json::Value>,
+    ) -> Result<CaptureAsset> {
+        let snapshot = self.read_editor_snapshot_files(id)?;
+        if !is_sha256_hex(expected_revision_sha256)
+            || snapshot.revision_sha256 != expected_revision_sha256
+        {
+            return Err(AssetLibraryError::AnnotationRevisionMismatch);
+        }
+        match document {
+            Some(document) => self.write_editor_project_snapshot(&snapshot, rendered, document)?,
+            None => self.write_editor_flat_snapshot(&snapshot, rendered)?,
+        }
+        Ok(snapshot.asset)
+    }
+
+    #[cfg(test)]
+    fn clear_annotation_project(&self, id: &uuid::Uuid) -> Result<()> {
+        let asset = self.annotation_asset(id)?;
+        let failed_files = self.cleanup_annotation_project_files(&asset);
+        if failed_files > 0 {
+            return Err(AssetLibraryError::CleanupFailed { failed_files });
+        }
+        Ok(())
     }
 
     pub fn set_favorite(&mut self, favorite: bool, id: &uuid::Uuid) -> Result<()> {
@@ -273,11 +537,10 @@ impl AssetLibrary {
         next_index.remove(position);
         self.persist_index(&next_index)?;
         self.index = next_index;
-        let _ = std::fs::remove_file(self.asset_url(&asset));
-        let _ = std::fs::remove_file(
-            self.thumbnails_url
-                .join(format!("{}.jpg", asset.id.to_string().to_lowercase())),
-        );
+        let failed_files = self.cleanup_asset_files(&asset);
+        if failed_files > 0 {
+            return Err(AssetLibraryError::CleanupFailed { failed_files });
+        }
         Ok(())
     }
 
@@ -299,12 +562,12 @@ impl AssetLibrary {
             .collect::<Vec<_>>();
         self.persist_index(&next_index)?;
         self.index = next_index;
-        for asset in trashed {
-            let _ = std::fs::remove_file(self.asset_url(&asset));
-            let _ = std::fs::remove_file(
-                self.thumbnails_url
-                    .join(format!("{}.jpg", asset.id.to_string().to_lowercase())),
-            );
+        let failed_files = trashed
+            .iter()
+            .map(|asset| self.cleanup_asset_files(asset))
+            .sum();
+        if failed_files > 0 {
+            return Err(AssetLibraryError::CleanupFailed { failed_files });
         }
         Ok(())
     }
@@ -353,23 +616,203 @@ impl AssetLibrary {
         Ok(requested)
     }
 
+    fn annotation_asset(&self, id: &uuid::Uuid) -> Result<CaptureAsset> {
+        let asset = self
+            .asset_by_id(id)
+            .cloned()
+            .ok_or(AssetLibraryError::AssetNotFound)?;
+        if asset.kind != CaptureKind::Image {
+            return Err(AssetLibraryError::UnsupportedAnnotationAsset);
+        }
+        Ok(asset)
+    }
+
+    fn annotation_project_urls(&self, asset: &CaptureAsset) -> (PathBuf, PathBuf) {
+        let id = asset.id.to_string().to_lowercase();
+        (
+            self.annotations_url.join(format!("{id}.json")),
+            self.annotations_url.join(format!("{id}.source.png")),
+        )
+    }
+
+    #[cfg(test)]
+    fn read_existing_annotation_project(
+        &self,
+        asset: &CaptureAsset,
+        rendered: &[u8],
+    ) -> Result<Option<StoredAnnotationProject>> {
+        let (document_url, source_url) = self.annotation_project_urls(asset);
+        let encoded = read_optional_file(&document_url)?;
+        let source = read_optional_file(&source_url)?;
+        validate_annotation_project_snapshot(encoded.as_deref(), source.as_deref(), rendered, None)
+    }
+
+    fn read_editor_snapshot_files(&self, id: &uuid::Uuid) -> Result<EditorSnapshotFiles> {
+        let asset = self.annotation_asset(id)?;
+        let rendered = std::fs::read(self.asset_url(&asset))?;
+        let (document_url, source_url) = self.annotation_project_urls(&asset);
+        let encoded = read_optional_file(&document_url)?;
+        let source = read_optional_file(&source_url)?;
+        let validation = validate_annotation_project_snapshot(
+            encoded.as_deref(),
+            source.as_deref(),
+            &rendered,
+            Some((asset.pixel_width, asset.pixel_height)),
+        );
+        let (state, valid_project) = match validation {
+            Ok(Some(stored)) => (EditorAnnotationState::Valid, Some(stored)),
+            Ok(None) => (EditorAnnotationState::None, None),
+            Err(
+                AssetLibraryError::IncompleteAnnotationProject
+                | AssetLibraryError::CorruptAnnotationProject(_)
+                | AssetLibraryError::StaleAnnotationProject,
+            ) => (EditorAnnotationState::Invalid, None),
+            Err(error) => return Err(error),
+        };
+        let revision_sha256 =
+            editor_revision_sha256(state, &rendered, encoded.as_deref(), source.as_deref());
+        Ok(EditorSnapshotFiles {
+            asset,
+            rendered,
+            encoded,
+            source,
+            document_url,
+            source_url,
+            revision_sha256,
+            state,
+            valid_project,
+        })
+    }
+
+    fn write_editor_project_snapshot(
+        &self,
+        snapshot: &EditorSnapshotFiles,
+        rendered: &[u8],
+        document: &serde_json::Value,
+    ) -> Result<()> {
+        let clean_source = match snapshot.state {
+            EditorAnnotationState::Valid => snapshot
+                .source
+                .as_deref()
+                .ok_or(AssetLibraryError::IncompleteAnnotationProject)?,
+            EditorAnnotationState::None | EditorAnnotationState::Invalid => &snapshot.rendered,
+        };
+        let stored = StoredAnnotationProject {
+            project_version: ANNOTATION_PROJECT_VERSION,
+            source_sha256: sha256_hex(clean_source),
+            rendered_sha256: sha256_hex(rendered),
+            document: document.clone(),
+        };
+        let encoded = encode_annotation_project(&stored)?;
+        let asset_url = self.asset_url(&snapshot.asset);
+        let writes = match snapshot.state {
+            EditorAnnotationState::Valid => vec![
+                (snapshot.document_url.as_path(), encoded.as_slice()),
+                (asset_url.as_path(), rendered),
+            ],
+            EditorAnnotationState::None | EditorAnnotationState::Invalid => vec![
+                (snapshot.source_url.as_path(), clean_source),
+                (snapshot.document_url.as_path(), encoded.as_slice()),
+                (asset_url.as_path(), rendered),
+            ],
+        };
+        for (index, (path, bytes)) in writes.into_iter().enumerate() {
+            if let Err(error) = self.write_annotation_replacement(index + 1, path, bytes) {
+                restore_editor_snapshot(snapshot, &asset_url);
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
+
+    fn write_editor_flat_snapshot(
+        &self,
+        snapshot: &EditorSnapshotFiles,
+        rendered: &[u8],
+    ) -> Result<()> {
+        let asset_url = self.asset_url(&snapshot.asset);
+        if let Err(error) = self.write_annotation_replacement(1, &asset_url, rendered) {
+            restore_editor_snapshot(snapshot, &asset_url);
+            return Err(error);
+        }
+        for path in [&snapshot.document_url, &snapshot.source_url] {
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    restore_editor_snapshot(snapshot, &asset_url);
+                    return Err(AssetLibraryError::Io(error));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_annotation_replacement(
+        &self,
+        write_index: usize,
+        path: &Path,
+        data: &[u8],
+    ) -> Result<()> {
+        #[cfg(test)]
+        if self.annotation_replace_fail_at_write.get() == Some(write_index) {
+            return Err(AssetLibraryError::Io(std::io::Error::other(
+                "injected annotation replacement failure",
+            )));
+        }
+        #[cfg(not(test))]
+        let _ = write_index;
+        atomic_write(path, data)
+    }
+
+    fn write_new_annotation_project_files(
+        &self,
+        asset: &CaptureAsset,
+        clean_source: &[u8],
+        rendered: &[u8],
+        document: &serde_json::Value,
+    ) -> Result<()> {
+        let (document_url, source_url) = self.annotation_project_urls(asset);
+        if document_url.exists() || source_url.exists() {
+            return Err(AssetLibraryError::AnnotationProjectAlreadyExists);
+        }
+
+        atomic_write(&source_url, clean_source)?;
+        let stored = StoredAnnotationProject {
+            project_version: ANNOTATION_PROJECT_VERSION,
+            source_sha256: sha256_hex(clean_source),
+            rendered_sha256: sha256_hex(rendered),
+            document: document.clone(),
+        };
+        let encoded = match encode_annotation_project(&stored) {
+            Ok(encoded) => encoded,
+            Err(error) => {
+                let _ = std::fs::remove_file(&source_url);
+                return Err(error);
+            }
+        };
+        if let Err(error) = atomic_write(&document_url, &encoded) {
+            let _ = std::fs::remove_file(&source_url);
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn cleanup_annotation_project_files(&self, asset: &CaptureAsset) -> usize {
+        let (document_url, source_url) = self.annotation_project_urls(asset);
+        remove_files([document_url, source_url])
+    }
+
     fn cleanup_asset_files(&self, asset: &CaptureAsset) -> usize {
-        let paths = [
+        let (annotation_document, annotation_source) = self.annotation_project_urls(asset);
+        remove_files([
             self.asset_url(asset),
             self.thumbnails_url
                 .join(format!("{}.jpg", asset.id.to_string().to_lowercase())),
-        ];
-        paths
-            .iter()
-            .filter(|path| match std::fs::remove_file(path) {
-                Ok(()) => false,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-                Err(error) => {
-                    log::error!("could not remove permanently deleted asset file: {error}");
-                    true
-                }
-            })
-            .count()
+            annotation_document,
+            annotation_source,
+        ])
     }
 
     fn persist(&self) -> Result<()> {
@@ -438,10 +881,147 @@ fn now_ms() -> f64 {
     chrono::Utc::now().timestamp_millis() as f64
 }
 
+fn encode_annotation_project(project: &StoredAnnotationProject) -> Result<Vec<u8>> {
+    serde_json::to_vec_pretty(project)
+        .map_err(|error| AssetLibraryError::CorruptAnnotationProject(error.to_string()))
+}
+
+fn editor_revision_sha256(
+    state: EditorAnnotationState,
+    rendered: &[u8],
+    encoded: Option<&[u8]>,
+    source: Option<&[u8]>,
+) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"kiri-editor-snapshot-v1\0");
+    digest.update([match state {
+        EditorAnnotationState::None => 0,
+        EditorAnnotationState::Valid => 1,
+        EditorAnnotationState::Invalid => 2,
+    }]);
+    update_revision_part(&mut digest, b"rendered", Some(rendered));
+    update_revision_part(&mut digest, b"document", encoded);
+    update_revision_part(&mut digest, b"source", source);
+    format!("{:x}", digest.finalize())
+}
+
+fn update_revision_part(digest: &mut Sha256, label: &[u8], bytes: Option<&[u8]>) {
+    digest.update((label.len() as u64).to_be_bytes());
+    digest.update(label);
+    match bytes {
+        Some(bytes) => {
+            digest.update([1]);
+            digest.update((bytes.len() as u64).to_be_bytes());
+            digest.update(bytes);
+        }
+        None => digest.update([0]),
+    }
+}
+
+fn restore_editor_snapshot(snapshot: &EditorSnapshotFiles, asset_url: &Path) {
+    best_effort_restore(&snapshot.source_url, snapshot.source.as_deref());
+    best_effort_restore(&snapshot.document_url, snapshot.encoded.as_deref());
+    best_effort_restore(asset_url, Some(&snapshot.rendered));
+}
+
+fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(AssetLibraryError::Io(error)),
+    }
+}
+
+fn validate_annotation_project_snapshot(
+    encoded: Option<&[u8]>,
+    source: Option<&[u8]>,
+    rendered: &[u8],
+    expected_image_pixels: Option<(i64, i64)>,
+) -> Result<Option<StoredAnnotationProject>> {
+    let (encoded, source) = match (encoded, source) {
+        (None, None) => return Ok(None),
+        (Some(encoded), Some(source)) => (encoded, source),
+        _ => return Err(AssetLibraryError::IncompleteAnnotationProject),
+    };
+    let stored: StoredAnnotationProject = serde_json::from_slice(encoded)
+        .map_err(|error| AssetLibraryError::CorruptAnnotationProject(error.to_string()))?;
+    if stored.project_version != ANNOTATION_PROJECT_VERSION
+        || !is_sha256_hex(&stored.source_sha256)
+        || !is_sha256_hex(&stored.rendered_sha256)
+    {
+        return Err(AssetLibraryError::CorruptAnnotationProject(
+            "unsupported project wrapper".into(),
+        ));
+    }
+    if sha256_hex(source) != stored.source_sha256 || sha256_hex(rendered) != stored.rendered_sha256
+    {
+        return Err(AssetLibraryError::StaleAnnotationProject);
+    }
+    let document_json = serde_json::to_string(&stored.document)
+        .map_err(|error| AssetLibraryError::CorruptAnnotationProject(error.to_string()))?;
+    let document = AnnotationDocument::from_json(&document_json)
+        .map_err(AssetLibraryError::CorruptAnnotationProject)?;
+    if let Some((width, height)) = expected_image_pixels {
+        document
+            .validate_for_image_pixels(width, height)
+            .map_err(AssetLibraryError::CorruptAnnotationProject)?;
+    }
+
+    Ok(Some(stored))
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(data))
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn remove_files<const N: usize>(paths: [PathBuf; N]) -> usize {
+    paths
+        .iter()
+        .filter(|path| match std::fs::remove_file(path) {
+            Ok(()) => false,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => {
+                log::error!("could not remove asset library file: {error}");
+                true
+            }
+        })
+        .count()
+}
+
+fn best_effort_restore(path: &Path, previous: Option<&[u8]>) {
+    let result = match previous {
+        Some(bytes) => atomic_write(path, bytes),
+        None => match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(AssetLibraryError::Io(error)),
+        },
+    };
+    if let Err(error) = result {
+        log::error!("could not roll back asset library write: {error}");
+    }
+}
+
 /// Write via a temporary file and rename into place. On Windows, rename over
 /// an existing file is retried after removing the target.
 fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("json.tmp");
+    let file_name = path.file_name().ok_or_else(|| {
+        AssetLibraryError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "atomic write target has no filename",
+        ))
+    })?;
+    let mut tmp_name = std::ffi::OsString::from(".");
+    tmp_name.push(file_name);
+    tmp_name.push(format!(".{}.tmp", uuid::Uuid::new_v4().simple()));
+    let tmp = path.with_file_name(tmp_name);
     std::fs::write(&tmp, data)?;
     match std::fs::rename(&tmp, path) {
         Ok(()) => Ok(()),
@@ -488,6 +1068,30 @@ mod tests {
             .collect()
     }
 
+    fn annotation_document(label: &str) -> serde_json::Value {
+        serde_json::json!({
+            "schemaVersion": 1,
+            "canvas": { "width": 100, "height": 80 },
+            "sourcePixels": { "width": 100, "height": 80 },
+            "marks": [{
+                "kind": "text",
+                "id": 1,
+                "text": label,
+                "rect": { "x": 1, "y": 1, "width": 40, "height": 20 },
+                "color": "white",
+                "background": "transparent",
+                "fontSize": 14
+            }]
+        })
+    }
+
+    fn save_test_project(library: &AssetLibrary, asset: &CaptureAsset, label: &str) {
+        let rendered = std::fs::read(library.asset_url(asset)).unwrap();
+        library
+            .save_annotation_project(&asset.id, &rendered, &annotation_document(label))
+            .unwrap();
+    }
+
     #[test]
     fn imports_and_lists_assets() {
         let (_dir, root) = temp_root();
@@ -512,6 +1116,639 @@ mod tests {
     }
 
     #[test]
+    fn annotated_import_keeps_the_swift_index_shape_and_loads_valid_project() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        assert!(root.join("Annotations").is_dir());
+        let document = annotation_document("capture");
+        let asset = library
+            .import_data_with_annotation_project(
+                b"flattened-capture",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                Some("Safari".into()),
+                Some(1_700_000_000_123.0),
+                b"clean-capture",
+                &document,
+            )
+            .unwrap();
+
+        let loaded = library.load_annotation_project(&asset.id).unwrap().unwrap();
+        assert_eq!(loaded.document, document);
+        assert_eq!(std::fs::read(&loaded.source_url).unwrap(), b"clean-capture");
+        assert_eq!(
+            loaded.document_url.file_name().unwrap().to_str().unwrap(),
+            format!("{}.json", asset.id.to_string().to_lowercase())
+        );
+        assert_eq!(
+            loaded.source_url.file_name().unwrap().to_str().unwrap(),
+            format!("{}.source.png", asset.id.to_string().to_lowercase())
+        );
+        assert_eq!(
+            std::fs::read(library.asset_url(&asset)).unwrap(),
+            b"flattened-capture"
+        );
+
+        let index: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("library.json")).unwrap()).unwrap();
+        let entry = index.as_array().unwrap()[0].as_object().unwrap();
+        for forbidden in [
+            "annotationProject",
+            "sourceSha256",
+            "renderedSha256",
+            "document",
+        ] {
+            assert!(entry.get(forbidden).is_none());
+        }
+
+        let reopened = AssetLibrary::open(root).unwrap();
+        assert_eq!(
+            reopened
+                .load_annotation_project(&asset.id)
+                .unwrap()
+                .unwrap()
+                .document,
+            annotation_document("capture")
+        );
+    }
+
+    #[test]
+    fn valid_editor_snapshot_returns_the_matching_document_and_clean_source() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_data_with_annotation_project(
+                b"flattened",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+                b"clean-source",
+                &annotation_document("first"),
+            )
+            .unwrap();
+        let snapshot = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(snapshot.state, EditorAnnotationState::Valid);
+        assert_eq!(snapshot.document, Some(annotation_document("first")));
+        assert_eq!(snapshot.source, b"clean-source");
+        assert!(is_sha256_hex(&snapshot.revision_sha256));
+    }
+
+    #[test]
+    fn semantically_invalid_document_falls_back_to_the_current_flat() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_data_with_annotation_project(
+                b"flattened",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+                b"clean-source",
+                &annotation_document("valid"),
+            )
+            .unwrap();
+        let project = library.load_annotation_project(&asset.id).unwrap().unwrap();
+        let mut wrapper: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&project.document_url).unwrap()).unwrap();
+        wrapper["document"]["sourcePixels"]["width"] = serde_json::json!(0);
+        std::fs::write(
+            &project.document_url,
+            serde_json::to_vec_pretty(&wrapper).unwrap(),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            library.load_annotation_project(&asset.id),
+            Err(AssetLibraryError::CorruptAnnotationProject(_))
+        ));
+        let snapshot = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(snapshot.state, EditorAnnotationState::Invalid);
+        assert_eq!(snapshot.document, None);
+        assert_eq!(snapshot.source, b"flattened");
+    }
+
+    #[test]
+    fn schema_valid_but_asset_mismatched_documents_fall_back_to_the_current_flat() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_data_with_annotation_project(
+                b"flattened",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+                b"clean-source",
+                &annotation_document("valid"),
+            )
+            .unwrap();
+        let project = library.load_annotation_project(&asset.id).unwrap().unwrap();
+        let original: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&project.document_url).unwrap()).unwrap();
+
+        let mut wrong_pixels = original.clone();
+        wrong_pixels["document"]["sourcePixels"]["width"] = serde_json::json!(99);
+        std::fs::write(
+            &project.document_url,
+            serde_json::to_vec_pretty(&wrong_pixels).unwrap(),
+        )
+        .unwrap();
+        let pixel_mismatch = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(pixel_mismatch.state, EditorAnnotationState::Invalid);
+        assert_eq!(pixel_mismatch.document, None);
+        assert_eq!(pixel_mismatch.source, b"flattened");
+
+        let mut wrong_ratio = original;
+        wrong_ratio["document"]["canvas"]["width"] = serde_json::json!(120);
+        std::fs::write(
+            &project.document_url,
+            serde_json::to_vec_pretty(&wrong_ratio).unwrap(),
+        )
+        .unwrap();
+        let ratio_mismatch = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(ratio_mismatch.state, EditorAnnotationState::Invalid);
+        assert_eq!(ratio_mismatch.document, None);
+        assert_eq!(ratio_mismatch.source, b"flattened");
+    }
+
+    #[test]
+    fn editor_snapshots_use_the_current_flat_for_none_and_invalid_projects() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_data(
+                b"legacy-flat",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let none = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(none.state, EditorAnnotationState::None);
+        assert_eq!(none.document, None);
+        assert_eq!(none.source, b"legacy-flat");
+
+        library
+            .save_annotation_project(&asset.id, b"valid-flat", &annotation_document("valid"))
+            .unwrap();
+        let valid = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(valid.state, EditorAnnotationState::Valid);
+        assert_eq!(valid.source, b"legacy-flat");
+
+        library.replace_data(b"external-flat", &asset.id).unwrap();
+        let invalid = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(invalid.state, EditorAnnotationState::Invalid);
+        assert_eq!(invalid.document, None);
+        assert_eq!(invalid.source, b"external-flat");
+        assert_ne!(invalid.revision_sha256, valid.revision_sha256);
+    }
+
+    #[test]
+    fn editor_revision_cas_rejects_changes_to_flat_document_or_source() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_data_with_annotation_project(
+                b"flat",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+                b"source",
+                &annotation_document("initial"),
+            )
+            .unwrap();
+        let baseline = library.load_editor_snapshot(&asset.id).unwrap();
+        let project = library.load_annotation_project(&asset.id).unwrap().unwrap();
+        let asset_url = library.asset_url(&asset);
+        let original_flat = std::fs::read(&asset_url).unwrap();
+        let original_document = std::fs::read(&project.document_url).unwrap();
+        let original_source = std::fs::read(&project.source_url).unwrap();
+
+        let assert_rejected = |library: &AssetLibrary| {
+            let changed = library.load_editor_snapshot(&asset.id).unwrap();
+            assert_ne!(changed.revision_sha256, baseline.revision_sha256);
+            assert!(matches!(
+                library.save_editor_snapshot(
+                    &asset.id,
+                    &baseline.revision_sha256,
+                    b"must-not-write",
+                    Some(&annotation_document("must-not-write")),
+                ),
+                Err(AssetLibraryError::AnnotationRevisionMismatch)
+            ));
+        };
+
+        std::fs::write(&asset_url, b"changed-flat").unwrap();
+        assert_rejected(&library);
+        std::fs::write(&asset_url, &original_flat).unwrap();
+
+        let mut reformatted_document = original_document.clone();
+        reformatted_document.push(b'\n');
+        std::fs::write(&project.document_url, reformatted_document).unwrap();
+        assert_rejected(&library);
+        std::fs::write(&project.document_url, &original_document).unwrap();
+
+        std::fs::write(&project.source_url, b"changed-source").unwrap();
+        assert_rejected(&library);
+        std::fs::write(&project.source_url, &original_source).unwrap();
+
+        let restored = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(restored.revision_sha256, baseline.revision_sha256);
+        assert_eq!(std::fs::read(asset_url).unwrap(), original_flat);
+        assert_eq!(
+            std::fs::read(project.document_url).unwrap(),
+            original_document
+        );
+        assert_eq!(std::fs::read(project.source_url).unwrap(), original_source);
+    }
+
+    #[test]
+    fn editor_cas_saves_none_valid_and_invalid_projects() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_data(
+                b"none-flat",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+
+        let none = library.load_editor_snapshot(&asset.id).unwrap();
+        library
+            .save_editor_snapshot(
+                &asset.id,
+                &none.revision_sha256,
+                b"first-rendered",
+                Some(&annotation_document("first")),
+            )
+            .unwrap();
+        let first = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(first.state, EditorAnnotationState::Valid);
+        assert_eq!(first.source, b"none-flat");
+        assert_eq!(first.document, Some(annotation_document("first")));
+
+        library
+            .save_editor_snapshot(
+                &asset.id,
+                &first.revision_sha256,
+                b"second-rendered",
+                Some(&annotation_document("second")),
+            )
+            .unwrap();
+        let second = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(second.state, EditorAnnotationState::Valid);
+        assert_eq!(second.source, b"none-flat");
+        assert_eq!(second.document, Some(annotation_document("second")));
+
+        library.replace_data(b"external-flat", &asset.id).unwrap();
+        let invalid = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(invalid.state, EditorAnnotationState::Invalid);
+        library
+            .save_editor_snapshot(
+                &asset.id,
+                &invalid.revision_sha256,
+                b"repaired-rendered",
+                Some(&annotation_document("repaired")),
+            )
+            .unwrap();
+        let repaired = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(repaired.state, EditorAnnotationState::Valid);
+        assert_eq!(repaired.source, b"external-flat");
+        assert_eq!(repaired.document, Some(annotation_document("repaired")));
+        assert_eq!(
+            std::fs::read(library.asset_url(&asset)).unwrap(),
+            b"repaired-rendered"
+        );
+    }
+
+    #[test]
+    fn editor_cas_clear_updates_flat_and_removes_projects_in_all_states() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+
+        let none = library
+            .import_data(b"none", CaptureKind::Image, "png", 1, 1, None, None, None)
+            .unwrap();
+        let none_snapshot = library.load_editor_snapshot(&none.id).unwrap();
+        library
+            .save_editor_snapshot(&none.id, &none_snapshot.revision_sha256, b"none-new", None)
+            .unwrap();
+        let none_after = library.load_editor_snapshot(&none.id).unwrap();
+        assert_eq!(none_after.state, EditorAnnotationState::None);
+        assert_eq!(none_after.source, b"none-new");
+
+        let valid = library
+            .import_data_with_annotation_project(
+                b"valid-flat",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+                b"valid-source",
+                &annotation_document("valid"),
+            )
+            .unwrap();
+        let valid_snapshot = library.load_editor_snapshot(&valid.id).unwrap();
+        library
+            .save_editor_snapshot(
+                &valid.id,
+                &valid_snapshot.revision_sha256,
+                b"valid-new",
+                None,
+            )
+            .unwrap();
+        let valid_after = library.load_editor_snapshot(&valid.id).unwrap();
+        assert_eq!(valid_after.state, EditorAnnotationState::None);
+        assert_eq!(valid_after.source, b"valid-new");
+
+        let invalid = library
+            .import_data_with_annotation_project(
+                b"invalid-flat",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+                b"invalid-source",
+                &annotation_document("invalid"),
+            )
+            .unwrap();
+        library
+            .replace_data(b"external-invalid", &invalid.id)
+            .unwrap();
+        let invalid_snapshot = library.load_editor_snapshot(&invalid.id).unwrap();
+        assert_eq!(invalid_snapshot.state, EditorAnnotationState::Invalid);
+        library
+            .save_editor_snapshot(
+                &invalid.id,
+                &invalid_snapshot.revision_sha256,
+                b"invalid-new",
+                None,
+            )
+            .unwrap();
+        let invalid_after = library.load_editor_snapshot(&invalid.id).unwrap();
+        assert_eq!(invalid_after.state, EditorAnnotationState::None);
+        assert_eq!(invalid_after.source, b"invalid-new");
+    }
+
+    #[test]
+    fn legacy_first_save_snapshots_source_and_later_saves_keep_it_immutable() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_data(
+                b"legacy-flat",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(library
+            .load_annotation_project(&asset.id)
+            .unwrap()
+            .is_none());
+
+        library
+            .save_annotation_project(&asset.id, b"rendered-one", &annotation_document("one"))
+            .unwrap();
+        let first = library.load_annotation_project(&asset.id).unwrap().unwrap();
+        assert_eq!(std::fs::read(&first.source_url).unwrap(), b"legacy-flat");
+        assert_eq!(first.document, annotation_document("one"));
+
+        library
+            .save_annotation_project(&asset.id, b"rendered-two", &annotation_document("two"))
+            .unwrap();
+        let second = library.load_annotation_project(&asset.id).unwrap().unwrap();
+        assert_eq!(std::fs::read(&second.source_url).unwrap(), b"legacy-flat");
+        assert_eq!(second.document, annotation_document("two"));
+        assert_eq!(
+            std::fs::read(library.asset_url(&asset)).unwrap(),
+            b"rendered-two"
+        );
+    }
+
+    #[test]
+    fn stale_or_incomplete_projects_fail_closed_and_can_be_cleared() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_data(
+                b"flat",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        save_test_project(&library, &asset, "attached");
+
+        library
+            .replace_data(b"external-replacement", &asset.id)
+            .unwrap();
+        assert!(matches!(
+            library.load_annotation_project(&asset.id),
+            Err(AssetLibraryError::StaleAnnotationProject)
+        ));
+        assert!(matches!(
+            library.save_annotation_project(
+                &asset.id,
+                b"new-render",
+                &annotation_document("must-not-apply")
+            ),
+            Err(AssetLibraryError::StaleAnnotationProject)
+        ));
+
+        library.clear_annotation_project(&asset.id).unwrap();
+        assert!(library
+            .load_annotation_project(&asset.id)
+            .unwrap()
+            .is_none());
+        library
+            .save_annotation_project(&asset.id, b"new-render", &annotation_document("fresh"))
+            .unwrap();
+        let fresh = library.load_annotation_project(&asset.id).unwrap().unwrap();
+        assert_eq!(
+            std::fs::read(&fresh.source_url).unwrap(),
+            b"external-replacement"
+        );
+
+        std::fs::remove_file(&fresh.source_url).unwrap();
+        assert!(matches!(
+            library.load_annotation_project(&asset.id),
+            Err(AssetLibraryError::IncompleteAnnotationProject)
+        ));
+    }
+
+    #[test]
+    fn corrupt_projects_are_reported_and_explicit_clear_recovers() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_data(b"flat", CaptureKind::Image, "png", 1, 1, None, None, None)
+            .unwrap();
+        save_test_project(&library, &asset, "corrupt");
+        let project = library.load_annotation_project(&asset.id).unwrap().unwrap();
+        std::fs::write(&project.document_url, b"{broken").unwrap();
+
+        assert!(matches!(
+            library.load_annotation_project(&asset.id),
+            Err(AssetLibraryError::CorruptAnnotationProject(_))
+        ));
+        library.clear_annotation_project(&asset.id).unwrap();
+        assert!(library
+            .load_annotation_project(&asset.id)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn editor_cas_restores_all_files_after_invalid_project_write_failure() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library
+            .import_data(
+                b"flat",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        save_test_project(&library, &asset, "old");
+        library.replace_data(b"external-flat", &asset.id).unwrap();
+
+        let (document_url, source_url) = library.annotation_project_urls(&asset);
+        let asset_url = library.asset_url(&asset);
+        let previous_document = std::fs::read(&document_url).unwrap();
+        let previous_source = std::fs::read(&source_url).unwrap();
+        let previous_rendered = std::fs::read(&asset_url).unwrap();
+        let invalid = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(invalid.state, EditorAnnotationState::Invalid);
+        library.annotation_replace_fail_at_write.set(Some(3));
+
+        assert!(matches!(
+            library.save_editor_snapshot(
+                &asset.id,
+                &invalid.revision_sha256,
+                b"new-rendered",
+                Some(&annotation_document("new"))
+            ),
+            Err(AssetLibraryError::Io(_))
+        ));
+        library.annotation_replace_fail_at_write.set(None);
+        assert_eq!(std::fs::read(document_url).unwrap(), previous_document);
+        assert_eq!(std::fs::read(source_url).unwrap(), previous_source);
+        assert_eq!(std::fs::read(asset_url).unwrap(), previous_rendered);
+        assert!(matches!(
+            library.load_annotation_project(&asset.id),
+            Err(AssetLibraryError::StaleAnnotationProject)
+        ));
+    }
+
+    #[test]
+    fn annotation_projects_reject_non_image_assets_before_writing_files() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+
+        assert!(matches!(
+            library.import_data_with_annotation_project(
+                b"video",
+                CaptureKind::Video,
+                "mp4",
+                1,
+                1,
+                Some(1.0),
+                None,
+                None,
+                b"source",
+                &annotation_document("video"),
+            ),
+            Err(AssetLibraryError::UnsupportedAnnotationAsset)
+        ));
+        assert!(library.index.is_empty());
+        assert_eq!(std::fs::read_dir(root.join("Assets")).unwrap().count(), 0);
+        assert_eq!(
+            std::fs::read_dir(root.join("Annotations")).unwrap().count(),
+            0
+        );
+    }
+
+    #[test]
+    fn annotated_import_rolls_back_all_files_when_index_persistence_fails() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let blocked_index = root.join("blocked-index");
+        std::fs::create_dir(&blocked_index).unwrap();
+        library.index_url = blocked_index;
+
+        assert!(matches!(
+            library.import_data_with_annotation_project(
+                b"flat",
+                CaptureKind::Image,
+                "png",
+                1,
+                1,
+                None,
+                None,
+                None,
+                b"clean",
+                &annotation_document("rollback"),
+            ),
+            Err(AssetLibraryError::Io(_))
+        ));
+        assert!(library.index.is_empty());
+        assert_eq!(std::fs::read_dir(root.join("Assets")).unwrap().count(), 0);
+        assert_eq!(
+            std::fs::read_dir(root.join("Annotations")).unwrap().count(),
+            0
+        );
+    }
+
+    #[test]
     fn rejects_invalid_extensions() {
         let (_dir, root) = temp_root();
         let mut library = AssetLibrary::open(root).unwrap();
@@ -528,10 +1765,14 @@ mod tests {
         let asset = library
             .import_data(b"x", CaptureKind::Image, "png", 1, 1, None, None, None)
             .unwrap();
+        save_test_project(&library, &asset, "trash");
+        let project = library.load_annotation_project(&asset.id).unwrap().unwrap();
 
         library.move_to_trash(&asset.id).unwrap();
         assert!(library.all_assets(false).is_empty());
         assert_eq!(library.all_assets(true).len(), 1);
+        assert!(project.document_url.exists());
+        assert!(project.source_url.exists());
 
         library.restore(&asset.id).unwrap();
         assert_eq!(library.all_assets(false).len(), 1);
@@ -540,11 +1781,21 @@ mod tests {
         // which was always true for the Trash view, so restored captures kept
         // appearing in both Library and Trash).
         assert!(library.all_assets(true).is_empty());
+        assert_eq!(
+            library
+                .load_annotation_project(&asset.id)
+                .unwrap()
+                .unwrap()
+                .document,
+            annotation_document("trash")
+        );
 
         library.move_to_trash(&asset.id).unwrap();
         library.permanently_delete(&asset.id).unwrap();
         assert!(library.all_assets(true).is_empty());
         assert!(!library.asset_url(&asset).exists());
+        assert!(!project.document_url.exists());
+        assert!(!project.source_url.exists());
     }
 
     #[test]
@@ -554,6 +1805,8 @@ mod tests {
         let asset = library
             .import_data(b"kept", CaptureKind::Image, "png", 1, 1, None, None, None)
             .unwrap();
+        save_test_project(&library, &asset, "kept");
+        let project = library.load_annotation_project(&asset.id).unwrap().unwrap();
         library.move_to_trash(&asset.id).unwrap();
         let asset_path = library.asset_url(&asset);
 
@@ -567,6 +1820,8 @@ mod tests {
         ));
         assert!(library.asset_by_id(&asset.id).is_some());
         assert!(asset_path.exists());
+        assert!(project.document_url.exists());
+        assert!(project.source_url.exists());
 
         let reopened = AssetLibrary::open(root).unwrap();
         assert!(reopened.asset_by_id(&asset.id).is_some());
@@ -579,6 +1834,13 @@ mod tests {
         let mut library = AssetLibrary::open(root).unwrap();
         let assets = import_test_assets(&mut library, 3);
         let ids = assets.iter().map(|asset| asset.id).collect::<Vec<_>>();
+        for (index, asset) in assets.iter().enumerate() {
+            save_test_project(&library, asset, &format!("batch-{index}"));
+        }
+        let projects = ids
+            .iter()
+            .map(|id| library.load_annotation_project(id).unwrap().unwrap())
+            .collect::<Vec<_>>();
 
         library.persist_count.set(0);
         library.batch_move_to_trash(&ids).unwrap();
@@ -586,6 +1848,9 @@ mod tests {
         assert!(ids
             .iter()
             .all(|id| library.asset_by_id(id).unwrap().trashed_at.is_some()));
+        assert!(projects
+            .iter()
+            .all(|project| project.document_url.exists() && project.source_url.exists()));
 
         library.persist_count.set(0);
         library.batch_restore(&ids).unwrap();
@@ -608,6 +1873,9 @@ mod tests {
         assert!(assets
             .iter()
             .all(|asset| !library.asset_url(asset).exists()));
+        assert!(projects
+            .iter()
+            .all(|project| !project.document_url.exists() && !project.source_url.exists()));
     }
 
     #[test]
@@ -732,6 +2000,32 @@ mod tests {
     }
 
     #[test]
+    fn permanent_delete_reports_annotation_cleanup_failure_after_committing_index() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let asset = library
+            .import_data(b"flat", CaptureKind::Image, "png", 1, 1, None, None, None)
+            .unwrap();
+        save_test_project(&library, &asset, "single-cleanup");
+        let project = library.load_annotation_project(&asset.id).unwrap().unwrap();
+        library.move_to_trash(&asset.id).unwrap();
+        std::fs::remove_file(&project.source_url).unwrap();
+        std::fs::create_dir(&project.source_url).unwrap();
+
+        assert!(matches!(
+            library.permanently_delete(&asset.id),
+            Err(AssetLibraryError::CleanupFailed { failed_files: 1 })
+        ));
+        assert!(library.asset_by_id(&asset.id).is_none());
+        assert!(!library.asset_url(&asset).exists());
+        assert!(!project.document_url.exists());
+        assert!(project.source_url.is_dir());
+
+        let reopened = AssetLibrary::open(root).unwrap();
+        assert!(reopened.asset_by_id(&asset.id).is_none());
+    }
+
+    #[test]
     fn all_assets_splits_trashed_from_active() {
         let (_dir, root) = temp_root();
         let mut library = AssetLibrary::open(root).unwrap();
@@ -765,6 +2059,8 @@ mod tests {
         let gone = library
             .import_data(b"g", CaptureKind::Image, "png", 1, 1, None, None, None)
             .unwrap();
+        save_test_project(&library, &gone, "empty-trash");
+        let gone_project = library.load_annotation_project(&gone.id).unwrap().unwrap();
         library.move_to_trash(&gone.id).unwrap();
 
         library.empty_trash().unwrap();
@@ -773,6 +2069,8 @@ mod tests {
         assert!(library.all_assets(true).is_empty());
         assert_eq!(library.all_assets(false).len(), 1);
         assert_eq!(library.all_assets(false)[0].id, kept.id);
+        assert!(!gone_project.document_url.exists());
+        assert!(!gone_project.source_url.exists());
     }
 
     #[test]
@@ -794,6 +2092,11 @@ mod tests {
                 None,
             )
             .unwrap();
+        save_test_project(&library, &trashed, "persist-failure");
+        let trashed_project = library
+            .load_annotation_project(&trashed.id)
+            .unwrap()
+            .unwrap();
         library.move_to_trash(&trashed.id).unwrap();
         let active_path = library.asset_url(&active);
         let trashed_path = library.asset_url(&trashed);
@@ -810,12 +2113,57 @@ mod tests {
         assert_eq!(library.all_assets(true)[0].id, trashed.id);
         assert!(active_path.exists());
         assert!(trashed_path.exists());
+        assert!(trashed_project.document_url.exists());
+        assert!(trashed_project.source_url.exists());
 
         let reopened = AssetLibrary::open(root).unwrap();
         assert!(reopened.asset_by_id(&active.id).is_some());
         assert!(reopened.asset_by_id(&trashed.id).is_some());
         assert!(reopened.asset_url(&active).exists());
         assert!(reopened.asset_url(&trashed).exists());
+    }
+
+    #[test]
+    fn empty_trash_reports_annotation_cleanup_failure_after_committing_index() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let active = library
+            .import_data(b"active", CaptureKind::Image, "png", 1, 1, None, None, None)
+            .unwrap();
+        let trashed = library
+            .import_data(
+                b"trashed",
+                CaptureKind::Image,
+                "png",
+                1,
+                1,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        save_test_project(&library, &trashed, "empty-cleanup");
+        let project = library
+            .load_annotation_project(&trashed.id)
+            .unwrap()
+            .unwrap();
+        library.move_to_trash(&trashed.id).unwrap();
+        std::fs::remove_file(&project.source_url).unwrap();
+        std::fs::create_dir(&project.source_url).unwrap();
+
+        assert!(matches!(
+            library.empty_trash(),
+            Err(AssetLibraryError::CleanupFailed { failed_files: 1 })
+        ));
+        assert_eq!(library.all_assets(false)[0].id, active.id);
+        assert!(library.all_assets(true).is_empty());
+        assert!(!library.asset_url(&trashed).exists());
+        assert!(!project.document_url.exists());
+        assert!(project.source_url.is_dir());
+
+        let reopened = AssetLibrary::open(root).unwrap();
+        assert_eq!(reopened.all_assets(false)[0].id, active.id);
+        assert!(reopened.all_assets(true).is_empty());
     }
 
     #[test]

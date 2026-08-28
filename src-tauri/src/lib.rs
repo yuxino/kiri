@@ -94,6 +94,8 @@ pub fn run() {
                 tauri::WindowEvent::Destroyed => {
                     if let Some(state) = window.app_handle().try_state::<AppState>() {
                         let label = window.label();
+                        state.editor_annotations.lock().unwrap().remove(label);
+                        state.editor_save_destinations.lock().unwrap().remove(label);
                         let destroyed_overlay = {
                             let mut capture = state.capture.lock().unwrap();
                             capture.destroy_overlay(label)
@@ -138,12 +140,16 @@ pub fn run() {
             commands::batch_set_favorite,
             commands::copy_asset,
             commands::open_asset,
+            commands::open_editor,
             commands::reveal_asset,
             commands::convert_to_gif,
             commands::start_capture,
             commands::cancel_capture,
+            commands::prepare_capture_annotation,
             commands::confirm_capture,
             commands::save_file_dialog,
+            commands::get_asset_annotation_project,
+            commands::prepare_asset_annotation,
             commands::update_asset,
             commands::rename_asset,
             commands::set_tags,

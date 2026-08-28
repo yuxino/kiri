@@ -39,8 +39,10 @@ history.
 - [x] Stable macOS development identity for persistent privacy permissions
 - [x] One transparent desktop icon source with dev, production, and CI validation
 - [x] Release jobs verify release tools and app icons before packaging
+- [x] Release CI verifies tags and produces Windows drafts without an intentional macOS policy failure
 - [x] FFmpeg is downloaded on the first recording or explicit GIF conversion when absent, then cached locally
 - [x] Interactive screenshot and recording completion preview with open, copy, recoverable Trash, and Undo actions
+- [x] Re-editable local screenshot annotations with completion-card and library editor entry points
 - [x] Explicit MP4/GIF recording output choice; direct GIF is silent and preserves the MP4 when GIF finalization fails
 
 Release validation still open:
@@ -49,7 +51,7 @@ Release validation still open:
 - [ ] Windows acceptance testing (capture, recording, audio, OCR, ripple)
 - [ ] Pause/resume and exported-control exclusion acceptance on both platforms
 - [ ] Mixed-scale multi-display acceptance testing
-- [ ] Signed and notarized release builds (macOS) + Authenticode (Windows)
+- [ ] Maintainer-packaged macOS DMGs retain one stable local signing identity and pass manual Gatekeeper install/launch acceptance
 - [ ] Verify each release's final arm64, x64, and Windows installers
 
 ## Later

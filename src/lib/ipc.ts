@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { AnnotationDocumentV1 } from "../annotation/model";
 
 // ---------------------------------------------------------------------------
 // Shared DTO types (mirror src-tauri/src/commands.rs)
@@ -146,6 +147,23 @@ export interface UpdateCheckDto {
   updateAvailable: boolean;
 }
 
+export interface AnnotationProjectDto {
+  revisionSha256: string;
+  state: "none" | "valid" | "invalid";
+  documentJson: string | null;
+}
+
+export interface EditorUpdateDto {
+  revisionSha256: string;
+  actionSucceeded: boolean;
+}
+
+const EDITOR_REVISION_MISMATCH_ERROR = "The screenshot changed after the editor opened.";
+
+export function isEditorRevisionMismatch(error: unknown): boolean {
+  return String(error) === EDITOR_REVISION_MISMATCH_ERROR;
+}
+
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
@@ -179,12 +197,29 @@ export const api = {
   setLanguage: (language: string) => invoke<void>("set_language", { language }),
   copyAsset: (id: string) => invoke<void>("copy_asset", { id }),
   openAsset: (id: string) => invoke<void>("open_asset", { id }),
+  openEditor: (id: string) => invoke<void>("open_editor", { id }),
   revealAsset: (id: string) => invoke<void>("reveal_asset", { id }),
   convertToGif: (id: string) => invoke<void>("convert_to_gif", { id }),
 
   startCapture: () => invoke<CaptureContextDto>("start_capture"),
   cancelCapture: () => invoke<void>("cancel_capture"),
-  confirmCapture: (png: Uint8Array) => invoke<void>("confirm_capture", png),
+  confirmCapture: async (
+    png: Uint8Array,
+    annotation: {
+      selection: { x: number; y: number; width: number; height: number };
+      document: AnnotationDocumentV1;
+    },
+  ) => {
+    const token = await invoke<string>("prepare_capture_annotation", {
+      request: {
+        selection: annotation.selection,
+        documentJson: JSON.stringify(annotation.document),
+      },
+    });
+    return invoke<void>("confirm_capture", png, {
+      headers: { "x-kiri-annotation-token": token },
+    });
+  },
   copyText: (text: string) => invoke<void>("copy_text", { text }),
   getOcrProviderSettings: () =>
     invoke<OcrProviderSettingsDto>("get_ocr_provider_settings"),
@@ -234,20 +269,33 @@ export const api = {
 
   saveFileDialog: (defaultName: string) =>
     invoke<string | null>("save_file_dialog", { defaultName }),
+  getAssetAnnotationProject: (id: string) =>
+    invoke<AnnotationProjectDto>("get_asset_annotation_project", { id }),
   updateAsset: (
     id: string,
     png: Uint8Array,
-    options: { copyToClipboard: boolean; savePath: string | null },
-  ) =>
-    invoke<void>("update_asset", png, {
+    document: AnnotationDocumentV1,
+    options: {
+      copyToClipboard: boolean;
+      saveToken: string | null;
+      revisionSha256: string;
+    },
+  ) => {
+    return invoke<string>("prepare_asset_annotation", {
+      id,
+      documentJson: JSON.stringify(document),
+      revisionSha256: options.revisionSha256,
+    }).then((annotationToken) => invoke<EditorUpdateDto>("update_asset", png, {
       headers: {
         "x-kiri-asset-id": id,
+        "x-kiri-annotation-token": annotationToken,
         "x-kiri-copy-to-clipboard": options.copyToClipboard ? "1" : "0",
-        ...(options.savePath
-          ? { "x-kiri-save-path": encodeURIComponent(options.savePath) }
+        ...(options.saveToken
+          ? { "x-kiri-save-token": options.saveToken }
           : {}),
       },
-    }),
+    }));
+  },
 };
 
 // ---------------------------------------------------------------------------

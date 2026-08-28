@@ -163,6 +163,33 @@ pub fn clear_frozen_png_for_capture(store: &ProtocolStore, capture_id: uuid::Uui
     }
 }
 
+fn annotation_source_revision(query: Option<&str>) -> Option<String> {
+    let mut revision = None;
+    for (key, value) in url::form_urlencoded::parse(query?.as_bytes()) {
+        if key != "revision" || revision.replace(value.into_owned()).is_some() {
+            return None;
+        }
+    }
+    revision.filter(|value| {
+        value.len() == 64
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    })
+}
+
+fn annotation_source_for_revision(
+    library: &crate::core::library::AssetLibrary,
+    id: &uuid::Uuid,
+    expected_revision: &str,
+) -> Option<Vec<u8>> {
+    library
+        .load_editor_snapshot(id)
+        .ok()
+        .filter(|snapshot| snapshot.revision_sha256 == expected_revision)
+        .map(|snapshot| snapshot.source)
+}
+
 pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let uri = request.uri();
     let host = uri.host().unwrap_or("").to_string();
@@ -222,6 +249,25 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
                     .unwrap()
                     .insert(cache_key, thumbnail.clone());
                 return respond(thumbnail, "image/png");
+            }
+        }
+        return not_found();
+    }
+
+    // Immutable clean source for a validated editable screenshot project.
+    // Missing, corrupt, or stale sidecars fail closed; callers then fall back
+    // to the current flattened asset instead of drawing old marks twice.
+    if host == "annotation-source" {
+        if let (Ok(id), Some(expected_revision)) = (
+            uuid::Uuid::parse_str(&path),
+            annotation_source_revision(uri.query()),
+        ) {
+            let source = {
+                let library = state.library.lock().unwrap();
+                annotation_source_for_revision(&library, &id, &expected_revision)
+            };
+            if let Some(source) = source {
+                return respond_png(source);
             }
         }
         return not_found();
@@ -531,6 +577,124 @@ fn not_found() -> Response<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn annotation_source_query_requires_one_exact_revision_hash() {
+        let hash = "a".repeat(64);
+        assert_eq!(
+            annotation_source_revision(Some(&format!("revision={hash}"))),
+            Some(hash)
+        );
+        for query in [
+            None,
+            Some("revision=short"),
+            Some("revision=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+            Some("revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&revision=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            Some("revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&extra=value"),
+        ] {
+            assert!(annotation_source_revision(query).is_none(), "query {query:?}");
+        }
+    }
+
+    #[test]
+    fn annotation_source_revision_returns_only_the_exact_snapshot_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut library =
+            crate::core::library::AssetLibrary::open(directory.path().to_path_buf()).unwrap();
+        let legacy = library
+            .import_data(
+                b"legacy-flat",
+                crate::core::asset::CaptureKind::Image,
+                "png",
+                1,
+                1,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let legacy_snapshot = library.load_editor_snapshot(&legacy.id).unwrap();
+        assert_eq!(
+            legacy_snapshot.state,
+            crate::core::library::EditorAnnotationState::None
+        );
+        assert_eq!(
+            annotation_source_for_revision(&library, &legacy.id, &legacy_snapshot.revision_sha256,),
+            Some(b"legacy-flat".to_vec())
+        );
+
+        let document = serde_json::json!({
+            "schemaVersion": 1,
+            "canvas": { "width": 1, "height": 1 },
+            "sourcePixels": { "width": 1, "height": 1 },
+            "marks": []
+        });
+        let asset = library
+            .import_data_with_annotation_project(
+                b"flat",
+                crate::core::asset::CaptureKind::Image,
+                "png",
+                1,
+                1,
+                None,
+                None,
+                None,
+                b"clean-source",
+                &document,
+            )
+            .unwrap();
+        let first = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(
+            annotation_source_for_revision(&library, &asset.id, &first.revision_sha256),
+            Some(b"clean-source".to_vec())
+        );
+
+        let annotation_id = asset.id.to_string().to_lowercase();
+        let document_url = directory
+            .path()
+            .join("Annotations")
+            .join(format!("{annotation_id}.json"));
+        let source_url = directory
+            .path()
+            .join("Annotations")
+            .join(format!("{annotation_id}.source.png"));
+        let mut reformatted = std::fs::read(&document_url).unwrap();
+        reformatted.push(b'\n');
+        std::fs::write(&document_url, reformatted).unwrap();
+        assert!(
+            annotation_source_for_revision(&library, &asset.id, &first.revision_sha256).is_none()
+        );
+        let second = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(
+            second.state,
+            crate::core::library::EditorAnnotationState::Valid
+        );
+        assert_eq!(
+            annotation_source_for_revision(&library, &asset.id, &second.revision_sha256),
+            Some(b"clean-source".to_vec())
+        );
+
+        let asset_url = library.asset_url(&asset);
+        std::fs::write(&asset_url, b"changed-flat").unwrap();
+        assert!(
+            annotation_source_for_revision(&library, &asset.id, &second.revision_sha256).is_none()
+        );
+        std::fs::write(&asset_url, b"flat").unwrap();
+
+        std::fs::write(source_url, b"tampered-source").unwrap();
+        assert!(
+            annotation_source_for_revision(&library, &asset.id, &second.revision_sha256).is_none()
+        );
+        let invalid = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(
+            invalid.state,
+            crate::core::library::EditorAnnotationState::Invalid
+        );
+        assert_eq!(
+            annotation_source_for_revision(&library, &asset.id, &invalid.revision_sha256),
+            Some(b"flat".to_vec())
+        );
+    }
 
     #[test]
     fn frozen_capture_requires_exact_per_capture_token_and_clear_revokes_it() {

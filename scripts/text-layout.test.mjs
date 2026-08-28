@@ -11,6 +11,10 @@ const measureText = (text) => text.length * 10;
 test("text layout preserves explicit and empty lines", () => {
   assert.deepEqual(layoutTextLines("A\nB", 100, measureText), ["A", "B"]);
   assert.deepEqual(layoutTextLines("A\n\nB", 100, measureText), ["A", "", "B"]);
+  assert.deepEqual(layoutTextLines("  Kiri\nnext line  ", 200, measureText), [
+    "  Kiri",
+    "next line  ",
+  ]);
 });
 
 test("text layout counts Latin and CJK soft wrapping", () => {

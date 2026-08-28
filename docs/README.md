@@ -33,12 +33,18 @@ application or a durable product decision.
   — interactive completion actions, explicit MP4/GIF output, and the neutral
   recording countdown.
 - [`adr/0013-fail-closed-macos-release-signing.md`](adr/0013-fail-closed-macos-release-signing.md)
-  — fail-closed release packaging until CI can prove a persistent macOS
-  signing identity.
+  — historical fail-closed signing rationale, superseded for release
+  orchestration by ADR 0017.
 - [`adr/0014-user-initiated-update-checks.md`](adr/0014-user-initiated-update-checks.md)
   — explicit, bounded update checks without background downloads or installs.
 - [`adr/0015-monochrome-workspace-visual-system.md`](adr/0015-monochrome-workspace-visual-system.md)
   — the black, white, and neutral-gray application visual system.
+- [`adr/0016-editable-screenshot-projects.md`](adr/0016-editable-screenshot-projects.md)
+  — re-editable local screenshot annotations, flat-image compatibility, and
+  completion/library editor entry points.
+- [`adr/0017-maintainer-packaged-macos-releases.md`](adr/0017-maintainer-packaged-macos-releases.md)
+  — developer-installable GitHub distribution with maintainer-packaged,
+  stable self-signed macOS DMGs and no intentional CI red light.
 
 Completed implementation plans and the former Swift migration specifications
 are intentionally not kept in the working tree. Git history and release tags

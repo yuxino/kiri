@@ -1,7 +1,7 @@
 //! AppModel equivalent — coordinates capture, library operations, recording
 //! state, and transient feedback across the Tauri windows.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -13,7 +13,9 @@ use tauri::{
 };
 
 use crate::capture::{CapturedDisplay, PlatformRecorder};
+use crate::core::annotation::AnnotationDocument;
 use crate::core::asset::CaptureAsset;
+use crate::core::geometry::Rect;
 use crate::core::library::AssetLibrary;
 use crate::core::policy::RecordingOptions;
 use crate::record::SegmentEncoder;
@@ -32,6 +34,12 @@ pub struct AppState {
         std::sync::Mutex<Option<Box<dyn crate::platform::ClickMonitorHandle + Send>>>,
     pub ocr_providers: Arc<crate::ocr_controller::OcrProviderManager>,
     pub ocr_requests: Arc<crate::ocr_controller::OcrRequestController>,
+    /// One bounded annotation snapshot per live editor window. A save consumes
+    /// the snapshot; destroying the window discards it.
+    pub editor_annotations: std::sync::Mutex<HashMap<String, StagedEditorAnnotation>>,
+    /// One native-save-panel destination per live editor window. The renderer
+    /// receives only the opaque token; a save consumes both token and path.
+    pub editor_save_destinations: std::sync::Mutex<HashMap<String, ApprovedEditorSave>>,
     remote_ocr: std::sync::OnceLock<Option<crate::remote_ocr::RemoteOcrClient>>,
 }
 
@@ -71,6 +79,30 @@ pub struct CaptureSession {
     /// Library windows hidden for the capture session.
     pub hidden_windows: Vec<String>,
     pub overlay_labels: Vec<String>,
+    /// Present only after an overlay with committed marks stages the matching
+    /// selection/document pair. Confirmation consumes the whole session.
+    pub annotation: Option<StagedCaptureAnnotation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StagedCaptureAnnotation {
+    pub token: uuid::Uuid,
+    pub selection: Rect,
+    pub document: AnnotationDocument,
+}
+
+#[derive(Debug, Clone)]
+pub struct StagedEditorAnnotation {
+    pub token: uuid::Uuid,
+    pub document: AnnotationDocument,
+    /// Content-addressed baseline returned when the editor loaded its source.
+    pub revision_sha256: String,
+}
+
+#[derive(Debug)]
+pub struct ApprovedEditorSave {
+    pub token: uuid::Uuid,
+    pub path: PathBuf,
 }
 
 impl Default for RecordingFlow {
@@ -318,6 +350,8 @@ impl AppState {
             click_monitor: std::sync::Mutex::new(None),
             ocr_providers,
             ocr_requests: Arc::new(crate::ocr_controller::OcrRequestController::default()),
+            editor_annotations: Default::default(),
+            editor_save_destinations: Default::default(),
             remote_ocr: std::sync::OnceLock::new(),
         })
     }
@@ -913,6 +947,7 @@ mod tests {
                 was_kiri_frontmost: true,
                 hidden_windows: Vec::new(),
                 overlay_labels: vec!["overlay-a".into(), "overlay-b".into()],
+                annotation: None,
             }),
         };
 

@@ -3,13 +3,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { api } from "../lib/ipc";
+import { api, isEditorRevisionMismatch } from "../lib/ipc";
 import { t } from "../i18n";
 import type { Rect } from "../annotation/geom";
 import {
   COLOR_HEX,
   COLOR_PRESETS,
   DEFAULT_APPEARANCE,
+  type AnnotationDocumentV1,
   type AppearanceSettings,
   type MosaicIntensity,
   type MosaicStyle,
@@ -17,6 +18,9 @@ import {
   type Tool,
 } from "../annotation/model";
 import AnnotationCanvas, { type AnnotationCanvasHandle } from "../annotation/AnnotationCanvas";
+import { resolveInitialEditorDocument } from "../annotation/editor-document.js";
+import { AnnotationInteractionLock } from "../annotation/interaction-lock.js";
+import { parseAnnotationDocument } from "../annotation/project.js";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 
 const TOOLS: { tool: Tool; icon: IconName; title: string }[] = [
@@ -32,13 +36,19 @@ const TOOLS: { tool: Tool; icon: IconName; title: string }[] = [
 export function EditorWindow(props: { id: string }) {
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [imageSize, setImageSize] = useState<{ w: number; h: number } | null>(null);
+  const [document, setDocument] = useState<AnnotationDocumentV1 | null>(null);
+  const [containerSize, setContainerSize] = useState({ width: 800, height: 560 });
   const [tool, setTool] = useState<Tool>("select");
   const [appearance, setAppearance] = useState<AppearanceSettings>(DEFAULT_APPEARANCE);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [hasMarks, setHasMarks] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [completing, setCompleting] = useState(false);
   const canvasRef = useRef<AnnotationCanvasHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const revisionRef = useRef<string | null>(null);
+  const completionLock = useMemo(() => new AnnotationInteractionLock(), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -48,25 +58,70 @@ export function EditorWindow(props: { id: string }) {
 
     setImage(null);
     setImageSize(null);
-    // Blob URL keeps the canvas CORS-clean for export.
-    fetch(`kiri://asset/${props.id}`, { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error("asset unavailable");
-        return response.blob();
-      })
-      .then((blob) => {
+    setDocument(null);
+    setHasMarks(false);
+    revisionRef.current = null;
+    setActionError(null);
+
+    async function loadImage(url: string): Promise<HTMLImageElement> {
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) throw new Error("asset unavailable");
+      const blob = await response.blob();
+      if (disposed) throw new Error("editor disposed");
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      objectUrl = URL.createObjectURL(blob);
+      const img = new Image();
+      pendingImage = img;
+      img.src = objectUrl;
+      await img.decode();
+      return img;
+    }
+
+    void (async () => {
+      let initialDocument: AnnotationDocumentV1 | null = null;
+      let revisionSha256: string;
+      try {
+        const snapshot = await api.getAssetAnnotationProject(props.id);
+        revisionSha256 = snapshot.revisionSha256;
+        if (snapshot.state === "valid") {
+          if (!snapshot.documentJson) throw new Error("valid project has no document");
+          initialDocument = parseAnnotationDocument(JSON.parse(snapshot.documentJson));
+        } else if (snapshot.state === "invalid" && !disposed) {
+          setActionError("Editable data couldn't be loaded. The current image is still available.");
+        }
         if (disposed) return;
-        objectUrl = URL.createObjectURL(blob);
-        const img = new Image();
-        pendingImage = img;
-        img.onload = () => {
-          if (disposed) return;
-          setImage(img);
-          setImageSize({ w: img.naturalWidth, h: img.naturalHeight });
-        };
-        img.src = objectUrl;
-      })
-      .catch(() => {});
+      } catch {
+        if (!disposed) setActionError("The screenshot changed. Close and reopen the editor.");
+        return;
+      }
+
+      let img: HTMLImageElement;
+      try {
+        img = await loadImage(
+          `kiri://annotation-source/${props.id}?revision=${revisionSha256}`,
+        );
+        if (
+          initialDocument &&
+          (img.naturalWidth !== initialDocument.sourcePixels.width ||
+            img.naturalHeight !== initialDocument.sourcePixels.height)
+        ) {
+          throw new Error("annotation source dimensions changed");
+        }
+      } catch {
+        if (!disposed) setActionError("The screenshot changed. Close and reopen the editor.");
+        return;
+      }
+      if (disposed) return;
+      const nextDocument = resolveInitialEditorDocument(initialDocument, {
+        width: img.naturalWidth,
+        height: img.naturalHeight,
+      });
+      setImage(img);
+      setImageSize({ w: img.naturalWidth, h: img.naturalHeight });
+      setDocument(nextDocument);
+      setHasMarks(nextDocument.marks.length > 0);
+      revisionRef.current = revisionSha256;
+    })();
 
     return () => {
       disposed = true;
@@ -76,18 +131,43 @@ export function EditorWindow(props: { id: string }) {
     };
   }, [props.id]);
 
-  // Aspect-fit rect for the image within the container.
-  const region = useMemo<Rect>(() => {
-    if (!imageSize) return { x: 0, y: 0, width: 1, height: 1 };
+  useEffect(() => {
     const container = containerRef.current;
-    const width = container?.clientWidth ?? 800;
-    const height = container?.clientHeight ?? 560;
-    const scale = Math.min(width / imageSize.w, height / imageSize.h);
-    return { x: 0, y: 0, width: imageSize.w * scale, height: imageSize.h * scale };
-  }, [imageSize]);
+    if (!container) return;
+    const publish = () => {
+      setContainerSize({
+        width: Math.max(1, container.clientWidth),
+        height: Math.max(1, container.clientHeight),
+      });
+    };
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
+  // Aspect-fit CSS size; annotation geometry remains in document.canvas.
+  const viewSize = useMemo(() => {
+    if (!imageSize) return { width: 1, height: 1 };
+    const scale = Math.min(
+      containerSize.width / imageSize.w,
+      containerSize.height / imageSize.h,
+    );
+    return { width: imageSize.w * scale, height: imageSize.h * scale };
+  }, [containerSize, imageSize]);
+
+  const documentRegion = useMemo<Rect>(() => {
+    const canvas = document?.canvas ?? { width: 1, height: 1 };
+    return { x: 0, y: 0, width: canvas.width, height: canvas.height };
+  }, [document]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (completionLock.locked) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (e.key === "Escape") {
         void closeWindow();
         return;
@@ -123,40 +203,60 @@ export function EditorWindow(props: { id: string }) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [completionLock]);
 
-  function closeWindow() {
-    void getCurrentWindow().close();
+  async function closeWindow() {
+    await getCurrentWindow().close();
   }
 
   async function complete(copyToClipboard: boolean) {
-    setActionError(null);
+    if (!completionLock.acquire()) return;
+    setCompleting(true);
     const failureMessage = copyToClipboard
       ? "Couldn't copy the edited image. Try again."
       : "Couldn't save the edited image. Try again.";
     try {
-      const png = await canvasRef.current?.exportPng();
-      if (!png) {
+      setActionError(null);
+      const revisionSha256 = revisionRef.current;
+      if (!revisionSha256) {
+        setActionError("The screenshot changed. Close and reopen the editor.");
+        return;
+      }
+      const result = await canvasRef.current?.exportResult();
+      if (!result) {
         setActionError(failureMessage);
         return;
       }
-      const savePath = copyToClipboard
+      const saveToken = copyToClipboard
         ? null
         : await api.saveFileDialog(`kiri-${props.id}.png`);
       // Cancelling Save As must be a true no-op: do not replace the library
-      // asset when the system file picker returns no destination.
-      if (!copyToClipboard && savePath === null) return;
-      await api.updateAsset(props.id, png, {
+      // asset when the system file picker returns no one-time authorization.
+      if (!copyToClipboard && saveToken === null) return;
+      const update = await api.updateAsset(props.id, result.png, result.document, {
         copyToClipboard,
-        savePath,
+        saveToken,
+        revisionSha256,
       });
-    } catch {
-      setActionError(failureMessage);
-      return;
+      revisionRef.current = update.revisionSha256;
+      if (!update.actionSucceeded) {
+        setActionError(failureMessage);
+        return;
+      }
+      // Spec: copying finishes and closes the editor; saving keeps it open
+      // so the user can continue (they can close manually or hit Copy).
+      if (copyToClipboard) await closeWindow().catch(() => {});
+    } catch (error) {
+      if (isEditorRevisionMismatch(error)) {
+        revisionRef.current = null;
+        setActionError("The screenshot changed. Close and reopen the editor.");
+      } else {
+        setActionError(failureMessage);
+      }
+    } finally {
+      completionLock.release();
+      setCompleting(false);
     }
-    // Spec: copying finishes and closes the editor; saving keeps it open
-    // so the user can continue (they can close manually or hit Copy).
-    if (copyToClipboard) closeWindow();
   }
 
   const slider =
@@ -171,7 +271,13 @@ export function EditorWindow(props: { id: string }) {
             : null;
 
   return (
-    <div className="kiri-dark" style={{ height: "100%", display: "flex", flexDirection: "column", background: "#080808", position: "relative" }}>
+    <div
+      className="kiri-dark"
+      aria-busy={completing}
+      data-interaction-disabled={completing || undefined}
+      inert={completing}
+      style={{ height: "100%", display: "flex", flexDirection: "column", background: "#080808", position: "relative" }}
+    >
       {/* 58pt toolbar */}
       <div
         style={{
@@ -182,6 +288,8 @@ export function EditorWindow(props: { id: string }) {
           padding: "0 10px",
           borderBottom: "1px solid #383838",
           background: "#101010",
+          opacity: completing ? 0.62 : 1,
+          transition: "opacity 0.12s ease-out",
         }}
       >
         {TOOLS.map(({ tool: t2, icon, title }) => (
@@ -269,7 +377,7 @@ export function EditorWindow(props: { id: string }) {
         <EditorToolButton
           icon="xmark"
           title={t("Clear Annotations")}
-          disabled={!canUndo && !canRedo}
+          disabled={!hasMarks}
           onClick={() => canvasRef.current?.clearAnnotations()}
         />
         <div style={{ flex: 1 }} />
@@ -352,17 +460,22 @@ export function EditorWindow(props: { id: string }) {
 
       {/* Canvas area */}
       <div ref={containerRef} style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", background: "#141414", position: "relative" }}>
-        {imageSize && (
-          <div style={{ position: "relative", width: region.width, height: region.height }}>
+        {imageSize && document && (
+          <div style={{ position: "relative", width: viewSize.width, height: viewSize.height }}>
             <AnnotationCanvas
               ref={canvasRef}
               image={image}
-              region={region}
+              region={documentRegion}
+              viewSize={viewSize}
+              initialDocument={document}
+              interactionDisabled={completing}
+              interactionLock={completionLock}
               tool={tool}
               appearance={appearance}
-              onHistoryChange={(u, r) => {
+              onHistoryChange={(u, r, populated) => {
                 setCanUndo(u);
                 setCanRedo(r);
+                setHasMarks(populated);
               }}
               onCancel={closeWindow}
             />

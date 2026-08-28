@@ -41,6 +41,7 @@ import {
   type Tool,
 } from "../annotation/model";
 import AnnotationCanvas, { type AnnotationCanvasHandle } from "../annotation/AnnotationCanvas";
+import { AnnotationInteractionLock } from "../annotation/interaction-lock.js";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 import { RemoteOcrConsent } from "../ocr/RemoteOcrConsent";
 
@@ -132,6 +133,8 @@ export function OverlayWindow() {
   const modeSelectorRef = useRef<HTMLDivElement>(null);
   const modeSelectorDragRef = useRef<ModeSelectorDrag | null>(null);
   const suppressModeSelectorClickRef = useRef(false);
+  const completionLock = useMemo(() => new AnnotationInteractionLock(), []);
+  const [completing, setCompleting] = useState(false);
   const modeRef = useRef<Mode>("screenshot");
   const preparedOcrRef = useRef<PreparedOcrRequestDto | null>(null);
   const ocrGenerationRef = useRef(0);
@@ -200,7 +203,14 @@ export function OverlayWindow() {
     : { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
 
   const modeSelectorPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || !event.isPrimary || modeSelectorDragRef.current) return;
+    if (
+      completionLock.locked ||
+      event.button !== 0 ||
+      !event.isPrimary ||
+      modeSelectorDragRef.current
+    ) {
+      return;
+    }
     event.stopPropagation();
     const selector = modeSelectorRef.current;
     if (!selector) return;
@@ -222,6 +232,7 @@ export function OverlayWindow() {
     event.stopPropagation();
     const gesture = modeSelectorDragRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
+    if (completionLock.locked) return;
     const dx = event.clientX - gesture.start.x;
     const dy = event.clientY - gesture.start.y;
     if (!gesture.moved && Math.hypot(dx, dy) < MODE_SELECTOR_DRAG_THRESHOLD) return;
@@ -293,23 +304,40 @@ export function OverlayWindow() {
 
   const complete = useCallback(
     async () => {
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        reportFrontend("complete: annotation canvas not mounted");
-        return;
+      if (!completionLock.acquire()) return;
+      const modeSelectorGesture = modeSelectorDragRef.current;
+      if (modeSelectorGesture) {
+        if (modeSelectorGesture.captureTarget.hasPointerCapture(modeSelectorGesture.pointerId)) {
+          modeSelectorGesture.captureTarget.releasePointerCapture(modeSelectorGesture.pointerId);
+        }
+        modeSelectorDragRef.current = null;
+        setModeSelectorDragging(false);
       }
-      const png = await canvas.exportPng();
-      if (!png) {
-        reportFrontend("complete: exportPng returned no data");
-        return;
-      }
+      setCompleting(true);
       try {
-        await api.confirmCapture(png);
+        const canvas = canvasRef.current;
+        if (!canvas) {
+          reportFrontend("complete: annotation canvas not mounted");
+          return;
+        }
+        if (!selection) {
+          reportFrontend("complete: annotation selection not available");
+          return;
+        }
+        const result = await canvas.exportResult();
+        if (!result) {
+          reportFrontend("complete: exportResult returned no data");
+          return;
+        }
+        await api.confirmCapture(result.png, { selection, document: result.document });
       } catch (error) {
         reportFrontend(`confirm_capture rejected: ${String(error)}`);
+      } finally {
+        completionLock.release();
+        setCompleting(false);
       }
     },
-    [],
+    [completionLock, selection],
   );
 
   const recognizePreparedLocal = useCallback(async () => {
@@ -449,15 +477,21 @@ export function OverlayWindow() {
       if (e.key !== "Escape") return;
       e.preventDefault();
       e.stopImmediatePropagation();
+      if (completionLock.locked) return;
       cancel();
     };
     window.addEventListener("keydown", onEscape, true);
     return () => window.removeEventListener("keydown", onEscape, true);
-  }, [cancel]);
+  }, [cancel, completionLock]);
 
   // --- keyboard ---
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (completionLock.locked) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
@@ -527,7 +561,7 @@ export function OverlayWindow() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [complete, recognizePreparedLocal, runOcr]);
+  }, [complete, completionLock, recognizePreparedLocal, runOcr]);
 
   const phaseRef = useRef<Phase>("mode-select");
   phaseRef.current = phase;
@@ -689,6 +723,7 @@ export function OverlayWindow() {
   // at any point.
   const switchMode = useCallback(
     (next: Mode) => {
+      if (completionLock.locked) return;
       if (next === modeRef.current) return;
       discardPreparedOcr();
       modeRef.current = next;
@@ -724,7 +759,7 @@ export function OverlayWindow() {
       // With a valid region: screenshot re-shows the toolbar (selecting
       // phase with a selection); record shows the options popover.
     },
-    [discardPreparedOcr],
+    [completionLock, discardPreparedOcr],
   );
 
   // --- toolbar placement (spec §7.6) ---
@@ -751,6 +786,9 @@ export function OverlayWindow() {
   return (
     <div
       className="overlay-root kiri-dark"
+      aria-busy={completing}
+      data-interaction-disabled={completing || undefined}
+      inert={completing}
       style={{
         position: "fixed",
         inset: 0,
@@ -760,17 +798,20 @@ export function OverlayWindow() {
         background: frozenSrc ? "#141414" : "transparent",
         overflow: "hidden",
         cursor:
-          phase === "selecting" || phase === "record-options"
+          completing
+            ? "progress"
+            : phase === "selecting" || phase === "record-options"
             ? "crosshair"
             : "default",
       }}
-      onPointerDown={phase === "annotating" ? undefined : onPointerDown}
-      onPointerMove={phase === "annotating" ? undefined : onPointerMove}
-      onPointerUp={phase === "annotating" ? undefined : onPointerUp}
+      onPointerDown={completing || phase === "annotating" ? undefined : onPointerDown}
+      onPointerMove={completing || phase === "annotating" ? undefined : onPointerMove}
+      onPointerUp={completing || phase === "annotating" ? undefined : onPointerUp}
       onContextMenu={(e) => {
         // Spec §1.6: right-click returns to region selection while
         // annotating (tearing down annotations); otherwise it cancels.
         e.preventDefault();
+        if (completing) return;
         if (phase === "annotating") {
           setPhase("selecting");
           setSelection(null);
@@ -925,6 +966,8 @@ export function OverlayWindow() {
                 : undefined
             }
             region={{ x: selection.x, y: selection.y, width: selection.width, height: selection.height }}
+            interactionDisabled={completing}
+            interactionLock={completionLock}
             tool={tool}
             appearance={appearance}
             onHistoryChange={(u, r) => {
@@ -1095,6 +1138,8 @@ export function OverlayWindow() {
           setAppearance={setAppearance}
           canUndo={canUndo}
           canRedo={canRedo}
+          canSetSize={phase === "selecting"}
+          disabled={completing}
           onUndo={() => canvasRef.current?.undo()}
           onRedo={() => canvasRef.current?.redo()}
           onDone={() => void complete()}
@@ -1103,7 +1148,7 @@ export function OverlayWindow() {
           onTextFontLive={(value) => canvasRef.current?.setTextFontSizeLive(value)}
           onTextFontEnd={() => canvasRef.current?.endTextFontSizeAdjustment()}
           onSetSize={(wPx, hPx) => {
-            if (!selectionRef.current) return;
+            if (phase !== "selecting" || !selectionRef.current) return;
             const sc = context?.scale ?? 1;
             const w = Math.min(wPx / sc, bounds.width);
             const h = Math.min(hPx / sc, bounds.height);
@@ -1724,6 +1769,8 @@ interface ToolbarProps {
   setAppearance(a: AppearanceSettings): void;
   canUndo: boolean;
   canRedo: boolean;
+  canSetSize: boolean;
+  disabled: boolean;
   onUndo(): void;
   onRedo(): void;
   onDone(): void;
@@ -1755,6 +1802,8 @@ function Toolbar(props: ToolbarProps) {
     setAppearance,
     canUndo,
     canRedo,
+    canSetSize,
+    disabled,
     onUndo,
     onRedo,
     onDone,
@@ -1830,6 +1879,7 @@ function Toolbar(props: ToolbarProps) {
       <div
         ref={barRef}
         className="kiri-hud"
+        aria-disabled={disabled}
         onPointerDown={(e) => e.stopPropagation()}
         style={{
           position: "absolute",
@@ -1840,6 +1890,8 @@ function Toolbar(props: ToolbarProps) {
           gap: 3,
           padding: "6px 8px",
           boxShadow: "none",
+          opacity: disabled ? 0.62 : 1,
+          transition: "opacity 0.12s ease-out",
         }}
       >
         <ToolButton icon="xmark" title={t("Cancel capture · Esc")} onClick={onCancel} />
@@ -1941,38 +1993,40 @@ function Toolbar(props: ToolbarProps) {
         <ToolButton icon="arrow.uturn.backward" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={onUndo} />
         <ToolButton icon="arrow.uturn.forward" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={onRedo} />
         {sep}
-        {/* Quick pixel-size entry — confirm before resizing the selection. */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 3,
-            padding: "2px 4px",
-          }}
-        >
-          <input
-            type="number"
-            min={1}
-            value={sizeW}
-            onChange={(e) => setSizeW(e.target.value)}
-            onKeyDown={onSizeInputKeyDown}
-            placeholder={t("Width (px)").charAt(0)}
-            title={t("Width (px)")}
-            style={sizeInputStyle}
-          />
-          <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 11 }}>×</span>
-          <input
-            type="number"
-            min={1}
-            value={sizeH}
-            onChange={(e) => setSizeH(e.target.value)}
-            onKeyDown={onSizeInputKeyDown}
-            placeholder={t("Height (px)").charAt(0)}
-            title={t("Height (px)")}
-            style={sizeInputStyle}
-          />
-          <ToolButton icon="checkmark" title={t("Apply size")} onClick={applySize} />
-        </div>
+        {canSetSize && (
+          /* Quick pixel-size entry — confirm before resizing the selection. */
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 3,
+              padding: "2px 4px",
+            }}
+          >
+            <input
+              type="number"
+              min={1}
+              value={sizeW}
+              onChange={(e) => setSizeW(e.target.value)}
+              onKeyDown={onSizeInputKeyDown}
+              placeholder={t("Width (px)").charAt(0)}
+              title={t("Width (px)")}
+              style={sizeInputStyle}
+            />
+            <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 11 }}>×</span>
+            <input
+              type="number"
+              min={1}
+              value={sizeH}
+              onChange={(e) => setSizeH(e.target.value)}
+              onKeyDown={onSizeInputKeyDown}
+              placeholder={t("Height (px)").charAt(0)}
+              title={t("Height (px)")}
+              style={sizeInputStyle}
+            />
+            <ToolButton icon="checkmark" title={t("Apply size")} onClick={applySize} />
+          </div>
+        )}
         <ToolButton icon="checkmark" title={t("Done — Copy to clipboard · Return")} primary onClick={onDone} />
       </div>
     </>

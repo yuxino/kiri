@@ -12,6 +12,12 @@ kiri is local-first and does not upload captures automatically. A change that
 transfers capture contents or other user data must make the destination and
 user action explicit.
 
+Editable annotation documents are treated as untrusted local input. Kiri
+validates their schema and bounds, verifies the source and flattened-image
+hashes, and refuses stale editor saves instead of pairing a document with a
+different image revision. Native Save panels issue a one-time destination
+authorization; unrestricted filesystem paths are not exposed to the WebView.
+
 Recording or explicit GIF conversion may download the FFmpeg executable once
 when no usable local copy is available. This dependency request contains no
 capture contents, filenames, library metadata, credentials, or account

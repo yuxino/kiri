@@ -82,7 +82,7 @@ function actionErrorMessage(error: unknown): string {
 function previewLabel(kind: CompletionPreviewPayload["kind"]): string {
   if (kind === "video") return t("Open recording preview");
   if (kind === "gif") return t("Open GIF preview");
-  return t("Open screenshot preview");
+  return t("Edit screenshot");
 }
 
 function ActionButton(props: {
@@ -353,7 +353,14 @@ export function ToastWindow(props: { title?: string; symbol?: string }) {
   const openPreview = (event: ReactMouseEvent<HTMLButtonElement>) => {
     if (event.detail > 1) return;
     if (!assetId || isProcessing || undo) return;
-    void runAction("open", () => api.openAsset(assetId), () => hideWindow());
+    void runAction(
+      "open",
+      () =>
+        visibleCompletion.kind === "image"
+          ? api.openEditor(assetId)
+          : api.openAsset(assetId),
+      () => hideWindow(),
+    );
   };
 
   const copyAsset = () => {

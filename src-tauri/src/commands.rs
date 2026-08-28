@@ -2,6 +2,7 @@
 //! Synchronous commands run on the main thread; heavy work is spawned onto
 //! background threads.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
@@ -9,9 +10,10 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::capture::current as capture_backend;
+use crate::core::annotation::{AnnotationDocument, AnnotationPixelSize};
 use crate::core::asset::{CaptureAsset, CaptureKind};
 use crate::core::geometry::Rect;
-use crate::core::library::AssetLibraryError;
+use crate::core::library::{AssetLibraryError, EditorAnnotationState};
 use crate::core::policy::{RecordingOptions, RecordingOutputFormat};
 use crate::core::shortcut::KIRI_CAPTURE;
 use crate::platform;
@@ -20,7 +22,8 @@ use crate::state::RecoveryAction;
 use crate::state::{
     emit_asset_content_changed, emit_error, emit_library_changed, emit_notice, emit_notice_local,
     emit_notice_on_monitor, emit_recording_state, show_completion_preview, ActiveRecording,
-    AppState, CaptureSession, CompletionPreviewDto, RecordingConfiguration, RecordingFlow,
+    AppState, ApprovedEditorSave, CaptureSession, CompletionPreviewDto, RecordingConfiguration,
+    RecordingFlow, StagedCaptureAnnotation, StagedEditorAnnotation,
 };
 
 // ---------------------------------------------------------------------------
@@ -191,15 +194,13 @@ pub fn permanently_delete(app: AppHandle, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
     let state = app.state::<AppState>();
     let store = app.state::<crate::protocol::ProtocolStore>();
-    crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
-        state
-            .library
-            .lock()
-            .unwrap()
-            .permanently_delete(&parsed)
-            .map_err(|e| e.to_string())
-    })?;
-    emit_library_changed(&app);
+    let result = crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
+        state.library.lock().unwrap().permanently_delete(&parsed)
+    });
+    if result.is_ok() || matches!(&result, Err(AssetLibraryError::CleanupFailed { .. })) {
+        emit_library_changed(&app);
+    }
+    result.map_err(|error| error.to_string())?;
     emit_notice_local(&app, "Deleted Permanently".into(), "trash.fill".into());
     Ok(())
 }
@@ -216,15 +217,13 @@ pub fn empty_trash(app: AppHandle) -> Result<(), String> {
         .map(|asset| asset.id)
         .collect::<Vec<_>>();
     let store = app.state::<crate::protocol::ProtocolStore>();
-    crate::protocol::with_thumbnail_invalidations(&store, &removed_ids, || {
-        state
-            .library
-            .lock()
-            .unwrap()
-            .empty_trash()
-            .map_err(|e| e.to_string())
-    })?;
-    emit_library_changed(&app);
+    let result = crate::protocol::with_thumbnail_invalidations(&store, &removed_ids, || {
+        state.library.lock().unwrap().empty_trash()
+    });
+    if result.is_ok() || matches!(&result, Err(AssetLibraryError::CleanupFailed { .. })) {
+        emit_library_changed(&app);
+    }
+    result.map_err(|error| error.to_string())?;
     emit_notice_local(&app, "Trash Emptied".into(), "trash.slash".into());
     Ok(())
 }
@@ -363,6 +362,44 @@ pub fn open_asset(app: AppHandle, id: String) -> Result<(), String> {
     .shadow(true)
     .decorations(true);
     let _ = builder.build();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_editor(app: AppHandle, id: String) -> Result<(), String> {
+    let parsed =
+        uuid::Uuid::parse_str(&id).map_err(|_| "The capture id is invalid.".to_string())?;
+    let state = app.state::<AppState>();
+    let asset = state
+        .library
+        .lock()
+        .unwrap()
+        .asset_by_id(&parsed)
+        .cloned()
+        .ok_or_else(|| "The capture could not be found.".to_string())?;
+    if asset.kind != CaptureKind::Image {
+        return Err("Only image captures can be edited.".into());
+    }
+
+    let label = format!("editor-{}", asset.id.to_string().to_lowercase());
+    if let Some(window) = app.get_webview_window(&label) {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    WebviewWindowBuilder::new(
+        &app,
+        label,
+        WebviewUrl::App(format!("index.html?window=editor&id={}", asset.id).into()),
+    )
+    .title("kiri")
+    .inner_size(880.0, 620.0)
+    .min_inner_size(520.0, 420.0)
+    .resizable(true)
+    .shadow(true)
+    .decorations(true)
+    .build()
+    .map_err(|error| format!("The screenshot editor could not be opened: {error}"))?;
     Ok(())
 }
 
@@ -633,6 +670,7 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
             was_kiri_frontmost,
             hidden_windows,
             overlay_labels: vec![overlay_label.clone()],
+            annotation: None,
         });
     }
 
@@ -827,8 +865,62 @@ fn invalidate_capture_resources(app: &AppHandle, session: &CaptureSession) {
     );
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrepareCaptureAnnotationRequest {
+    selection: RectDto,
+    document_json: String,
+}
+
 #[tauri::command]
-pub fn confirm_capture(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+pub fn prepare_capture_annotation(
+    window: WebviewWindow,
+    app: AppHandle,
+    request: PrepareCaptureAnnotationRequest,
+) -> Result<String, String> {
+    let document = AnnotationDocument::from_json(&request.document_json)?;
+    let state = app.state::<AppState>();
+    let mut capture = state.capture.lock().unwrap();
+    let session = capture
+        .session
+        .as_mut()
+        .filter(|session| {
+            session
+                .overlay_labels
+                .iter()
+                .any(|label| label == window.label())
+        })
+        .ok_or_else(|| {
+            "This command is only available from the active capture overlay.".to_string()
+        })?;
+    let selection = Rect::new(
+        request.selection.x,
+        request.selection.y,
+        request.selection.width,
+        request.selection.height,
+    );
+    validate_staged_capture_annotation(&session.display, selection, &document)?;
+    let token = uuid::Uuid::new_v4();
+    session.annotation = Some(StagedCaptureAnnotation {
+        token,
+        selection,
+        document,
+    });
+    Ok(token.to_string())
+}
+
+#[tauri::command]
+pub fn confirm_capture(
+    window: WebviewWindow,
+    app: AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    let annotation_token = request
+        .headers()
+        .get("x-kiri-annotation-token")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+        .ok_or_else(|| "The capture annotation snapshot is invalid.".to_string())?;
     let png = match request.body() {
         tauri::ipc::InvokeBody::Raw(bytes) => bytes.as_slice(),
         tauri::ipc::InvokeBody::Json(_) => {
@@ -840,43 +932,90 @@ pub fn confirm_capture(app: AppHandle, request: tauri::ipc::Request<'_>) -> Resu
     }
 
     let state = app.state::<AppState>();
-    let (capture_id, max_width, max_height) = {
+    let (capture_id, max_width, max_height, staged, display) = {
         let capture = state.capture.lock().unwrap();
         let session = capture
             .session
             .as_ref()
             .ok_or_else(|| "No active capture session.".to_string())?;
+        if !session
+            .overlay_labels
+            .iter()
+            .any(|label| label == window.label())
+        {
+            return Err("Capture confirmation is only available to its overlay.".into());
+        }
+        let staged = session
+            .annotation
+            .as_ref()
+            .filter(|staged| staged.token == annotation_token)
+            .cloned()
+            .ok_or_else(|| {
+                "The capture annotation snapshot changed before confirmation.".to_string()
+            })?;
         (
             session.capture_id,
             session.display.pixel_width,
             session.display.pixel_height,
+            staged,
+            session.display.clone(),
         )
     };
     // Validate the complete PNG before consuming the active session or writing
     // to the clipboard/library. This also bounds decoder allocation by the
     // dimensions of the frozen display that owns the request.
     let pixel_size = validate_capture_png(png, max_width, max_height)?;
+    let editable_project = if staged.document.has_marks() {
+        if (
+            i64::from(staged.document.source_pixels.width),
+            i64::from(staged.document.source_pixels.height),
+        ) != pixel_size
+        {
+            return Err("The annotation document does not match the captured image.".to_string());
+        }
+        let source =
+            crop_annotation_source(&display, staged.selection, staged.document.source_pixels)?;
+        Some((source, staged.document.clone()))
+    } else {
+        None
+    };
     let session = {
         let mut capture = state.capture.lock().unwrap();
-        if capture
-            .session
-            .as_ref()
-            .is_none_or(|session| session.capture_id != capture_id)
-        {
+        if capture.session.as_ref().is_none_or(|session| {
+            session.capture_id != capture_id
+                || session
+                    .annotation
+                    .as_ref()
+                    .is_none_or(|staged| staged.token != annotation_token)
+        }) {
             return Err("The capture session changed before confirmation.".into());
         }
         capture.session.take().unwrap()
     };
     invalidate_capture_resources(&app, &session);
     // Errors must be visible: show the library window before emitting.
-    let session_failure = match confirm_capture_inner(&app, &state, session, png, pixel_size) {
-        Ok(()) => return Ok(()),
-        Err(error) => error,
-    };
+    let session_failure =
+        match confirm_capture_inner(&app, &state, session, png, pixel_size, editable_project) {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
     if let Some(window) = app.get_webview_window("library") {
         let _ = window.show();
     }
-    Err(session_failure)
+    if capture_failure_requires_global_error(session_failure.copied) {
+        emit_error(&app, session_failure.message.clone(), None);
+    }
+    Err(session_failure.message)
+}
+
+#[derive(Debug)]
+struct CaptureConfirmationFailure {
+    message: String,
+    copied: bool,
+}
+
+fn capture_failure_requires_global_error(copied: bool) -> bool {
+    !copied
 }
 
 fn confirm_capture_inner(
@@ -885,7 +1024,8 @@ fn confirm_capture_inner(
     session: CaptureSession,
     png: &[u8],
     pixel_size: (i64, i64),
-) -> Result<(), String> {
+    editable_project: Option<(Vec<u8>, AnnotationDocument)>,
+) -> Result<(), CaptureConfirmationFailure> {
     log::info!("confirm_capture: bytes={}", png.len());
 
     let completion_monitor = session.overlay_labels.iter().find_map(|label| {
@@ -908,18 +1048,38 @@ fn confirm_capture_inner(
 
     let (pixel_width, pixel_height) = pixel_size;
     let mut library = state.library.lock().unwrap();
-    let import_result = library
-        .import_data(
-            png,
-            CaptureKind::Image,
-            "png",
-            pixel_width,
-            pixel_height,
-            None,
-            session.source_application.clone(),
-            None,
-        )
-        .map_err(|e| e.to_string());
+    let import_result = match editable_project {
+        Some((source, document)) => serde_json::to_value(document)
+            .map_err(|_| "The annotation document could not be encoded.".to_string())
+            .and_then(|document| {
+                library
+                    .import_data_with_annotation_project(
+                        png,
+                        CaptureKind::Image,
+                        "png",
+                        pixel_width,
+                        pixel_height,
+                        None,
+                        session.source_application.clone(),
+                        None,
+                        &source,
+                        &document,
+                    )
+                    .map_err(|error| error.to_string())
+            }),
+        None => library
+            .import_data(
+                png,
+                CaptureKind::Image,
+                "png",
+                pixel_width,
+                pixel_height,
+                None,
+                session.source_application.clone(),
+                None,
+            )
+            .map_err(|error| error.to_string()),
+    };
     drop(library);
     let asset = match import_result {
         Ok(asset) => asset,
@@ -932,7 +1092,10 @@ fn confirm_capture_inner(
                     completion_monitor,
                 );
             }
-            return Err(error);
+            return Err(CaptureConfirmationFailure {
+                message: error,
+                copied,
+            });
         }
     };
     emit_library_changed(app);
@@ -956,6 +1119,79 @@ fn confirm_capture_inner(
 
     restore_focus(app, &session);
     Ok(())
+}
+
+fn validate_staged_capture_annotation(
+    display: &crate::capture::CapturedDisplay,
+    selection: Rect,
+    document: &AnnotationDocument,
+) -> Result<(), String> {
+    let values = [
+        selection.x,
+        selection.y,
+        selection.width,
+        selection.height,
+        display.screen_frame.width,
+        display.screen_frame.height,
+    ];
+    if values.iter().any(|value| !value.is_finite())
+        || selection.x < 0.0
+        || selection.y < 0.0
+        || selection.width <= 0.0
+        || selection.height <= 0.0
+        || selection.x + selection.width > display.screen_frame.width + 0.01
+        || selection.y + selection.height > display.screen_frame.height + 0.01
+        || (document.canvas.width - selection.width).abs() > 0.01
+        || (document.canvas.height - selection.height).abs() > 0.01
+    {
+        return Err("The annotation selection is invalid.".into());
+    }
+    let scale_x = display.pixel_width as f64 / display.screen_frame.width;
+    let scale_y = display.pixel_height as f64 / display.screen_frame.height;
+    let expected_width = (selection.width * scale_x).round();
+    let expected_height = (selection.height * scale_y).round();
+    if expected_width != f64::from(document.source_pixels.width)
+        || expected_height != f64::from(document.source_pixels.height)
+    {
+        return Err("The annotation source dimensions are invalid.".into());
+    }
+    Ok(())
+}
+
+fn crop_annotation_source(
+    display: &crate::capture::CapturedDisplay,
+    selection: Rect,
+    expected: AnnotationPixelSize,
+) -> Result<Vec<u8>, String> {
+    validate_capture_png(
+        display.png_data.as_ref(),
+        display.pixel_width,
+        display.pixel_height,
+    )?;
+    let image =
+        image::load_from_memory_with_format(display.png_data.as_ref(), image::ImageFormat::Png)
+            .map_err(|_| "The frozen capture image is invalid.".to_string())?;
+    let width = expected.width;
+    let height = expected.height;
+    if width == 0 || height == 0 || width > image.width() || height > image.height() {
+        return Err("The annotation source dimensions are invalid.".into());
+    }
+    let scale_x = image.width() as f64 / display.screen_frame.width;
+    let scale_y = image.height() as f64 / display.screen_frame.height;
+    let max_left = image.width() - width;
+    let max_top = image.height() - height;
+    let left = (selection.x * scale_x)
+        .round()
+        .clamp(0.0, f64::from(max_left)) as u32;
+    let top = (selection.y * scale_y)
+        .round()
+        .clamp(0.0, f64::from(max_top)) as u32;
+    let cropped = image.crop_imm(left, top, width, height);
+    let mut output = std::io::Cursor::new(Vec::new());
+    cropped
+        .write_to(&mut output, image::ImageFormat::Png)
+        .map_err(|_| "The editable screenshot source could not be prepared.".to_string())?;
+    Ok(output.into_inner())
 }
 
 const CAPTURE_PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
@@ -1024,10 +1260,23 @@ fn validate_capture_png(png: &[u8], max_width: i64, max_height: i64) -> Result<(
 
 #[tauri::command]
 pub async fn save_file_dialog(
+    window: WebviewWindow,
     app: AppHandle,
     default_name: String,
 ) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
+    let editor_id = editor_window_id(&window)?;
+    {
+        let state = app.state::<AppState>();
+        let library = state.library.lock().unwrap();
+        let asset = library
+            .asset_by_id(&editor_id)
+            .ok_or_else(|| "The edited asset could not be found.".to_string())?;
+        if asset.kind != CaptureKind::Image {
+            return Err("Only image captures can be edited.".into());
+        }
+    }
+    let window_label = window.label().to_string();
     // Localize the filter label from the persisted language preference.
     let filter_label = match crate::state::load_language(&app).as_str() {
         "zh-Hans" => "PNG 图片",
@@ -1035,17 +1284,28 @@ pub async fn save_file_dialog(
         _ => "PNG image",
     }
     .to_string();
-    tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
+    let dialog_app = app.clone();
+    let destination = tauri::async_runtime::spawn_blocking(move || {
+        dialog_app
+            .dialog()
             .file()
             .set_file_name(default_name)
             .add_filter(filter_label, &["png"])
             .blocking_save_file()
             .and_then(|path| path.into_path().ok())
-            .map(|path| path.display().to_string())
     })
     .await
-    .map_err(|error| format!("Could not open the save panel: {error}"))
+    .map_err(|error| format!("Could not open the save panel: {error}"))?;
+
+    let state = app.state::<AppState>();
+    let mut destinations = state.editor_save_destinations.lock().unwrap();
+    let Some(path) = destination else {
+        destinations.remove(&window_label);
+        return Ok(None);
+    };
+    let token = uuid::Uuid::new_v4();
+    destinations.insert(window_label, ApprovedEditorSave { token, path });
+    Ok(Some(token.to_string()))
 }
 
 fn restore_focus(app: &AppHandle, session: &CaptureSession) {
@@ -1065,9 +1325,10 @@ const EDITOR_ACTION_REQUIRED_ERROR: &str =
     "The editor action must copy the image or save it to a file.";
 const EDITOR_SAVE_ERROR: &str = "The edited image could not be saved to the selected file.";
 const EDITOR_CLIPBOARD_ERROR: &str = "The edited image could not be copied to the clipboard.";
+const EDITOR_REVISION_MISMATCH_ERROR: &str = "The screenshot changed after the editor opened.";
 
-fn validate_editor_action(copy_to_clipboard: bool, save_path: Option<&str>) -> Result<(), String> {
-    if copy_to_clipboard || save_path.is_some() {
+fn validate_editor_action(copy_to_clipboard: bool, has_save_token: bool) -> Result<(), String> {
+    if copy_to_clipboard || has_save_token {
         Ok(())
     } else {
         Err(EDITOR_ACTION_REQUIRED_ERROR.into())
@@ -1082,14 +1343,183 @@ fn finish_editor_clipboard_copy(result: anyhow::Result<()>) -> Result<(), String
     result.map_err(|_| EDITOR_CLIPBOARD_ERROR.to_string())
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AnnotationProjectDto {
+    revision_sha256: String,
+    state: EditorAnnotationState,
+    document_json: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EditorUpdateDto {
+    revision_sha256: String,
+    action_succeeded: bool,
+}
+
+fn require_editor_window(window: &WebviewWindow, id: &uuid::Uuid) -> Result<(), String> {
+    let expected = format!("editor-{}", id.to_string().to_lowercase());
+    if window.label() == expected {
+        Ok(())
+    } else {
+        Err("This command is only available from the matching screenshot editor.".into())
+    }
+}
+
+fn editor_window_id(window: &WebviewWindow) -> Result<uuid::Uuid, String> {
+    let raw_id = window
+        .label()
+        .strip_prefix("editor-")
+        .ok_or_else(|| "This command is only available from a screenshot editor.".to_string())?;
+    let id = uuid::Uuid::parse_str(raw_id)
+        .map_err(|_| "This command is only available from a screenshot editor.".to_string())?;
+    require_editor_window(window, &id)?;
+    Ok(id)
+}
+
+fn editor_save_destination(
+    destinations: &HashMap<String, ApprovedEditorSave>,
+    window_label: &str,
+    token: Option<uuid::Uuid>,
+) -> Result<Option<PathBuf>, String> {
+    let approved = destinations.get(window_label);
+    match (token, approved) {
+        (None, _) => Ok(None),
+        (Some(token), Some(approved)) if approved.token == token => Ok(Some(approved.path.clone())),
+        (Some(_), _) => Err("The selected save destination is no longer authorized.".into()),
+    }
+}
+
+fn commit_editor_update<T, E>(
+    mutation: impl FnOnce() -> Result<T, E>,
+    committed_action: impl FnOnce() -> bool,
+) -> Result<(T, bool), E> {
+    let revision = mutation()?;
+    Ok((revision, committed_action()))
+}
+
+fn is_annotation_revision(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn validate_editor_annotation_document(
+    document: &AnnotationDocument,
+    expected_size: (i64, i64),
+) -> Result<(), String> {
+    document.validate_for_image_pixels(expected_size.0, expected_size.1)
+}
+
 #[tauri::command]
-pub fn update_asset(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<(), String> {
+pub fn get_asset_annotation_project(
+    window: WebviewWindow,
+    app: AppHandle,
+    id: String,
+) -> Result<AnnotationProjectDto, String> {
+    let parsed =
+        uuid::Uuid::parse_str(&id).map_err(|_| "The edited asset id is invalid.".to_string())?;
+    require_editor_window(&window, &parsed)?;
+    let state = app.state::<AppState>();
+    let (snapshot, expected_size) = {
+        let library = state.library.lock().unwrap();
+        let asset = library
+            .asset_by_id(&parsed)
+            .ok_or_else(|| "The edited asset could not be found.".to_string())?;
+        if asset.kind != CaptureKind::Image {
+            return Err("Only image captures can be edited.".into());
+        }
+        let expected_size = (asset.pixel_width, asset.pixel_height);
+        let snapshot = library
+            .load_editor_snapshot(&parsed)
+            .map_err(|error| error.to_string())?;
+        (snapshot, expected_size)
+    };
+    let document_json = snapshot
+        .document
+        .map(|document| {
+            let document_json = serde_json::to_string(&document)
+                .map_err(|_| "The annotation document could not be decoded.".to_string())?;
+            let document = AnnotationDocument::from_json(&document_json)?;
+            validate_editor_annotation_document(&document, expected_size)?;
+            String::from_utf8(document.to_json()?)
+                .map_err(|_| "The annotation document could not be decoded.".to_string())
+        })
+        .transpose()?;
+    Ok(AnnotationProjectDto {
+        revision_sha256: snapshot.revision_sha256,
+        state: snapshot.state,
+        document_json,
+    })
+}
+
+#[tauri::command]
+pub fn prepare_asset_annotation(
+    window: WebviewWindow,
+    app: AppHandle,
+    id: String,
+    document_json: String,
+    revision_sha256: String,
+) -> Result<String, String> {
+    let parsed =
+        uuid::Uuid::parse_str(&id).map_err(|_| "The edited asset id is invalid.".to_string())?;
+    require_editor_window(&window, &parsed)?;
+    let document = AnnotationDocument::from_json(&document_json)?;
+    let state = app.state::<AppState>();
+    if !is_annotation_revision(&revision_sha256) {
+        return Err("The editor source revision is invalid.".into());
+    }
+    let expected_size = {
+        let library = state.library.lock().unwrap();
+        let asset = library
+            .asset_by_id(&parsed)
+            .ok_or_else(|| "The edited asset could not be found.".to_string())?;
+        if asset.kind != CaptureKind::Image {
+            return Err("Only image captures can be edited.".into());
+        }
+        let current_revision = library
+            .load_editor_snapshot(&parsed)
+            .map_err(|error| error.to_string())?
+            .revision_sha256;
+        if current_revision != revision_sha256 {
+            return Err(EDITOR_REVISION_MISMATCH_ERROR.into());
+        }
+        (asset.pixel_width, asset.pixel_height)
+    };
+    validate_editor_annotation_document(&document, expected_size)?;
+    let token = uuid::Uuid::new_v4();
+    state.editor_annotations.lock().unwrap().insert(
+        window.label().to_string(),
+        StagedEditorAnnotation {
+            token,
+            document,
+            revision_sha256,
+        },
+    );
+    Ok(token.to_string())
+}
+
+#[tauri::command]
+pub fn update_asset(
+    window: WebviewWindow,
+    app: AppHandle,
+    request: tauri::ipc::Request<'_>,
+) -> Result<EditorUpdateDto, String> {
     let parsed = request
         .headers()
         .get("x-kiri-asset-id")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .ok_or_else(|| "The edited asset id is invalid.".to_string())?;
+    require_editor_window(&window, &parsed)?;
+    let annotation_token = request
+        .headers()
+        .get("x-kiri-annotation-token")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+        .ok_or_else(|| "The editor annotation snapshot is invalid.".to_string())?;
     let copy_to_clipboard = match request
         .headers()
         .get("x-kiri-copy-to-clipboard")
@@ -1099,17 +1529,20 @@ pub fn update_asset(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<
         Some("0") => false,
         _ => return Err("The editor action is invalid.".into()),
     };
-    let save_path = request
+    let save_token = request
         .headers()
-        .get("x-kiri-save-path")
+        .get("x-kiri-save-token")
         .map(|value| {
             value
                 .to_str()
-                .map_err(|_| "The save path is invalid.".to_string())
-                .and_then(decode_save_path_header)
+                .map_err(|_| "The save authorization is invalid.".to_string())
+                .and_then(|value| {
+                    uuid::Uuid::parse_str(value)
+                        .map_err(|_| "The save authorization is invalid.".to_string())
+                })
         })
         .transpose()?;
-    validate_editor_action(copy_to_clipboard, save_path.as_deref())?;
+    validate_editor_action(copy_to_clipboard, save_token.is_some())?;
     let png = match request.body() {
         tauri::ipc::InvokeBody::Raw(bytes) if !bytes.is_empty() => bytes.as_slice(),
         tauri::ipc::InvokeBody::Raw(_) => return Err("The edited image is empty.".into()),
@@ -1132,44 +1565,77 @@ pub fn update_asset(app: AppHandle, request: tauri::ipc::Request<'_>) -> Result<
     if validate_capture_png(png, expected_size.0, expected_size.1)? != expected_size {
         return Err("The edited image dimensions changed unexpectedly.".into());
     }
-    if let Some(save_path) = &save_path {
-        write_editor_save(Path::new(save_path), png)?;
-    }
-    if copy_to_clipboard {
-        finish_editor_clipboard_copy(platform::write_image_to_clipboard(png))?;
-    }
+    let mut annotations = state.editor_annotations.lock().unwrap();
+    let staged = annotations
+        .get(window.label())
+        .filter(|staged| staged.token == annotation_token)
+        .cloned()
+        .ok_or_else(|| "The editor annotation snapshot changed before saving.".to_string())?;
+    validate_editor_annotation_document(&staged.document, expected_size)?;
+    let mut destinations = state.editor_save_destinations.lock().unwrap();
+    let save_path = editor_save_destination(&destinations, window.label(), save_token)?;
     let store = app.state::<crate::protocol::ProtocolStore>();
-    crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
-        state.library.lock().unwrap().replace_data(png, &parsed)
-    })
-    .map_err(|e| e.to_string())?;
-    if copy_to_clipboard {
-        emit_notice(
-            &app,
-            "Copied to Clipboard".into(),
-            "checkmark.circle.fill".into(),
-        );
-    }
+    let document_value = serde_json::to_value(&staged.document)
+        .map_err(|_| "The annotation document could not be encoded.".to_string())?;
+    let mutation = commit_editor_update(
+        || {
+            crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
+                let library = state.library.lock().unwrap();
+                library.save_editor_snapshot(
+                    &parsed,
+                    &staged.revision_sha256,
+                    png,
+                    staged.document.has_marks().then_some(&document_value),
+                )?;
+                Ok::<String, AssetLibraryError>(
+                    library.load_editor_snapshot(&parsed)?.revision_sha256,
+                )
+            })
+        },
+        || {
+            annotations.remove(window.label());
+            if save_token.is_some() {
+                destinations.remove(window.label());
+            }
+            drop(destinations);
+            drop(annotations);
+
+            let mut action_succeeded = true;
+            if let Some(save_path) = &save_path {
+                if let Err(error) = write_editor_save(save_path, png) {
+                    log::error!("update_asset: {error}");
+                    action_succeeded = false;
+                }
+            }
+            if copy_to_clipboard {
+                match finish_editor_clipboard_copy(platform::write_image_to_clipboard(png)) {
+                    Ok(()) => emit_notice(
+                        &app,
+                        "Copied to Clipboard".into(),
+                        "checkmark.circle.fill".into(),
+                    ),
+                    Err(error) => {
+                        log::error!("update_asset: {error}");
+                        action_succeeded = false;
+                    }
+                }
+            }
+            action_succeeded
+        },
+    );
+    let (revision_sha256, action_succeeded) = match mutation {
+        Ok(result) => result,
+        Err(AssetLibraryError::AnnotationRevisionMismatch) => {
+            return Err(EDITOR_REVISION_MISMATCH_ERROR.into())
+        }
+        Err(error) => return Err(error.to_string()),
+    };
     emit_asset_content_changed(&app, &parsed);
     emit_library_changed(&app);
-    Ok(())
-}
-
-fn decode_save_path_header(encoded: &str) -> Result<String, String> {
-    if encoded.is_empty()
-        || encoded.len() > 16 * 1024
-        || encoded
-            .bytes()
-            .any(|byte| matches!(byte, b'&' | b'=' | b'+'))
-    {
-        return Err("The save path is invalid.".into());
-    }
-    let query = format!("path={encoded}");
-    url::form_urlencoded::parse(query.as_bytes())
-        .find(|(key, _)| key == "path")
-        .map(|(_, path)| path.into_owned())
-        .filter(|path| !path.is_empty())
-        .ok_or_else(|| "The save path is invalid.".to_string())
+    Ok(EditorUpdateDto {
+        revision_sha256,
+        action_succeeded,
+    })
 }
 
 /// Sets a friendly display title for a capture (metadata only; the on-disk
@@ -2560,12 +3026,20 @@ pub fn quit_app(app: AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod command_security_tests {
     use super::{
-        cleanup_finalization_files, decode_save_path_header, finish_editor_clipboard_copy,
+        capture_failure_requires_global_error, cleanup_finalization_files, commit_editor_update,
+        crop_annotation_source, editor_save_destination, finish_editor_clipboard_copy,
         recording_channels, sanitize_frontend_log, validate_capture_png, validate_editor_action,
-        write_editor_save, EDITOR_ACTION_REQUIRED_ERROR, EDITOR_CLIPBOARD_ERROR, EDITOR_SAVE_ERROR,
+        validate_editor_annotation_document, validate_staged_capture_annotation, write_editor_save,
+        EDITOR_ACTION_REQUIRED_ERROR, EDITOR_CLIPBOARD_ERROR, EDITOR_SAVE_ERROR,
     };
+    use crate::core::annotation::AnnotationDocument;
+    use crate::core::geometry::Rect;
     use crate::core::policy::RecordingOptions;
+    use crate::state::ApprovedEditorSave;
+    use std::cell::Cell;
+    use std::collections::HashMap;
     use std::io::Cursor;
+    use std::path::PathBuf;
     use std::sync::mpsc::TrySendError;
 
     #[test]
@@ -2629,23 +3103,131 @@ mod command_security_tests {
     }
 
     #[test]
-    fn editor_save_path_header_round_trips_unicode_without_raw_separators() {
-        assert_eq!(
-            decode_save_path_header("%2Ftmp%2F%E6%B5%8B%E8%AF%95%20image.png").unwrap(),
-            "/tmp/测试 image.png"
-        );
-        assert!(decode_save_path_header("/tmp/raw+path.png").is_err());
-        assert!(decode_save_path_header("path&extra=value").is_err());
+    fn capture_double_failure_requires_a_global_error_after_the_overlay_closes() {
+        assert!(capture_failure_requires_global_error(false));
+        assert!(!capture_failure_requires_global_error(true));
+    }
+
+    #[test]
+    fn editable_capture_source_matches_the_staged_pixel_dimensions() {
+        let image = image::RgbaImage::from_fn(8, 6, |x, y| image::Rgba([x as u8, y as u8, 0, 255]));
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let display = crate::capture::CapturedDisplay {
+            png_data: png.into_inner().into(),
+            pixel_width: 8,
+            pixel_height: 6,
+            screen_frame: Rect::new(0.0, 0.0, 4.0, 3.0),
+            window_rects: Vec::new(),
+            display_id: 1,
+            backing_scale: 2.0,
+        };
+        let selection = Rect::new(0.25, 0.5, 2.0, 1.5);
+        let document = AnnotationDocument::from_json(
+            r#"{"schemaVersion":1,"canvas":{"width":2,"height":1.5},"sourcePixels":{"width":4,"height":3},"marks":[{"kind":"mosaic","id":1,"points":[{"x":1,"y":1}],"brushDiameter":20,"intensity":"standard","style":"pixel"}]}"#,
+        )
+        .unwrap();
+        validate_staged_capture_annotation(&display, selection, &document).unwrap();
+        let source = crop_annotation_source(&display, selection, document.source_pixels).unwrap();
+        let cropped =
+            image::load_from_memory_with_format(&source, image::ImageFormat::Png).unwrap();
+        assert_eq!((cropped.width(), cropped.height()), (4, 3));
+        assert_eq!(cropped.to_rgba8().get_pixel(0, 0).0, [1, 1, 0, 255]);
+    }
+
+    #[test]
+    fn editor_document_must_match_asset_pixels_and_aspect_ratio() {
+        let document = AnnotationDocument::from_json(
+            r#"{"schemaVersion":1,"canvas":{"width":400,"height":300},"sourcePixels":{"width":800,"height":600},"marks":[]}"#,
+        )
+        .unwrap();
+        validate_editor_annotation_document(&document, (800, 600)).unwrap();
+        assert!(validate_editor_annotation_document(&document, (801, 600)).is_err());
+
+        let mut wrong_aspect = document;
+        wrong_aspect.canvas.width = 500.0;
+        assert!(validate_editor_annotation_document(&wrong_aspect, (800, 600)).is_err());
     }
 
     #[test]
     fn editor_action_requires_copy_or_save_destination() {
         assert_eq!(
-            validate_editor_action(false, None).unwrap_err(),
+            validate_editor_action(false, false).unwrap_err(),
             EDITOR_ACTION_REQUIRED_ERROR
         );
-        assert!(validate_editor_action(true, None).is_ok());
-        assert!(validate_editor_action(false, Some("/tmp/capture.png")).is_ok());
+        assert!(validate_editor_action(true, false).is_ok());
+        assert!(validate_editor_action(false, true).is_ok());
+    }
+
+    #[test]
+    fn editor_save_destination_requires_the_native_token_without_consuming_it() {
+        let label = "editor-00000000-0000-0000-0000-000000000001";
+        let token = uuid::Uuid::new_v4();
+        let path = PathBuf::from("/tmp/kiri-approved.png");
+        let destinations = HashMap::from([(
+            label.to_string(),
+            ApprovedEditorSave {
+                token,
+                path: path.clone(),
+            },
+        )]);
+
+        assert_eq!(
+            editor_save_destination(&destinations, label, Some(token)).unwrap(),
+            Some(path.clone())
+        );
+        assert_eq!(
+            editor_save_destination(&destinations, label, Some(token)).unwrap(),
+            Some(path)
+        );
+        assert!(editor_save_destination(&destinations, label, Some(uuid::Uuid::new_v4())).is_err());
+        assert!(destinations.contains_key(label));
+    }
+
+    #[test]
+    fn editor_revision_mismatch_retains_tokens_and_skips_external_action() {
+        let label = "editor-00000000-0000-0000-0000-000000000001";
+        let mut annotations = HashMap::from([(label, "annotation-token")]);
+        let mut destinations = HashMap::from([(label, "save-token")]);
+        let external_action_ran = Cell::new(false);
+
+        let result = commit_editor_update(
+            || Err::<String, _>("revision mismatch"),
+            || {
+                annotations.remove(label);
+                destinations.remove(label);
+                external_action_ran.set(true);
+                true
+            },
+        );
+
+        assert_eq!(result, Err("revision mismatch"));
+        assert_eq!(annotations.get(label), Some(&"annotation-token"));
+        assert_eq!(destinations.get(label), Some(&"save-token"));
+        assert!(!external_action_ran.get());
+    }
+
+    #[test]
+    fn editor_committed_action_returns_revision_even_when_external_action_fails() {
+        let label = "editor-00000000-0000-0000-0000-000000000001";
+        let mut annotations = HashMap::from([(label, "annotation-token")]);
+        let mut destinations = HashMap::from([(label, "save-token")]);
+
+        let result = commit_editor_update(
+            || Ok::<String, &str>("next-revision".into()),
+            || {
+                annotations.remove(label);
+                destinations.remove(label);
+                false
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result, ("next-revision".into(), false));
+        assert!(!annotations.contains_key(label));
+        assert!(!destinations.contains_key(label));
     }
 
     #[test]

@@ -81,6 +81,18 @@ export type AnnotationMark =
       style: MosaicStyle;
     };
 
+/**
+ * Persisted editable-annotation sidecar. Marks stay in the logical coordinate
+ * space in which the capture was created; editor viewport changes never
+ * rewrite these dimensions or coordinates.
+ */
+export interface AnnotationDocumentV1 {
+  schemaVersion: 1;
+  canvas: { width: number; height: number };
+  sourcePixels: { width: number; height: number };
+  marks: AnnotationMark[];
+}
+
 export interface AppearanceSettings {
   colorPreset: ColorPreset;
   textBackgroundStyle: TextBackgroundStyle;
@@ -103,6 +115,11 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   mosaicBrushDiameter: 20,
 };
 
+/** Rejects whitespace-only edits without normalizing meaningful user text. */
+export function annotationTextForCommit(text: string): string | null {
+  return text.trim() ? text : null;
+}
+
 interface HistoryStep {
   before: AnnotationMark[];
   after: AnnotationMark[];
@@ -115,6 +132,10 @@ export class AnnotationHistory {
   private undoSteps: HistoryStep[] = [];
   private redoSteps: HistoryStep[] = [];
 
+  constructor(initialElements: AnnotationMark[] = []) {
+    this.load(initialElements);
+  }
+
   get elements(): AnnotationMark[] {
     return this.visible;
   }
@@ -125,6 +146,13 @@ export class AnnotationHistory {
 
   get canRedo(): boolean {
     return this.redoSteps.length > 0;
+  }
+
+  /** Loads a persisted baseline without making the whole document undoable. */
+  load(elements: AnnotationMark[]): void {
+    this.visible = elements.slice();
+    this.undoSteps = [];
+    this.redoSteps = [];
   }
 
   append(element: AnnotationMark): void {
@@ -164,6 +192,20 @@ export class AnnotationHistory {
     this.visible = elements.slice();
   }
 
+  /**
+   * Records an already-visible preview as one undoable change. The caller
+   * supplies the element that existed before overwrite() began.
+   */
+  commitOverwrite(index: number, original: AnnotationMark): AnnotationMark | null {
+    if (index < 0 || index >= this.visible.length) return null;
+    const current = this.visible[index];
+    const before = this.visible.slice();
+    before[index] = original;
+    const after = this.visible.slice();
+    this.record({ before, after, undoResult: current, redoResult: current });
+    return current;
+  }
+
   undo(): AnnotationMark | null {
     const step = this.undoSteps.pop();
     if (!step) return null;
@@ -196,24 +238,50 @@ export class AnnotationHistory {
 // Hit testing (spec §6.1)
 // ---------------------------------------------------------------------------
 
-function hitTestMark(mark: AnnotationMark, p: Point): boolean {
+export interface AnnotationHitTestScale {
+  /** Document units represented by one CSS pixel on each axis. */
+  x: number;
+  y: number;
+  radial: number;
+}
+
+const UNIT_HIT_TEST_SCALE: AnnotationHitTestScale = { x: 1, y: 1, radial: 1 };
+
+function hitTestMark(
+  mark: AnnotationMark,
+  p: Point,
+  scale: AnnotationHitTestScale,
+): boolean {
   switch (mark.kind) {
     case "pen":
-      return polylineDistance(p, mark.points) <= Math.max(7, mark.width / 2 + 4);
+      return (
+        polylineDistance(p, mark.points) <=
+        Math.max(7 * scale.radial, mark.width / 2 + 4 * scale.radial)
+      );
     case "rectangle": {
       const r = standardized(mark.rect);
-      const pad = Math.max(6, mark.width);
-      return containsPadded(r, p, pad, pad);
+      return containsPadded(
+        r,
+        p,
+        Math.max(6 * scale.x, mark.width),
+        Math.max(6 * scale.y, mark.width),
+      );
     }
     case "line":
     case "arrow":
-      return distanceToSegment(p, mark.start, mark.end) <= Math.max(7, mark.width / 2 + 4);
+      return (
+        distanceToSegment(p, mark.start, mark.end) <=
+        Math.max(7 * scale.radial, mark.width / 2 + 4 * scale.radial)
+      );
     case "text": {
       const r = standardized(mark.rect);
-      return containsPadded(r, p, 7, 6);
+      return containsPadded(r, p, 7 * scale.x, 6 * scale.y);
     }
     case "mosaic":
-      return polylineDistance(p, mark.points) <= mark.brushDiameter / 2 + 4;
+      return (
+        polylineDistance(p, mark.points) <=
+        mark.brushDiameter / 2 + 4 * scale.radial
+      );
   }
 }
 
@@ -222,9 +290,13 @@ function containsPadded(r: Rect, p: Point, dx: number, dy: number): boolean {
 }
 
 /** Reverse-order hit test: topmost mark wins. */
-export function markIndexAt(marks: AnnotationMark[], p: Point): number | null {
+export function markIndexAt(
+  marks: AnnotationMark[],
+  p: Point,
+  scale: AnnotationHitTestScale = UNIT_HIT_TEST_SCALE,
+): number | null {
   for (let i = marks.length - 1; i >= 0; i--) {
-    if (hitTestMark(marks[i], p)) return i;
+    if (hitTestMark(marks[i], p, scale)) return i;
   }
   return null;
 }

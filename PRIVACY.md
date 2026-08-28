@@ -5,13 +5,25 @@ capture library stay on the device unless the user exports them or explicitly
 sends a selected OCR region to a configured remote provider. Kiri has no
 account system, analytics, advertising, or telemetry.
 
+## Editable screenshot projects
+
+For annotations created by current Kiri builds, the local library keeps the
+shareable flattened screenshot together with a clean source image and a small
+annotation document. The clean source can still contain pixels hidden by
+mosaic, text backgrounds, or shapes in the flattened result. These project
+files stay in Kiri's application-data directory, are never uploaded by the
+editing feature, and remain recoverable when the screenshot is moved to Trash.
+They are removed when that screenshot is permanently deleted. Older flattened
+screenshots do not contain reconstructable annotation data; starting a new edit
+uses the current flattened image as its source.
+
 ## Recording dependency
 
 Kiri uses FFmpeg for local recording and GIF encoding. If no usable copy is
 already installed or cached, Kiri downloads the executable once when the user
 first starts a recording or explicitly converts a video to GIF, then stores it
-in the operating-system cache. Browsing the library never starts this download. The
-dependency request contains no screenshots, recordings, filenames, library
+in the operating-system cache. Browsing the library never starts this
+download. The dependency request contains no screenshots, recordings, filenames, library
 metadata, credentials, or account identifier. Media encoding remains local.
 Automatic downloads come from `ffmpeg.martin-riedl.de` on macOS and the
 `GyanD/codexffmpeg` release repository on `github.com` on Windows.

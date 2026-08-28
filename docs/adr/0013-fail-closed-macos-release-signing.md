@@ -1,7 +1,18 @@
 # ADR 0013: Fail-closed macOS release signing
 
-- Status: Accepted
+- Status: Superseded by ADR 0017
 - Date: 2026-08-26
+
+## Supersession
+
+ADR 0017 keeps this record's prohibition on ad-hoc signing, but replaces the
+temporary deliberately failing macOS CI job. Kiri's current distribution bar
+is a GitHub download that can be installed and launched after normal manual
+Gatekeeper approval; App Store distribution, Developer ID, and notarization
+are not required. Maintainers package macOS DMGs locally with one long-lived
+self-signed identity while release CI verifies versions and produces the
+Windows draft. The decision below is retained as the historical rationale for
+protecting Kiri's macOS privacy identity.
 
 ## Context
 

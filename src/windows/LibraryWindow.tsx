@@ -470,7 +470,16 @@ export function LibraryWindow() {
             window.dispatchEvent(new CustomEvent(`kiri-addtag:${asset.id}`));
           })}
         />
-        <MenuRow icon="photo.on.rectangle" label={t("Open")} onClick={run(() => void api.openAsset(asset.id).catch(() => {}))} />
+        <MenuRow
+          icon={asset.kind === "image" ? "pencil.tip" : "photo.on.rectangle"}
+          label={t(asset.kind === "image" ? "Edit" : "Open")}
+          onClick={run(() =>
+            void (asset.kind === "image"
+              ? api.openEditor(asset.id)
+              : api.openAsset(asset.id)
+            ).catch(() => {}),
+          )}
+        />
         <MenuRow icon="folder" label={t("Show in Finder")} onClick={run(() => void api.revealAsset(asset.id).catch(() => {}))} />
         {asset.gifEligible && (
           <MenuRow
@@ -790,7 +799,12 @@ export function LibraryWindow() {
                       if (el) cardElsRef.current.set(asset.id, el);
                       else cardElsRef.current.delete(asset.id);
                     }}
-                    onDoubleClick={() => void api.openAsset(asset.id).catch(() => {})}
+                    onDoubleClick={() =>
+                      void (asset.kind === "image"
+                        ? api.openEditor(asset.id)
+                        : api.openAsset(asset.id)
+                      ).catch(() => {})
+                    }
                   />
                 ))}
               </div>

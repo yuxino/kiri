@@ -55,12 +55,16 @@ unrestricted filesystem path.
    shares it with the session, OCR preparation, and custom protocol. The
    overlay receives a capture-scoped, unguessable `kiri://` URL. The image is
    not written to disk.
-4. The overlay performs window hit testing, region selection, and annotation.
-5. Screenshot confirmation sends only the rendered selected PNG to Rust. Rust
-   validates its header and decodes it under capture-sized allocation limits,
-   then copies it to the clipboard, imports it into the local library, tears
-   down the session, and restores focus.
-6. A successful import presents the persisted asset in the resident completion
+4. The overlay performs window hit testing, region selection, and annotation in
+   a fixed logical document coordinate space.
+5. Screenshot confirmation stages the validated annotation document and sends
+   the rendered selected PNG with an owner-bound one-time token. Rust validates
+   and decodes the PNG under capture-sized allocation limits. When marks exist,
+   Rust also crops a pixel-aligned clean source from the still-live frozen
+   display and stores it with the document without changing `library.json`.
+6. Rust copies the flattened PNG to the clipboard, imports it into the local
+   library, tears down the session, and restores focus.
+7. A successful import presents the persisted asset in the resident completion
    window on the originating display. The preview does not take focus; a copy
    failure is reported without discarding the saved asset, and a save failure
    never presents a preview for an asset that does not exist.
@@ -69,6 +73,30 @@ Escape cancels the active session and releases its frozen image. There is no
 runtime synthetic-desktop or temporary-library mode in development or
 production; deterministic capture data belongs in unit tests or an isolated
 test harness.
+
+## Screenshot editing flow
+
+The flattened PNG remains the shareable asset. A marked screenshot also owns a
+versioned document in `Annotations/<uuid>.json` and an immutable clean source in
+`Annotations/<uuid>.source.png`. Legacy and unannotated images have no project
+until their first annotated editor save.
+
+An editor-only command loads one content-addressed snapshot. Its revision binds
+the current flattened bytes, the exact presence and bytes of the document and
+source files, and whether the project is absent, valid, or invalid. The editor
+loads its image through `kiri://annotation-source/<uuid>?revision=<sha256>`;
+the protocol returns the exact source from a newly verified matching snapshot,
+not a path that can change between validation and reading. Valid projects use
+the clean source and persisted marks. Missing or invalid projects use the
+current flat image; invalid data produces a visible warning and is never
+applied.
+
+Save stages a bounded document with a one-time token tied to the matching
+`editor-<uuid>` window. The library compare-and-swaps against the revision that
+was opened, then updates the flat image and project together with best-effort
+rollback for ordinary write failures. Any intervening flat, document, or source
+change rejects the stale save. Native Save As destinations are likewise
+represented in the WebView by a single-use token rather than a filesystem path.
 
 ## OCR flow
 
@@ -162,9 +190,11 @@ download or install application updates.
 One resident `toast` window serves two distinct modes. Ordinary notices are
 short-lived and ignore pointer input. Persisted screenshot, MP4, and GIF assets
 use an interactive completion card with a bounded thumbnail, status detail,
-and actions to open the existing viewer, copy, or move the asset to recoverable
-Trash. Images copy as clipboard pixels; MP4 and GIF assets copy as operating-
-system file items, never as a text path or a full in-memory video payload.
+and actions to continue editing an image, open video/GIF in the viewer, copy,
+or move the asset to recoverable Trash. The library keeps a separate eye action
+for flat image quick preview. Images copy as clipboard pixels; MP4 and GIF
+assets copy as operating-system file items, never as a text path or a full
+in-memory video payload.
 
 Moving an asset to Trash collapses the preview into a compact three-second Undo
 row that calls the normal library restore operation. Permanent deletion is not
@@ -181,6 +211,12 @@ display without taking focus and is protected/excluded from subsequent captures.
 - Windows library: `%APPDATA%\\kiri`
 - Assets are indexed by `library.json`; Trash is recoverable and never empties
   automatically.
+- Editable screenshot state is stored only in `Annotations/`. Moving to Trash
+  retains it; permanent deletion removes the sidecar and clean source together
+  with the flat asset. A clean source can contain pixels covered by annotations
+  in the flattened image.
+- Editor sources and saves are content-addressed. Hash or revision mismatch
+  fails closed instead of pairing marks with changed image bytes.
 - Batch asset mutations validate every identifier, publish `library.json` once,
   and update memory only after that write succeeds. Permanent deletion removes
   files only after the new index is durable.

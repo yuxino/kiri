@@ -1,3 +1,4 @@
+pub mod annotation;
 pub mod asset;
 pub mod geometry;
 pub mod library;

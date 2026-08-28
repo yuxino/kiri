@@ -1,7 +1,12 @@
 // Shared canvas rendering for the live annotation view and exported bitmap.
-// View coordinates are top-left (y down); export scales into pixel space.
+// Document coordinates are top-left (y down); export scales into pixel space.
 
-import type { AnnotationMark, ColorPreset, TextBackgroundStyle } from "./model";
+import type {
+  AnnotationMark,
+  ColorPreset,
+  MosaicIntensity,
+  TextBackgroundStyle,
+} from "./model";
 import { COLOR_HEX, MOSAIC_VIEW_BLOCK_SIZE, arrowHeadPoints, selectionBounds } from "./model";
 import type { Point, Rect } from "./geom";
 import { inset, intersection, maxX, maxY, minX, minY, standardized } from "./geom";
@@ -37,25 +42,71 @@ export interface RenderContext {
   sourceOffset: Point;
   /** Display size of the region (points). */
   regionSize: Rect;
-  /** Image pixels per view point. */
+  /** Image pixels per annotation-document point. */
   scaleX: number;
   scaleY: number;
-  /** True when rendering the export bitmap (pixel space, y-flipped). */
+  /** CSS viewport points per annotation-document point. */
+  viewScaleX: number;
+  viewScaleY: number;
+  /** True when rendering the export bitmap in pixel space. */
   exporting: boolean;
 }
 
-function exportPoint(p: Point, r: RenderContext): Point {
-  if (!r.exporting) return p;
-  // Canvas 2D and the view are both y-down, so scaling without a vertical flip
-  // keeps sub-region annotations aligned with the background image.
+export interface RenderGeometryScale {
+  /** Directional document-to-output multipliers. */
+  x: number;
+  y: number;
+  /**
+   * Isotropic geometry uses the smaller axis so strokes, circular brush clips,
+   * and blur kernels stay inside the mapped document-space bounds.
+   */
+  stroke: number;
+}
+
+export function renderGeometryScale(
+  exporting: boolean,
+  scaleX: number,
+  scaleY: number,
+): RenderGeometryScale {
+  if (!exporting) return { x: 1, y: 1, stroke: 1 };
+  return { x: scaleX, y: scaleY, stroke: Math.min(scaleX, scaleY) };
+}
+
+export function scaleRectForRender(rect: Rect, scale: RenderGeometryScale): Rect {
   return {
-    x: p.x * r.scaleX,
-    y: p.y * r.scaleY,
+    x: rect.x * scale.x,
+    y: rect.y * scale.y,
+    width: rect.width * scale.x,
+    height: rect.height * scale.y,
   };
 }
 
-function exportSize(size: number, r: RenderContext): number {
-  return r.exporting ? size * Math.min(r.scaleX, r.scaleY) : size;
+export function mosaicBlurRadius(
+  brushDiameter: number,
+  intensity: MosaicIntensity,
+  scale: RenderGeometryScale,
+): number {
+  const intensityFactor = intensity === "soft" ? 0.18 : intensity === "standard" ? 0.25 : 0.34;
+  const documentRadius = Math.max(2, Math.round(brushDiameter * intensityFactor));
+  return Math.max(1, Math.round(documentRadius * scale.stroke));
+}
+
+function geometryScale(r: RenderContext): RenderGeometryScale {
+  return renderGeometryScale(r.exporting, r.scaleX, r.scaleY);
+}
+
+function exportPoint(p: Point, r: RenderContext): Point {
+  const scale = geometryScale(r);
+  // Canvas 2D and the view are both y-down, so scaling without a vertical flip
+  // keeps sub-region annotations aligned with the background image.
+  return {
+    x: p.x * scale.x,
+    y: p.y * scale.y,
+  };
+}
+
+function exportStrokeSize(size: number, r: RenderContext): number {
+  return size * geometryScale(r).stroke;
 }
 
 function strokePolyline(ctx: CanvasRenderingContext2D, points: Point[]) {
@@ -74,7 +125,7 @@ function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRenderingCo
     case "pen": {
       const points = mark.points.map((p) => exportPoint(p, r));
       ctx.strokeStyle = colorValue(mark.color);
-      ctx.lineWidth = exportSize(mark.width, r);
+      ctx.lineWidth = exportStrokeSize(mark.width, r);
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
       strokePolyline(ctx, points);
@@ -82,15 +133,17 @@ function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRenderingCo
     }
     case "rectangle": {
       const rect = standardized(mark.rect);
-      const p = exportPoint({ x: minX(rect), y: minY(rect) }, r);
-      const w = exportSize(rect.width, r);
-      const h = exportSize(rect.height, r);
-      const radius = r.exporting ? 3 : 2;
+      const scale = geometryScale(r);
+      const outputRect = scaleRectForRender(rect, scale);
+      const p = { x: minX(outputRect), y: minY(outputRect) };
+      const w = outputRect.width;
+      const h = outputRect.height;
+      const radius = 2 * scale.stroke;
       ctx.strokeStyle = colorValue(mark.color);
-      ctx.lineWidth = exportSize(mark.width, r);
+      ctx.lineWidth = mark.width * scale.stroke;
       if (w < 1 && h < 1) {
         // Keep a click-only rectangle visible as a small dot.
-        const dot = Math.max(exportSize(mark.width, r) * 0.7, 2);
+        const dot = Math.max(mark.width * scale.stroke * 0.7, 2 * scale.stroke);
         ctx.fillStyle = colorValue(mark.color);
         ctx.beginPath();
         ctx.arc(p.x, p.y, dot / 2, 0, Math.PI * 2);
@@ -105,7 +158,7 @@ function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRenderingCo
       const start = exportPoint(mark.start, r);
       const end = exportPoint(mark.end, r);
       ctx.strokeStyle = colorValue(mark.color);
-      ctx.lineWidth = exportSize(mark.width, r);
+      ctx.lineWidth = exportStrokeSize(mark.width, r);
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);
@@ -116,7 +169,7 @@ function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRenderingCo
     case "arrow": {
       const start = exportPoint(mark.start, r);
       const end = exportPoint(mark.end, r);
-      const width = exportSize(mark.width, r);
+      const width = exportStrokeSize(mark.width, r);
       ctx.strokeStyle = colorValue(mark.color);
       ctx.lineWidth = width;
       ctx.lineCap = "round";
@@ -135,23 +188,35 @@ function drawMark(mark: AnnotationMark, r: RenderContext, ctx: CanvasRenderingCo
     }
     case "text": {
       const rect = standardized(mark.rect);
-      const p = exportPoint({ x: minX(rect), y: minY(rect) }, r);
-      const w = exportSize(rect.width, r);
-      const h = exportSize(rect.height, r);
-      const fontSize = exportSize(mark.fontSize, r);
+      const scale = geometryScale(r);
+      const outputRect = scaleRectForRender(rect, scale);
+      const p = { x: minX(outputRect), y: minY(outputRect) };
       const background = backgroundValue(mark.background);
       if (background) {
-        const padScale = r.exporting ? Math.min(r.scaleX, r.scaleY) : 1;
-        const padX = 5 * padScale;
-        const padY = 3 * padScale;
+        const padX = 5 * scale.x;
+        const padY = 3 * scale.y;
         ctx.fillStyle = background;
-        roundRectPath(ctx, p.x - padX, p.y - padY, w + padX * 2, h + padY * 2, 5 * padScale);
+        roundRectPath(
+          ctx,
+          p.x - padX,
+          p.y - padY,
+          outputRect.width + padX * 2,
+          outputRect.height + padY * 2,
+          5 * scale.stroke,
+        );
         ctx.fill();
       }
+
+      // Lay text out once in document coordinates, then map glyphs through the
+      // directional output transform. This preserves wrapping while scaling
+      // font height by Y and glyph width by X.
+      ctx.save();
+      ctx.scale(scale.x, scale.y);
       ctx.fillStyle = colorValue(mark.color);
-      ctx.font = textFont(fontSize);
+      ctx.font = textFont(mark.fontSize);
       ctx.textBaseline = "top";
-      wrapText(ctx, mark.text, p.x, p.y, w, fontSize);
+      wrapText(ctx, mark.text, minX(rect), minY(rect), rect.width, mark.fontSize);
+      ctx.restore();
       break;
     }
     case "mosaic": {
@@ -256,9 +321,8 @@ function drawMosaicMark(
   const cw = Math.max(1, Math.min(crop.width, sourceW - cx));
   const ch = Math.max(1, Math.min(crop.height, sourceH - cy));
 
-  const clipDiameter = r.exporting
-    ? mark.brushDiameter * Math.min(r.scaleX, r.scaleY)
-    : mark.brushDiameter;
+  const scale = geometryScale(r);
+  const clipDiameter = mark.brushDiameter * scale.stroke;
   const points = r.exporting ? mark.points.map((p) => exportPoint(p, r)) : mark.points;
   const drawW = r.exporting ? viewRect.width * r.scaleX : viewRect.width;
   const drawH = r.exporting ? viewRect.height * r.scaleY : viewRect.height;
@@ -274,8 +338,7 @@ function drawMosaicMark(
     off.height = ch;
     const offCtx = off.getContext("2d")!;
     offCtx.drawImage(r.sourceImage, cx, cy, cw, ch, 0, 0, cw, ch);
-    const intensityFactor = mark.intensity === "soft" ? 0.18 : mark.intensity === "standard" ? 0.25 : 0.34;
-    const blurPx = Math.max(2, Math.round(mark.brushDiameter * intensityFactor));
+    const blurPx = mosaicBlurRadius(mark.brushDiameter, mark.intensity, scale);
     clipToMosaicStroke(ctx, points, clipDiameter);
     ctx.filter = `blur(${blurPx}px)`;
     ctx.drawImage(off, 0, 0, cw, ch, drawX, drawY, drawW, drawH);
@@ -284,10 +347,11 @@ function drawMosaicMark(
     return;
   }
 
-  const blockSize = MOSAIC_VIEW_BLOCK_SIZE[mark.intensity] * Math.max(r.scaleX, r.scaleY);
+  const blockSizeX = MOSAIC_VIEW_BLOCK_SIZE[mark.intensity] * r.scaleX;
+  const blockSizeY = MOSAIC_VIEW_BLOCK_SIZE[mark.intensity] * r.scaleY;
 
-  const smallW = Math.max(1, Math.ceil(cw / blockSize));
-  const smallH = Math.max(1, Math.ceil(ch / blockSize));
+  const smallW = Math.max(1, Math.ceil(cw / blockSizeX));
+  const smallH = Math.max(1, Math.ceil(ch / blockSizeY));
   const small = document.createElement("canvas");
   small.width = smallW;
   small.height = smallH;
@@ -365,32 +429,70 @@ export function renderAll(
   if (options.draft) drawMark(options.draft, r, ctx);
 
   if (!r.exporting && options.brushCursor && options.brushDiameter) {
-    drawBrushCursor(ctx, options.brushCursor, options.brushDiameter);
+    drawBrushCursor(
+      ctx,
+      options.brushCursor,
+      options.brushDiameter,
+      r.viewScaleX,
+      r.viewScaleY,
+    );
   }
   if (!r.exporting && options.selectedIndex !== null && options.selectedIndex !== undefined) {
     const selected = marks[options.selectedIndex];
-    if (selected) drawSelectionOutline(ctx, selected);
+    if (selected) drawSelectionOutline(ctx, selected, r.viewScaleX, r.viewScaleY);
   }
 }
 
-function drawBrushCursor(ctx: CanvasRenderingContext2D, p: Point, diameter: number) {
+function drawBrushCursor(
+  ctx: CanvasRenderingContext2D,
+  p: Point,
+  diameter: number,
+  viewScaleX: number,
+  viewScaleY: number,
+) {
+  const center = { x: p.x * viewScaleX, y: p.y * viewScaleY };
+  const radiusX = (diameter * viewScaleX) / 2;
+  const radiusY = (diameter * viewScaleY) / 2;
+  // Interaction chrome is drawn in CSS viewport coordinates so its outline
+  // remains legible while the document itself is zoomed to fit the editor.
+  ctx.save();
+  ctx.scale(1 / viewScaleX, 1 / viewScaleY);
   ctx.beginPath();
-  ctx.arc(p.x, p.y, diameter / 2, 0, Math.PI * 2);
+  ctx.ellipse(center.x, center.y, radiusX, radiusY, 0, 0, Math.PI * 2);
   ctx.strokeStyle = "rgba(0, 0, 0, 0.72)";
   ctx.lineWidth = 3;
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(p.x, p.y, diameter / 2, 0, Math.PI * 2);
+  ctx.ellipse(center.x, center.y, radiusX, radiusY, 0, 0, Math.PI * 2);
   ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
   ctx.lineWidth = 1.5;
   ctx.stroke();
+  ctx.restore();
 }
 
-function drawSelectionOutline(ctx: CanvasRenderingContext2D, mark: AnnotationMark) {
-  const bounds = selectionBounds(mark);
+function drawSelectionOutline(
+  ctx: CanvasRenderingContext2D,
+  mark: AnnotationMark,
+  viewScaleX: number,
+  viewScaleY: number,
+) {
+  const documentBounds = selectionBounds(mark);
+  const bounds = {
+    x: documentBounds.x * viewScaleX,
+    y: documentBounds.y * viewScaleY,
+    width: documentBounds.width * viewScaleX,
+    height: documentBounds.height * viewScaleY,
+  };
+  const toViewPoint = (point: Point): Point => ({
+    x: point.x * viewScaleX,
+    y: point.y * viewScaleY,
+  });
+  ctx.save();
+  ctx.scale(1 / viewScaleX, 1 / viewScaleY);
   if (mark.kind === "line" || mark.kind === "arrow") {
-    drawSelectionHandle(ctx, mark.start);
-    drawSelectionHandle(ctx, mark.end);
+    drawSelectionHandle(ctx, toViewPoint(mark.start));
+    drawSelectionHandle(ctx, toViewPoint(mark.end));
+    ctx.restore();
     return;
   }
   const outline = inset(standardized(bounds), 5, 5);
@@ -416,6 +518,7 @@ function drawSelectionOutline(ctx: CanvasRenderingContext2D, mark: AnnotationMar
     ];
     for (const handle of handles) drawSelectionHandle(ctx, handle);
   }
+  ctx.restore();
 }
 
 function drawSelectionHandle(ctx: CanvasRenderingContext2D, p: Point) {

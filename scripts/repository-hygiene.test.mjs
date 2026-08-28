@@ -62,6 +62,22 @@ test("permission-sensitive macOS entry points never allow ad-hoc signing", () =>
   }
 });
 
+test("release CI does not create an intentional red light or ad-hoc macOS package", () => {
+  const workflow = readFileSync(
+    join(repositoryRoot, ".github", "workflows", "release.yml"),
+    "utf8",
+  );
+  const windowsJob = workflow.match(/\n  build-windows:\n([\s\S]*)$/)?.[1];
+
+  assert.doesNotMatch(workflow, /\bexit\s+1\b/, "policy must not deliberately fail a release");
+  assert.doesNotMatch(workflow, /\n  build-macos:/);
+  assert.doesNotMatch(workflow, /runs-on:\s*macos-|--bundles\s+(?:app|dmg)|package-app\.sh/);
+
+  assert.ok(windowsJob, "release.yml must retain the Windows release job");
+  assert.match(windowsJob, /needs: verify-version/);
+  assert.match(windowsJob, /releaseDraft:\s*true/);
+});
+
 test("completed migration material stays in Git history", () => {
   for (const obsoletePath of ["docs/plans", "docs/spec"]) {
     assert.equal(

@@ -27,7 +27,11 @@ export function layoutTextLines(text, maxWidth, measureText) {
         const rest = paragraph.slice(index);
         const wordMatch = rest.match(/^\s*\S+/);
         const word = wordMatch ? wordMatch[0] : ch;
-        const candidateWord = line ? `${line}${word}` : word.trim();
+        const candidateWord = line
+          ? `${line}${word}`
+          : index === 0
+            ? word
+            : word.trimStart();
         if (measureText(candidateWord) > availableWidth && line) {
           flush();
           continue;
