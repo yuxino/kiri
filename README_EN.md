@@ -28,7 +28,7 @@ If the library is offline, retry or locate it again. Choose a file to replace a 
 
 Download the latest version from [GitHub Releases](https://github.com/yuxino/kiri/releases/latest).
 
-- **macOS 14+**: download the Apple Silicon (`arm64`) or Intel (`x64`) `.dmg`, open it, and drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording**; **Input Monitoring** is needed only for click highlights. Microphone recording requires macOS 15+ and requests **Microphone** permission only when enabled.
+- **macOS 14+**: download the Apple Silicon (`arm64`) or Intel (`x64`) `.dmg`. Intel support is limited to models that can run macOS 14; older Intel Macs are unsupported. Open it and drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording**; **Input Monitoring** is needed only for click highlights. Microphone recording requires macOS 15+ and requests **Microphone** permission only when enabled.
 - **Windows**: run the installer. Screen capture needs no extra system permission; microphone access follows Windows privacy settings. The installer is not Authenticode-signed, so SmartScreen may warn, and Windows has not completed real-device testing.
 
 > The v1.4.5 macOS releases use the project's maintained local self-signed identity, not ad-hoc, Developer ID signing, or Apple notarization. First launch may require Control-clicking `Kiri.app` and choosing **Open**, or selecting **Open Anyway** in System Settings → Privacy & Security. Gatekeeper does not need to be disabled.
