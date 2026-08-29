@@ -11,8 +11,8 @@ state and the floating batch-action bar. Opening an asset required a double
 click. This made an ordinary open gesture look like the start of a destructive
 batch workflow, while per-card action icons remained visually prominent.
 
-The editor's primary action was labelled Copy even though it first updates the
-managed library asset and then copies the flattened image to the clipboard.
+The editor's primary action was labelled Copy even though editing is a change
+to the managed library asset. That label hid the normal edit-save workflow.
 
 ## Decision
 
@@ -22,10 +22,11 @@ managed library asset and then copies the flattened image to the clipboard.
 - While batch selection is active, card clicks do not open assets
   accidentally. Selected cards retain explicit per-card actions.
 - Context-click remains available without entering batch selection.
-- The editor's primary action is labelled Save & Copy in every language.
+- The editor's primary action saves the current library asset and is labelled
+  Save in every language. Save As remains a separate export action.
 
 ## Consequences
 
 Opening a capture is direct and does not flash selection controls. Batch
-operations require a visible drag gesture, and the editor states both effects
-of its primary action before the user commits it.
+operations require a visible drag gesture, and the editor presents the normal
+edit-save workflow directly.

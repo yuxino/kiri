@@ -310,7 +310,7 @@ export const api = {
     png: Uint8Array,
     document: AnnotationDocumentV1,
     options: {
-      copyToClipboard: boolean;
+      action: "save" | "saveAs";
       saveToken: string | null;
       revisionSha256: string;
     },
@@ -323,7 +323,7 @@ export const api = {
       headers: {
         "x-kiri-asset-id": id,
         "x-kiri-annotation-token": annotationToken,
-        "x-kiri-copy-to-clipboard": options.copyToClipboard ? "1" : "0",
+        "x-kiri-editor-action": options.action === "saveAs" ? "save-as" : "save",
         ...(options.saveToken
           ? { "x-kiri-save-token": options.saveToken }
           : {}),

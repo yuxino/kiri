@@ -1996,26 +1996,29 @@ fn restore_focus(app: &AppHandle, session: &CaptureSession) {
 // Editor command
 // ---------------------------------------------------------------------------
 
-const EDITOR_ACTION_REQUIRED_ERROR: &str =
-    "The editor action must copy the image or save it to a file.";
+const EDITOR_ACTION_INVALID_ERROR: &str = "The editor save action is invalid.";
 const EDITOR_SAVE_ERROR: &str = "The edited image could not be saved to the selected file.";
-const EDITOR_CLIPBOARD_ERROR: &str = "The edited image could not be copied to the clipboard.";
 const EDITOR_REVISION_MISMATCH_ERROR: &str = "The screenshot changed after the editor opened.";
 
-fn validate_editor_action(copy_to_clipboard: bool, has_save_token: bool) -> Result<(), String> {
-    if copy_to_clipboard || has_save_token {
-        Ok(())
-    } else {
-        Err(EDITOR_ACTION_REQUIRED_ERROR.into())
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditorSaveAction {
+    Save,
+    SaveAs,
+}
+
+fn parse_editor_save_action(
+    value: Option<&str>,
+    has_save_token: bool,
+) -> Result<EditorSaveAction, String> {
+    match (value, has_save_token) {
+        (Some("save"), false) => Ok(EditorSaveAction::Save),
+        (Some("save-as"), true) => Ok(EditorSaveAction::SaveAs),
+        _ => Err(EDITOR_ACTION_INVALID_ERROR.into()),
     }
 }
 
 fn write_editor_save(path: &Path, png: &[u8]) -> Result<(), String> {
     std::fs::write(path, png).map_err(|_| EDITOR_SAVE_ERROR.to_string())
-}
-
-fn finish_editor_clipboard_copy(result: anyhow::Result<()>) -> Result<(), String> {
-    result.map_err(|_| EDITOR_CLIPBOARD_ERROR.to_string())
 }
 
 #[derive(Debug, Serialize)]
@@ -2197,15 +2200,11 @@ pub fn update_asset(
         .and_then(|value| value.to_str().ok())
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
         .ok_or_else(|| "The editor annotation snapshot is invalid.".to_string())?;
-    let copy_to_clipboard = match request
+    let editor_action = request
         .headers()
-        .get("x-kiri-copy-to-clipboard")
+        .get("x-kiri-editor-action")
         .and_then(|value| value.to_str().ok())
-    {
-        Some("1") => true,
-        Some("0") => false,
-        _ => return Err("The editor action is invalid.".into()),
-    };
+        .map(str::to_owned);
     let save_token = request
         .headers()
         .get("x-kiri-save-token")
@@ -2219,7 +2218,7 @@ pub fn update_asset(
                 })
         })
         .transpose()?;
-    validate_editor_action(copy_to_clipboard, save_token.is_some())?;
+    let editor_action = parse_editor_save_action(editor_action.as_deref(), save_token.is_some())?;
     let png = match request.body() {
         tauri::ipc::InvokeBody::Raw(bytes) if !bytes.is_empty() => bytes.as_slice(),
         tauri::ipc::InvokeBody::Raw(_) => return Err("The edited image is empty.".into()),
@@ -2286,19 +2285,10 @@ pub fn update_asset(
                     action_succeeded = false;
                 }
             }
-            if copy_to_clipboard {
-                match finish_editor_clipboard_copy(platform::write_image_to_clipboard(png)) {
-                    Ok(()) => emit_notice(
-                        &app,
-                        "Copied to Clipboard".into(),
-                        "checkmark.circle.fill".into(),
-                    ),
-                    Err(error) => {
-                        log::error!("update_asset: {error}");
-                        action_succeeded = false;
-                    }
-                }
-            }
+            debug_assert_eq!(
+                save_path.is_some(),
+                editor_action == EditorSaveAction::SaveAs
+            );
             action_succeeded
         },
     );
@@ -3879,11 +3869,11 @@ pub fn quit_app(app: AppHandle) -> Result<(), String> {
 mod command_security_tests {
     use super::{
         capture_failure_requires_global_error, cleanup_finalization_files, commit_editor_update,
-        crop_annotation_source, editor_save_destination, finish_editor_clipboard_copy,
-        recording_channels, sanitize_frontend_log, validate_capture_png, validate_editor_action,
+        crop_annotation_source, editor_save_destination, parse_editor_save_action,
+        recording_channels, sanitize_frontend_log, validate_capture_png,
         validate_editor_annotation_document, validate_replacement_metadata,
-        validate_staged_capture_annotation, write_editor_save, EDITOR_ACTION_REQUIRED_ERROR,
-        EDITOR_CLIPBOARD_ERROR, EDITOR_SAVE_ERROR,
+        validate_staged_capture_annotation, write_editor_save, EditorSaveAction,
+        EDITOR_ACTION_INVALID_ERROR, EDITOR_SAVE_ERROR,
     };
     use crate::core::annotation::AnnotationDocument;
     use crate::core::asset::{CaptureAsset, CaptureKind};
@@ -4052,13 +4042,21 @@ mod command_security_tests {
     }
 
     #[test]
-    fn editor_action_requires_copy_or_save_destination() {
+    fn editor_save_action_matches_its_native_destination() {
         assert_eq!(
-            validate_editor_action(false, false).unwrap_err(),
-            EDITOR_ACTION_REQUIRED_ERROR
+            parse_editor_save_action(None, false).unwrap_err(),
+            EDITOR_ACTION_INVALID_ERROR
         );
-        assert!(validate_editor_action(true, false).is_ok());
-        assert!(validate_editor_action(false, true).is_ok());
+        assert_eq!(
+            parse_editor_save_action(Some("save"), false).unwrap(),
+            EditorSaveAction::Save
+        );
+        assert_eq!(
+            parse_editor_save_action(Some("save-as"), true).unwrap(),
+            EditorSaveAction::SaveAs
+        );
+        assert!(parse_editor_save_action(Some("save"), true).is_err());
+        assert!(parse_editor_save_action(Some("save-as"), false).is_err());
     }
 
     #[test]
@@ -4131,7 +4129,7 @@ mod command_security_tests {
     }
 
     #[test]
-    fn editor_save_and_clipboard_failures_return_stable_errors() {
+    fn editor_save_failures_return_stable_errors() {
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("capture.png");
         write_editor_save(&output, b"png").unwrap();
@@ -4140,11 +4138,6 @@ mod command_security_tests {
         assert_eq!(
             write_editor_save(directory.path(), b"png").unwrap_err(),
             EDITOR_SAVE_ERROR
-        );
-        assert_eq!(
-            finish_editor_clipboard_copy(Err(anyhow::anyhow!("private platform error")))
-                .unwrap_err(),
-            EDITOR_CLIPBOARD_ERROR
         );
     }
 }

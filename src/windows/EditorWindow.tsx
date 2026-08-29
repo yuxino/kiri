@@ -173,7 +173,7 @@ export function EditorWindow(props: { id: string }) {
         return;
       }
       if (e.key === "Enter" && !e.isComposing) {
-        void complete(true);
+        void complete("save");
         return;
       }
       const mod = e.metaKey || e.ctrlKey;
@@ -209,12 +209,10 @@ export function EditorWindow(props: { id: string }) {
     await getCurrentWindow().close();
   }
 
-  async function complete(copyToClipboard: boolean) {
+  async function complete(action: "save" | "saveAs") {
     if (!completionLock.acquire()) return;
     setCompleting(true);
-    const failureMessage = copyToClipboard
-      ? "Couldn't copy the edited image. Try again."
-      : "Couldn't save the edited image. Try again.";
+    const failureMessage = "Couldn't save the edited image. Try again.";
     try {
       setActionError(null);
       const revisionSha256 = revisionRef.current;
@@ -227,14 +225,14 @@ export function EditorWindow(props: { id: string }) {
         setActionError(failureMessage);
         return;
       }
-      const saveToken = copyToClipboard
-        ? null
-        : await api.saveFileDialog(`kiri-${props.id}.png`);
+      const saveToken = action === "saveAs"
+        ? await api.saveFileDialog(`kiri-${props.id}.png`)
+        : null;
       // Cancelling Save As must be a true no-op: do not replace the library
       // asset when the system file picker returns no one-time authorization.
-      if (!copyToClipboard && saveToken === null) return;
+      if (action === "saveAs" && saveToken === null) return;
       const update = await api.updateAsset(props.id, result.png, result.document, {
-        copyToClipboard,
+        action,
         saveToken,
         revisionSha256,
       });
@@ -243,9 +241,7 @@ export function EditorWindow(props: { id: string }) {
         setActionError(failureMessage);
         return;
       }
-      // Spec: copying finishes and closes the editor; saving keeps it open
-      // so the user can continue (they can close manually or hit Copy).
-      if (copyToClipboard) await closeWindow().catch(() => {});
+      if (action === "save") await closeWindow().catch(() => {});
     } catch (error) {
       if (isEditorRevisionMismatch(error)) {
         revisionRef.current = null;
@@ -394,7 +390,7 @@ export function EditorWindow(props: { id: string }) {
             fontWeight: 500,
             cursor: "pointer",
           }}
-          onClick={() => void complete(false)}
+          onClick={() => void complete("saveAs")}
         >
           {t("Save As…")}
         </button>
@@ -402,9 +398,9 @@ export function EditorWindow(props: { id: string }) {
         <button
           className="kiri-primary-button"
           style={{ minHeight: 32, borderRadius: 10 }}
-          onClick={() => void complete(true)}
+          onClick={() => void complete("save")}
         >
-          {t("Save & Copy")}
+          {t("Save")}
         </button>
       </div>
 
