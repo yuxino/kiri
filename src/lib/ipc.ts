@@ -105,6 +105,11 @@ export interface ErrorDto {
   recovery: string | null;
 }
 
+export interface ShortcutStatusDto {
+  label: string;
+  status: "enabled" | "occupied";
+}
+
 export type OcrProviderPreset = "aliyunBailian" | "openAi" | "customOpenAi";
 
 type OcrProtocol = "openAiChatCompletions";
@@ -293,7 +298,8 @@ export const api = {
   stopRecording: () => invoke<void>("stop_recording"),
 
   micSupported: () => invoke<boolean>("mic_supported"),
-  getShortcutLabel: () => invoke<string>("get_shortcut_label"),
+  getShortcutStatus: () => invoke<ShortcutStatusDto>("get_shortcut_status"),
+  retryShortcut: () => invoke<ShortcutStatusDto>("retry_shortcut"),
   checkForUpdates: () => invoke<UpdateCheckDto>("check_for_updates"),
   openReleasePage: () => invoke<void>("open_release_page"),
   openSettings: (action: string) => invoke<void>("open_settings", { action }),

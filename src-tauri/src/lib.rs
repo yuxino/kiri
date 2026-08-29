@@ -84,7 +84,12 @@ pub fn run() {
                 let _ = window.set_focus();
             }
 
-            register_shortcut(app.handle())?;
+            // A conflicting system-wide shortcut must not prevent Kiri from
+            // opening. Settings surfaces the unavailable binding and lets the
+            // user retry after releasing the conflict.
+            if let Err(error) = register_shortcut(app.handle()) {
+                log::warn!("[shortcut] registration failed: {error}");
+            }
             install_tray(app.handle())?;
             Ok(())
         })
@@ -187,7 +192,8 @@ pub fn run() {
             commands::get_locale,
             commands::get_language,
             commands::set_language,
-            commands::get_shortcut_label,
+            commands::get_shortcut_status,
+            commands::retry_shortcut,
             commands::open_settings,
             commands::quit_app,
             commands::get_recording_options,
@@ -233,19 +239,32 @@ fn install_macos_app_icon() -> std::io::Result<()> {
     Ok(())
 }
 
-fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
-    use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+pub(crate) fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let shortcut = capture_shortcut();
+    app.global_shortcut()
+        .register(shortcut)
+        .map_err(|e| tauri::Error::Anyhow(e.into()))?;
+    log::info!(
+        "[shortcut] registered {}",
+        crate::core::shortcut::KIRI_CAPTURE.display_label()
+    );
+    Ok(())
+}
+
+fn capture_shortcut() -> tauri_plugin_global_shortcut::Shortcut {
+    use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
     // macOS: Command+Shift+A; Windows: Control+Shift+A.
     #[cfg(target_os = "macos")]
     let modifiers = Modifiers::SUPER | Modifiers::SHIFT;
     #[cfg(not(target_os = "macos"))]
     let modifiers = Modifiers::CONTROL | Modifiers::SHIFT;
-    let shortcut = Shortcut::new(Some(modifiers), Code::KeyA);
-    app.global_shortcut()
-        .register(shortcut)
-        .map_err(|e| tauri::Error::Anyhow(e.into()))?;
-    log::info!("[shortcut] registered {modifiers:?} + A");
-    Ok(())
+    Shortcut::new(Some(modifiers), Code::KeyA)
+}
+
+pub(crate) fn capture_shortcut_is_registered(app: &tauri::AppHandle) -> bool {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    app.global_shortcut().is_registered(capture_shortcut())
 }
 
 /// Installs the global click monitor for the click ripple. The monitor uses
@@ -261,15 +280,14 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
         }
     }
     #[cfg(target_os = "macos")]
-    let main_height = dispatch2::run_on_main(|mtm| {
-        use objc2_app_kit::NSScreen;
-        NSScreen::mainScreen(mtm)
-            .map(|screen| {
-                let frame = screen.frame();
-                frame.origin.y + frame.size.height
-            })
-            .unwrap_or(0.0)
-    });
+    let main_height = {
+        use objc2_core_graphics::{CGDisplayBounds, CGMainDisplayID};
+        // Use the fixed Core Graphics main display, not NSScreen.mainScreen:
+        // the latter follows the key window and changes when a fullscreen app
+        // owns a secondary display.
+        let bounds = CGDisplayBounds(CGMainDisplayID());
+        bounds.origin.y + bounds.size.height
+    };
     #[cfg(windows)]
     let main_height = 0.0;
 

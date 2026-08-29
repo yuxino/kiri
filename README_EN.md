@@ -15,7 +15,7 @@ Kiri is primarily developed and tested on macOS. Windows has not completed real-
 
 ## Features
 
-- **Screenshots, crop, and re-editable annotation**: click a window or drag a region, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Color, widths, text, and mosaic styling remember the last choice. Annotations created by v1.4.5 or later can be reopened from the completion card or library, while marks flattened into older screenshots cannot be reconstructed.
+- **Screenshots, crop, and re-editable annotation**: click a window or drag a region, including from a macOS full-screen Space, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Color, widths, text, and mosaic styling remember the last choice. Annotations created by v1.4.5 or later can be reopened from the completion card or library, while marks flattened into older screenshots cannot be reconstructed.
 - **OCR**: recognize text locally with macOS Vision or Windows.Media.Ocr by default; optional remote OCR asks before every upload.
 - **Recording and GIF**: record a region with optional system audio, microphone, pointer, and click highlights; save as MP4 or GIF.
 - **Local library**: search, favorite, tag, rename, and move captures to recoverable Trash. Settings can use another local directory or external disk for the library.
@@ -28,7 +28,7 @@ If the library is offline, retry or locate it again. Choose a file to replace a 
 
 Download the latest version from [GitHub Releases](https://github.com/yuxino/kiri/releases/latest).
 
-- **macOS 14+**: download the single Universal `.dmg`, which supports both Apple silicon and Intel. Open it and drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording**; **Input Monitoring** is needed only for click highlights. Microphone recording requires macOS 15+ and requests **Microphone** permission only when enabled.
+- **macOS 14+**: download the single Universal `.dmg`, which supports both Apple silicon and Intel. Open it and drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording**; **Input Monitoring** is needed only for click highlights. The global capture shortcut needs no additional system permission, and Settings shows whether it is available. Microphone recording requires macOS 15+ and requests **Microphone** permission only when enabled.
 - **Windows 11 (x64)**: run the `.exe` installer. Screen capture needs no extra system permission; microphone access follows Windows privacy settings. The installer is not Authenticode-signed, so SmartScreen may warn, and Windows has not completed real-device testing.
 
 > The v1.4.5 and later macOS releases use the project's maintained local self-signed identity, not ad-hoc, Developer ID signing, or Apple notarization. First launch may require Control-clicking `Kiri.app` and choosing **Open**, or selecting **Open Anyway** in System Settings → Privacy & Security. Gatekeeper does not need to be disabled.

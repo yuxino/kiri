@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getAvailableShortcutLabel,
+  getLibraryBandRect,
   getLibraryCardInteraction,
   getLibraryCardPrimaryAction,
+  getLibraryContentPoint,
   getMenuFocusIndex,
 } from "../src/windows/library-card-interaction.js";
 
@@ -95,4 +98,41 @@ test("card menus support native arrow and edge keyboard navigation", () => {
   assert.equal(getMenuFocusIndex("End", 1, 4), 3);
   assert.equal(getMenuFocusIndex("ArrowDown", -1, 4), 0);
   assert.equal(getMenuFocusIndex("ArrowDown", 0, 0), -1);
+});
+
+test("rubber-band pointer coordinates do not count container padding twice", () => {
+  assert.deepEqual(
+    getLibraryContentPoint({
+      clientX: 922,
+      clientY: 460,
+      rectLeft: 100,
+      rectTop: 40,
+      clientLeft: 1,
+      clientTop: 1,
+      scrollLeft: 0,
+      scrollTop: 320,
+    }),
+    { x: 821, y: 739 },
+  );
+});
+
+test("rubber-band geometry is normalized in either drag direction", () => {
+  assert.deepEqual(getLibraryBandRect({ x0: 821, y0: 739, x1: 220, y1: 410 }), {
+    x: 220,
+    y: 410,
+    w: 601,
+    h: 329,
+  });
+});
+
+test("empty library advertises only an available global shortcut", () => {
+  assert.equal(
+    getAvailableShortcutLabel({ label: "⇧⌘A", status: "enabled" }),
+    "⇧⌘A",
+  );
+  assert.equal(
+    getAvailableShortcutLabel({ label: "⇧⌘A", status: "occupied" }),
+    null,
+  );
+  assert.equal(getAvailableShortcutLabel(null), null);
 });

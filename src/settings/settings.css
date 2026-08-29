@@ -74,6 +74,7 @@
 
 .kiri-language-row,
 .kiri-version-row,
+.kiri-shortcut-row,
 .kiri-storage-row {
   min-height: 72px;
   padding: 14px 16px;
@@ -86,6 +87,7 @@
 
 .kiri-language-row > div:first-child,
 .kiri-version-row > div:first-child,
+.kiri-shortcut-copy,
 .kiri-storage-copy {
   display: flex;
   flex-direction: column;
@@ -94,6 +96,7 @@
 
 .kiri-language-row strong,
 .kiri-version-row strong,
+.kiri-shortcut-row strong,
 .kiri-storage-row strong,
 .ocr-engine-copy strong {
   font-size: 13px;
@@ -102,6 +105,7 @@
 
 .kiri-language-row span,
 .kiri-version-row > div:first-child > span,
+.kiri-shortcut-copy > span,
 .kiri-storage-copy > span,
 .ocr-engine-copy > span:not(.ocr-engine-title-row) {
   color: var(--kiri-secondary-label);
@@ -114,6 +118,7 @@
 }
 
 .kiri-storage-title,
+.kiri-shortcut-actions,
 .kiri-storage-actions {
   display: flex;
   align-items: center;
@@ -135,6 +140,16 @@
 .kiri-storage-actions {
   justify-content: flex-end;
   flex-shrink: 0;
+}
+
+.kiri-shortcut-actions {
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.kiri-shortcut-actions .kiri-button {
+  min-height: 30px;
+  padding: 0 10px;
 }
 
 .kiri-storage-actions .kiri-button {
@@ -537,6 +552,7 @@
   .kiri-settings-section__heading,
   .kiri-language-row,
   .kiri-version-row,
+  .kiri-shortcut-row,
   .kiri-storage-row {
     align-items: stretch;
     flex-direction: column;
@@ -554,6 +570,7 @@
     align-self: flex-start;
   }
 
+  .kiri-shortcut-actions,
   .kiri-storage-actions {
     justify-content: flex-start;
   }

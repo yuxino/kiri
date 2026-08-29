@@ -570,7 +570,11 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto, monitor: Option<Mo
     let _ = window.set_content_protected(true);
     crate::platform::set_window_capture_excluded(app, label, true);
     let _ = window.emit("toast", notice.clone());
-    crate::platform::show_window_without_activation(app, label);
+    crate::platform::show_window_without_activation(
+        app,
+        label,
+        crate::platform::TransientWindowRole::CompletionFeedback,
+    );
 }
 
 /// Shows an interactive completion card in the same resident global-feedback
@@ -633,7 +637,11 @@ pub fn show_completion_preview(
     let _ = window.set_content_protected(true);
     crate::platform::set_window_capture_excluded(app, label, true);
     let _ = window.emit("completion-preview", preview.clone());
-    crate::platform::show_window_without_activation(app, label);
+    crate::platform::show_window_without_activation(
+        app,
+        label,
+        crate::platform::TransientWindowRole::CompletionFeedback,
+    );
 }
 
 fn focused_kiri_monitor(app: &AppHandle) -> Option<Monitor> {

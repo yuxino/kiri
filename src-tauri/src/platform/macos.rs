@@ -10,12 +10,13 @@ use objc2_core_foundation::CFRunLoop;
 use tauri::{AppHandle, Manager};
 
 use objc2_app_kit::{
-    NSEvent, NSEventMask, NSRunningApplication, NSScreenSaverWindowLevel, NSWindow, NSWorkspace,
+    NSEvent, NSEventMask, NSRunningApplication, NSScreenSaverWindowLevel, NSWindow,
+    NSWindowCollectionBehavior, NSWorkspace,
 };
 use objc2_core_foundation::kCFRunLoopDefaultMode;
 use objc2_foundation::{NSArray, NSString, NSURL};
 
-use super::{ClickMonitorHandle, MicrophoneAccess};
+use super::{ClickMonitorHandle, MicrophoneAccess, TransientWindowPolicy};
 
 pub fn activate_application(pid: u32) {
     // Focus restoration is also reached from async recording finalization.
@@ -31,7 +32,74 @@ pub fn activate_application(pid: u32) {
     });
 }
 
-pub fn show_window_without_activation(app: &AppHandle, label: &str) {
+fn apply_transient_window_policy(ns_window: &NSWindow, policy: TransientWindowPolicy) {
+    ns_window.setCollectionBehavior(transient_window_behavior(
+        ns_window.collectionBehavior(),
+        policy,
+    ));
+    if policy.screen_saver_level {
+        ns_window.setLevel(NSScreenSaverWindowLevel);
+    }
+}
+
+fn transient_window_behavior(
+    current: NSWindowCollectionBehavior,
+    policy: TransientWindowPolicy,
+) -> NSWindowCollectionBehavior {
+    // AppKit permits only one member from each group below. Remove defaults
+    // that can keep a window attached to Kiri's ordinary Space, then declare
+    // it eligible to accompany another application's fullscreen window.
+    let incompatible = NSWindowCollectionBehavior::CanJoinAllSpaces
+        | NSWindowCollectionBehavior::MoveToActiveSpace
+        | NSWindowCollectionBehavior::Managed
+        | NSWindowCollectionBehavior::Transient
+        | NSWindowCollectionBehavior::Stationary
+        | NSWindowCollectionBehavior::ParticipatesInCycle
+        | NSWindowCollectionBehavior::IgnoresCycle
+        | NSWindowCollectionBehavior::Primary
+        | NSWindowCollectionBehavior::Auxiliary
+        | NSWindowCollectionBehavior::CanJoinAllApplications
+        | NSWindowCollectionBehavior::FullScreenPrimary
+        | NSWindowCollectionBehavior::FullScreenAuxiliary
+        | NSWindowCollectionBehavior::FullScreenNone;
+    let mut behavior = current & !incompatible;
+    if policy.can_join_all_spaces {
+        behavior |= NSWindowCollectionBehavior::CanJoinAllSpaces;
+    }
+    if policy.full_screen_auxiliary {
+        behavior |= NSWindowCollectionBehavior::CanJoinAllApplications
+            | NSWindowCollectionBehavior::FullScreenAuxiliary;
+    }
+    if policy.stationary {
+        behavior |= NSWindowCollectionBehavior::Stationary;
+    }
+    behavior
+}
+
+pub(super) fn configure_transient_window(
+    window: &tauri::WebviewWindow,
+    policy: TransientWindowPolicy,
+) {
+    // Recording commands may reach this helper from a Tokio worker. AppKit
+    // traps off-main NSWindow mutation, so every native policy change stays on
+    // the application thread.
+    let window = window.clone();
+    dispatch2::run_on_main(move |_main_thread| {
+        let Ok(ns_window) = window.ns_window() else {
+            return;
+        };
+        let Some(ns_window) = (unsafe { (ns_window as *mut NSWindow).as_ref() }) else {
+            return;
+        };
+        apply_transient_window_policy(ns_window, policy);
+    });
+}
+
+pub(super) fn show_window_without_activation(
+    app: &AppHandle,
+    label: &str,
+    policy: TransientWindowPolicy,
+) {
     let Some(window) = app.get_webview_window(label) else {
         return;
     };
@@ -43,11 +111,10 @@ pub fn show_window_without_activation(app: &AppHandle, label: &str) {
         let Some(ns_window) = (unsafe { (ns_window as *mut NSWindow).as_ref() }) else {
             return false;
         };
-        // Capture overlays use the screen-saver level so they reliably cover
-        // the desktop. Put passive feedback at that same level before
-        // ordering it front; otherwise OCR's "Text Copied" notice is created
-        // successfully but remains hidden behind the still-open overlay.
-        ns_window.setLevel(NSScreenSaverWindowLevel);
+        // Apply the same full-screen Space policy used by capture windows
+        // before ordering passive feedback front. Otherwise the toast can be
+        // created successfully but remain on another Space.
+        apply_transient_window_policy(ns_window, policy);
         ns_window.orderFrontRegardless();
         true
     });
@@ -235,5 +302,53 @@ pub fn start_click_monitor(
                 "global click monitor setup ended before reporting readiness: {error}"
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod transient_window_tests {
+    use objc2_app_kit::NSWindowCollectionBehavior;
+
+    use super::{transient_window_behavior, TransientWindowPolicy};
+
+    #[test]
+    fn fullscreen_policy_replaces_incompatible_space_flags() {
+        let current = NSWindowCollectionBehavior::MoveToActiveSpace
+            | NSWindowCollectionBehavior::Managed
+            | NSWindowCollectionBehavior::ParticipatesInCycle
+            | NSWindowCollectionBehavior::Primary
+            | NSWindowCollectionBehavior::FullScreenPrimary;
+        let policy = TransientWindowPolicy {
+            can_join_all_spaces: true,
+            full_screen_auxiliary: true,
+            stationary: false,
+            screen_saver_level: true,
+        };
+
+        let behavior = transient_window_behavior(current, policy);
+
+        assert!(behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces));
+        assert!(behavior.contains(NSWindowCollectionBehavior::CanJoinAllApplications));
+        assert!(behavior.contains(NSWindowCollectionBehavior::FullScreenAuxiliary));
+        assert!(!behavior.contains(NSWindowCollectionBehavior::MoveToActiveSpace));
+        assert!(!behavior.contains(NSWindowCollectionBehavior::Managed));
+        assert!(!behavior.contains(NSWindowCollectionBehavior::Primary));
+        assert!(!behavior.contains(NSWindowCollectionBehavior::FullScreenPrimary));
+    }
+
+    #[test]
+    fn click_ripple_is_the_only_stationary_role() {
+        let behavior = transient_window_behavior(
+            NSWindowCollectionBehavior::Transient,
+            TransientWindowPolicy {
+                can_join_all_spaces: true,
+                full_screen_auxiliary: true,
+                stationary: true,
+                screen_saver_level: false,
+            },
+        );
+
+        assert!(behavior.contains(NSWindowCollectionBehavior::Stationary));
+        assert!(!behavior.contains(NSWindowCollectionBehavior::Transient));
     }
 }

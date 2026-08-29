@@ -25,6 +25,86 @@ pub enum MicrophoneAccess {
     Denied,
 }
 
+/// Native presentation roles for Kiri's short-lived capture and feedback
+/// windows. The role keeps macOS Space behavior centralized without changing
+/// the corresponding Windows window configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransientWindowRole {
+    CaptureOverlay,
+    RecordingCountdown,
+    RecordingControls,
+    CompletionFeedback,
+    ClickRipple,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TransientWindowPolicy {
+    pub can_join_all_spaces: bool,
+    pub full_screen_auxiliary: bool,
+    pub stationary: bool,
+    pub screen_saver_level: bool,
+}
+
+impl TransientWindowRole {
+    const fn policy(self) -> TransientWindowPolicy {
+        TransientWindowPolicy {
+            can_join_all_spaces: true,
+            full_screen_auxiliary: true,
+            stationary: matches!(self, Self::ClickRipple),
+            // Preserve the existing native levels: capture UI and completion
+            // feedback use the screen-saver level, while the click ripple
+            // continues to rely on its always-on-top window configuration.
+            screen_saver_level: !matches!(self, Self::ClickRipple),
+        }
+    }
+}
+
+/// Applies the native policy for a transient Kiri window. macOS requires
+/// explicit collection behavior to appear in another app's full-screen Space.
+pub fn configure_transient_window(window: &tauri::WebviewWindow, role: TransientWindowRole) {
+    #[cfg(target_os = "macos")]
+    macos::configure_transient_window(window, role.policy());
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = (window, role);
+}
+
+#[cfg(any(windows, test))]
+fn physical_transient_frame(
+    frame: crate::core::geometry::Rect,
+    backing_scale: f64,
+) -> (i32, i32, u32, u32) {
+    let scale = backing_scale.max(1.0);
+    (
+        (frame.x * scale).round() as i32,
+        (frame.y * scale).round() as i32,
+        (frame.width * scale).round().max(1.0) as u32,
+        (frame.height * scale).round().max(1.0) as u32,
+    )
+}
+
+/// Corrects transient window geometry after creation. Tao chooses a monitor
+/// for logical builder coordinates by trying each monitor's scale factor;
+/// that is ambiguous on Windows mixed-DPI desktops. Repositioning with an
+/// explicit physical frame keeps overlays on the display that was captured.
+pub fn place_transient_window(
+    window: &tauri::WebviewWindow,
+    frame: crate::core::geometry::Rect,
+    backing_scale: f64,
+) -> tauri::Result<()> {
+    #[cfg(windows)]
+    {
+        let (x, y, width, height) = physical_transient_frame(frame, backing_scale);
+        window.set_position(tauri::PhysicalPosition::new(x, y))?;
+        window.set_size(tauri::PhysicalSize::new(width, height))?;
+    }
+
+    #[cfg(not(windows))]
+    let _ = (window, frame, backing_scale);
+
+    Ok(())
+}
+
 /// Writes PNG bytes to the system clipboard as an image.
 pub fn write_image_to_clipboard(png: &[u8]) -> Result<()> {
     let image = image::load_from_memory(png).map_err(|error| anyhow::anyhow!(error))?;
@@ -73,8 +153,19 @@ pub fn write_file_to_clipboard(path: &Path) -> Result<()> {
 }
 
 /// Shows a window without activating Kiri or moving keyboard focus to it.
-pub fn show_window_without_activation(app: &tauri::AppHandle, label: &str) {
-    current::show_window_without_activation(app, label);
+pub fn show_window_without_activation(
+    app: &tauri::AppHandle,
+    label: &str,
+    role: TransientWindowRole,
+) {
+    #[cfg(target_os = "macos")]
+    current::show_window_without_activation(app, label, role.policy());
+
+    #[cfg(windows)]
+    {
+        let _ = role;
+        current::show_window_without_activation(app, label);
+    }
 }
 
 /// Activate the application with the given PID (focus restoration).
@@ -141,4 +232,60 @@ pub fn request_microphone_access() -> Result<MicrophoneAccess> {
 /// Makes a window click-through so it never blocks the cursor.
 pub fn set_window_click_through(app: &tauri::AppHandle, label: &str) {
     current::set_window_click_through(app, label);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{physical_transient_frame, TransientWindowRole};
+
+    #[test]
+    fn transient_windows_join_full_screen_spaces() {
+        for role in [
+            TransientWindowRole::CaptureOverlay,
+            TransientWindowRole::RecordingCountdown,
+            TransientWindowRole::RecordingControls,
+            TransientWindowRole::CompletionFeedback,
+            TransientWindowRole::ClickRipple,
+        ] {
+            let policy = role.policy();
+            assert!(policy.can_join_all_spaces, "{role:?}");
+            assert!(policy.full_screen_auxiliary, "{role:?}");
+        }
+    }
+
+    #[test]
+    fn ripple_is_stationary_without_changing_existing_window_levels() {
+        for role in [
+            TransientWindowRole::CaptureOverlay,
+            TransientWindowRole::RecordingCountdown,
+            TransientWindowRole::RecordingControls,
+            TransientWindowRole::CompletionFeedback,
+        ] {
+            let policy = role.policy();
+            assert!(!policy.stationary, "{role:?}");
+            assert!(policy.screen_saver_level, "{role:?}");
+        }
+
+        let ripple = TransientWindowRole::ClickRipple.policy();
+        assert!(ripple.stationary);
+        assert!(!ripple.screen_saver_level);
+    }
+
+    #[test]
+    fn windows_mixed_dpi_frames_round_trip_to_physical_monitor_bounds() {
+        assert_eq!(
+            physical_transient_frame(
+                crate::core::geometry::Rect::new(960.0, 0.0, 1280.0, 720.0),
+                2.0,
+            ),
+            (1920, 0, 2560, 1440)
+        );
+        assert_eq!(
+            physical_transient_frame(
+                crate::core::geometry::Rect::new(-1280.0, 180.0, 1280.0, 720.0),
+                2.0,
+            ),
+            (-2560, 360, 2560, 1440)
+        );
+    }
 }

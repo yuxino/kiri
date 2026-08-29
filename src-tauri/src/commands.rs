@@ -1305,6 +1305,7 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
 
     let capture_id = uuid::Uuid::new_v4();
     let overlay_frame = display.screen_frame;
+    let overlay_scale = display.backing_scale;
     let capture_token = {
         let store = app.state::<crate::protocol::ProtocolStore>();
         crate::protocol::set_frozen_png(&store, capture_id, display.png_data.clone())
@@ -1326,7 +1327,7 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
         });
     }
 
-    if let Err(error) = create_overlay_window(&app, overlay_frame, &capture_token) {
+    if let Err(error) = create_overlay_window(&app, overlay_frame, overlay_scale, &capture_token) {
         let failed_session = {
             let state = app.state::<AppState>();
             let mut capture = state.capture.lock().unwrap();
@@ -1401,6 +1402,7 @@ fn restore_capture_origin(
 fn create_overlay_window(
     app: &AppHandle,
     screen_frame: Rect,
+    backing_scale: f64,
     capture_token: &str,
 ) -> anyhow::Result<String> {
     let label = "overlay".to_string();
@@ -1423,35 +1425,17 @@ fn create_overlay_window(
     // Build visible: creating a hidden webview and showing it immediately can
     // race WKWebView initialization and leave the page blank on macOS.
     let window = builder.build()?;
-    raise_overlay_window(&window);
+    if let Err(error) = platform::place_transient_window(&window, screen_frame, backing_scale) {
+        let _ = window.close();
+        return Err(error.into());
+    }
+    platform::configure_transient_window(&window, platform::TransientWindowRole::CaptureOverlay);
     if let Err(error) = window.set_focus() {
         let _ = window.close();
         return Err(error.into());
     }
     Ok(label)
 }
-
-#[cfg(target_os = "macos")]
-fn raise_overlay_window(window: &tauri::WebviewWindow) {
-    use objc2_app_kit::{NSScreenSaverWindowLevel, NSWindow};
-
-    // Recording commands are async Tauri commands and therefore run on a
-    // Tokio worker. AppKit traps the whole process if NSWindow is mutated
-    // there, so keep the native pointer lookup and mutation on the main
-    // thread. `run_on_main` executes inline for the synchronous capture path
-    // and dispatches synchronously for countdown/control-panel creation.
-    let window = window.clone();
-    dispatch2::run_on_main(move |_main_thread| {
-        if let Ok(ns_window) = window.ns_window() {
-            let ns_window = ns_window as *mut NSWindow;
-            let ns_window = unsafe { &*ns_window };
-            ns_window.setLevel(NSScreenSaverWindowLevel);
-        }
-    });
-}
-
-#[cfg(not(target_os = "macos"))]
-fn raise_overlay_window(_window: &tauri::WebviewWindow) {}
 
 #[tauri::command]
 pub fn cancel_capture(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
@@ -2512,7 +2496,7 @@ pub async fn start_recording_flow(
         }
     }
 
-    let (screen_frame, return_pid, was_kiri_frontmost, overlay_labels) = {
+    let (screen_frame, backing_scale, return_pid, was_kiri_frontmost, overlay_labels) = {
         let state = app.state::<AppState>();
         let _transition = state.library_transition.lock().unwrap();
         {
@@ -2554,6 +2538,7 @@ pub async fn start_recording_flow(
         invalidate_capture_resources(&app, &session);
         (
             session.display.screen_frame,
+            session.display.backing_scale,
             session.return_pid,
             session.was_kiri_frontmost,
             session.overlay_labels,
@@ -2620,9 +2605,17 @@ pub async fn start_recording_flow(
             return Err(error.to_string());
         }
     };
+    if let Err(error) = platform::place_transient_window(&window, screen_frame, backing_scale) {
+        let _ = window.close();
+        reset_recording_session(&app);
+        return Err(error.to_string());
+    }
     platform::set_window_capture_excluded(&app, &label, true);
     // Spec (recording §5.1): the countdown window is level .screenSaver.
-    raise_overlay_window(&window);
+    platform::configure_transient_window(
+        &window,
+        platform::TransientWindowRole::RecordingCountdown,
+    );
     let _ = window.show();
     Ok(())
 }
@@ -2779,11 +2772,18 @@ fn create_control_panel(
     .shadow(false)
     .build()
     .map_err(|e| e.to_string())?;
+    let panel_frame = Rect::new(panel_x, panel_y, 296.0, 64.0);
+    if let Err(error) =
+        platform::place_transient_window(&panel, panel_frame, configuration.backing_scale)
+    {
+        let _ = panel.close();
+        return Err(error.to_string());
+    }
     platform::set_window_capture_excluded(app, "control-panel", true);
     // Keep the panel above every app window. It takes keyboard focus so the
     // recording hotkeys work (Space = pause/resume, Esc = stop); the panel
     // itself is the only window the user interacts with while recording.
-    raise_overlay_window(&panel);
+    platform::configure_transient_window(&panel, platform::TransientWindowRole::RecordingControls);
     let _ = panel.show();
     let _ = panel.set_focus();
     Ok(())
@@ -2795,7 +2795,7 @@ fn create_ripple_window(
 ) -> Result<(), String> {
     let region = configuration.region;
     let frame = configuration.screen_frame;
-    let _ripple = WebviewWindowBuilder::new(
+    let ripple = WebviewWindowBuilder::new(
         app,
         "ripple".to_string(),
         WebviewUrl::App("index.html?window=ripple".into()),
@@ -2806,10 +2806,24 @@ fn create_ripple_window(
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
+    .focused(false)
     .skip_taskbar(true)
     .shadow(false)
     .build()
     .map_err(|e| e.to_string())?;
+    let ripple_frame = Rect::new(
+        frame.x + region.x,
+        frame.y + region.y,
+        region.width,
+        region.height,
+    );
+    if let Err(error) =
+        platform::place_transient_window(&ripple, ripple_frame, configuration.backing_scale)
+    {
+        let _ = ripple.close();
+        return Err(error.to_string());
+    }
+    platform::configure_transient_window(&ripple, platform::TransientWindowRole::ClickRipple);
     platform::set_window_click_through(app, "ripple");
     Ok(())
 }
@@ -3911,9 +3925,57 @@ pub fn get_locale() -> String {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ShortcutRegistrationStatus {
+    Enabled,
+    Occupied,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutStatusDto {
+    pub label: String,
+    pub status: ShortcutRegistrationStatus,
+}
+
+fn shortcut_status(registered: bool) -> ShortcutStatusDto {
+    ShortcutStatusDto {
+        label: KIRI_CAPTURE.display_label(),
+        status: if registered {
+            ShortcutRegistrationStatus::Enabled
+        } else {
+            ShortcutRegistrationStatus::Occupied
+        },
+    }
+}
+
+fn require_library_window(window: &WebviewWindow) -> Result<(), String> {
+    if window.label() == "library" {
+        Ok(())
+    } else {
+        Err("This command is unavailable from this window.".into())
+    }
+}
+
 #[tauri::command]
-pub fn get_shortcut_label() -> String {
-    KIRI_CAPTURE.display_label()
+pub fn get_shortcut_status(window: WebviewWindow) -> Result<ShortcutStatusDto, String> {
+    require_library_window(&window)?;
+    Ok(shortcut_status(crate::capture_shortcut_is_registered(
+        window.app_handle(),
+    )))
+}
+
+#[tauri::command]
+pub fn retry_shortcut(window: WebviewWindow) -> Result<ShortcutStatusDto, String> {
+    require_library_window(&window)?;
+    let app = window.app_handle();
+    if !crate::capture_shortcut_is_registered(app) {
+        if let Err(error) = crate::register_shortcut(app) {
+            log::warn!("[shortcut] retry failed: {error}");
+        }
+    }
+    Ok(shortcut_status(crate::capture_shortcut_is_registered(app)))
 }
 
 #[tauri::command]
@@ -3966,7 +4028,7 @@ mod command_security_tests {
         parse_editor_save_action, recording_channels, sanitize_frontend_log, validate_capture_png,
         validate_editor_annotation_document, validate_replacement_metadata,
         validate_staged_capture_annotation, write_editor_save, EditorCropPixels, EditorSaveAction,
-        EDITOR_ACTION_INVALID_ERROR, EDITOR_SAVE_ERROR,
+        ShortcutRegistrationStatus, EDITOR_ACTION_INVALID_ERROR, EDITOR_SAVE_ERROR,
     };
     use crate::core::annotation::AnnotationDocument;
     use crate::core::asset::{CaptureAsset, CaptureKind};
@@ -3985,6 +4047,28 @@ mod command_security_tests {
         assert!(!sanitized.chars().any(char::is_control));
         assert!(sanitized.len() <= 4 * 1024);
         assert!(sanitized.starts_with("first second "));
+    }
+
+    #[test]
+    fn shortcut_status_reflects_native_registration() {
+        let enabled = super::shortcut_status(true);
+        assert_eq!(
+            enabled.label,
+            crate::core::shortcut::KIRI_CAPTURE.display_label()
+        );
+        assert_eq!(enabled.status, ShortcutRegistrationStatus::Enabled);
+        assert_eq!(serde_json::to_value(&enabled).unwrap()["status"], "enabled");
+
+        let occupied = super::shortcut_status(false);
+        assert_eq!(
+            occupied.label,
+            crate::core::shortcut::KIRI_CAPTURE.display_label()
+        );
+        assert_eq!(occupied.status, ShortcutRegistrationStatus::Occupied);
+        assert_eq!(
+            serde_json::to_value(&occupied).unwrap()["status"],
+            "occupied"
+        );
     }
 
     #[test]

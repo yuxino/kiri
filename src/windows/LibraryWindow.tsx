@@ -15,13 +15,17 @@ import {
   type ErrorDto,
   type LibraryStatusDto,
   type NoticeDto,
+  type ShortcutStatusDto,
 } from "../lib/ipc";
 import { t, fmt } from "../i18n";
 import brandIcon from "../../src-tauri/icons/128x128.png";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 import {
+  getAvailableShortcutLabel,
+  getLibraryBandRect,
   getLibraryCardInteraction,
   getLibraryCardPrimaryAction,
+  getLibraryContentPoint,
   getMenuFocusIndex,
 } from "./library-card-interaction.js";
 
@@ -88,7 +92,7 @@ export function LibraryWindow() {
   // Menu anchor in viewport coordinates (mouse position on right-click, or
   // the ⋯ button's corner), so the menu appears where the user looked.
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
-  const [shortcutLabel, setShortcutLabel] = useState("");
+  const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatusDto | null>(null);
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video" | "gif">("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -146,23 +150,31 @@ export function LibraryWindow() {
   // --- Rubber-band (drag) selection -------------------------------------
   const bandStart = useRef<{ x: number; y: number } | null>(null);
 
-  // Content-space pointer coords: absolute-positioned children (band) and
-  // offsetLeft/offsetTop (cards) are both relative to the container's
-  // PADDING box. Convert viewport client coords → padding-box coords by
-  // subtracting the border-box origin, adding the padding back, then adding
-  // the scroll offsets (so it stays correct after scrolling).
+  // Absolute children and card offsets both use the scroll container's
+  // padding edge as their origin. clientX/Y already include the visible
+  // padding, so adding the CSS padding again would shift the band right and
+  // make it enlarge the horizontal scroll area.
   const contentPoint = (e: { clientX: number; clientY: number }, container: HTMLDivElement) => {
     const rect = container.getBoundingClientRect();
-    const cs = getComputedStyle(container);
-    const padLeft = parseFloat(cs.paddingLeft) || 0;
-    const padTop = parseFloat(cs.paddingTop) || 0;
-    return {
-      x: e.clientX - rect.left + padLeft + container.scrollLeft,
-      y: e.clientY - rect.top + padTop + container.scrollTop,
-    };
+    return getLibraryContentPoint({
+      clientX: e.clientX,
+      clientY: e.clientY,
+      rectLeft: rect.left,
+      rectTop: rect.top,
+      clientLeft: container.clientLeft,
+      clientTop: container.clientTop,
+      scrollLeft: container.scrollLeft,
+      scrollTop: container.scrollTop,
+    });
   };
 
-  const bandPointerDown = (e: React.PointerEvent) => {
+  const releaseBandPointer = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  const bandPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     // Only start a band from the empty grid area (not on a card/button).
     const target = e.target as HTMLElement | null;
     if (target && target.closest("[data-card],button,input,a,[data-menu]")) return;
@@ -172,21 +184,24 @@ export function LibraryWindow() {
     const p = contentPoint(e, container);
     bandStart.current = p;
     setBand({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
   };
 
-  const bandPointerMove = (e: React.PointerEvent) => {
+  const bandPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!bandStart.current || !gridScrollRef.current) return;
     const p = contentPoint(e, gridScrollRef.current);
     setBand((prev) => (prev ? { ...prev, x1: p.x, y1: p.y } : prev));
   };
 
-  const bandPointerUp = (e: React.PointerEvent) => {
+  const bandPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!bandStart.current) return;
     const container = gridScrollRef.current;
     const start = bandStart.current;
     bandStart.current = null;
     if (!container) {
       setBand(null);
+      releaseBandPointer(e);
       return;
     }
     const p = contentPoint(e, container);
@@ -218,15 +233,18 @@ export function LibraryWindow() {
       });
     }
     setBand(null);
+    releaseBandPointer(e);
+  };
+
+  const bandPointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    bandStart.current = null;
+    setBand(null);
+    releaseBandPointer(e);
   };
 
   const bandRect = useMemo(() => {
     if (!band) return null;
-    const x = Math.min(band.x0, band.x1);
-    const y = Math.min(band.y0, band.y1);
-    const w = Math.abs(band.x1 - band.x0);
-    const h = Math.abs(band.y1 - band.y0);
-    return { x, y, w, h };
+    return getLibraryBandRect(band);
   }, [band]);
 
   const closeMenu = useCallback((restoreFocus = false) => {
@@ -283,8 +301,9 @@ export function LibraryWindow() {
   }, [visibleAssetIds]);
 
   useEffect(() => {
-    api.getShortcutLabel().then(setShortcutLabel).catch(() => {});
-  }, []);
+    if (destination !== "captures") return;
+    api.getShortcutStatus().then(setShortcutStatus).catch(() => {});
+  }, [destination]);
 
   const showingTrash = section === "trash";
   const showingTrashRef = useRef(showingTrash);
@@ -885,7 +904,7 @@ export function LibraryWindow() {
       ) : isEmpty ? (
         <EmptyState
           isTrashEmpty={isEmpty && showingTrash}
-          shortcutLabel={shortcutLabel}
+          shortcutStatus={shortcutStatus}
         />
       ) : isFilterEmpty ? (
         <div
@@ -908,6 +927,7 @@ export function LibraryWindow() {
           style={{
             flex: 1,
             overflowY: "auto",
+            overflowX: "hidden",
             padding: "0 22px 24px",
             position: "relative",
             touchAction: "none",
@@ -916,7 +936,8 @@ export function LibraryWindow() {
           onPointerDown={bandPointerDown}
           onPointerMove={bandPointerMove}
           onPointerUp={bandPointerUp}
-          onPointerCancel={bandPointerUp}
+          onPointerCancel={bandPointerCancel}
+          onLostPointerCapture={bandPointerCancel}
         >
           {/* Rubber-band selection rectangle */}
           {bandRect && (
@@ -927,6 +948,7 @@ export function LibraryWindow() {
                 top: bandRect.y,
                 width: bandRect.w,
                 height: bandRect.h,
+                boxSizing: "border-box",
                 background: "rgba(0,0,0,0.08)",
                 border: "1px solid rgba(0,0,0,0.62)",
                 borderRadius: 6,
@@ -2077,8 +2099,11 @@ function SegmentedPicker(props: {
   );
 }
 
-function EmptyState(props: { isTrashEmpty: boolean; shortcutLabel: string }) {
-  const { isTrashEmpty, shortcutLabel } = props;
+function EmptyState(props: {
+  isTrashEmpty: boolean;
+  shortcutStatus: ShortcutStatusDto | null;
+}) {
+  const { isTrashEmpty, shortcutStatus } = props;
   const title = isTrashEmpty
     ? t("Trash is empty")
     : t("Ready for your first capture");
@@ -2088,6 +2113,7 @@ function EmptyState(props: { isTrashEmpty: boolean; shortcutLabel: string }) {
   const guidance = !isTrashEmpty
     ? t("Choose Screenshot or Record, then select the region you need.")
     : null;
+  const shortcutLabel = getAvailableShortcutLabel(shortcutStatus);
   const hint = !isTrashEmpty && shortcutLabel
     ? fmt("or press  %@", shortcutLabel)
     : null;

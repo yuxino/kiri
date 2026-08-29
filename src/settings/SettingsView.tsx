@@ -10,6 +10,7 @@ import {
   type OcrProviderProfileDto,
   type OcrProviderSettingsDto,
   type SaveOcrProviderProfileRequest,
+  type ShortcutStatusDto,
 } from "../lib/ipc";
 import { OcrProfileDialog } from "./OcrProfileDialog";
 import { OcrSettingsSection } from "./OcrSettingsSection";
@@ -304,6 +305,8 @@ function GeneralSettingsSection() {
   const [libraryLoadError, setLibraryLoadError] = useState(false);
   const [libraryBusy, setLibraryBusy] = useState(false);
   const [libraryOperationError, setLibraryOperationError] = useState<string | null>(null);
+  const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatusDto | null>(null);
+  const [shortcutBusy, setShortcutBusy] = useState(false);
   const libraryStatusGeneration = useRef(0);
 
   const loadLibraryStatus = useCallback(async (clearOperationErrorOnSuccess = false) => {
@@ -322,6 +325,7 @@ function GeneralSettingsSection() {
 
   useEffect(() => {
     void loadLibraryStatus();
+    void api.getShortcutStatus().then(setShortcutStatus).catch(() => {});
     const subscription = onLibraryChanged(() => {
       void loadLibraryStatus();
     });
@@ -334,6 +338,18 @@ function GeneralSettingsSection() {
     setCurrentLanguage(next);
     setLanguage(next);
     void api.setLanguage(next).catch(() => {});
+  };
+
+  const retryShortcut = async () => {
+    if (shortcutBusy) return;
+    setShortcutBusy(true);
+    try {
+      setShortcutStatus(await api.retryShortcut());
+    } catch {
+      // Preserve the visible occupied state if the IPC layer itself fails.
+    } finally {
+      setShortcutBusy(false);
+    }
   };
 
   const runLibraryAction = async (
@@ -395,6 +411,29 @@ function GeneralSettingsSection() {
               {item === "en" ? "EN" : item === "zh-Hans" ? "中文" : "日本語"}
             </button>
           ))}
+        </div>
+      </div>
+      <div className="kiri-settings-card kiri-shortcut-row">
+        <div className="kiri-shortcut-copy">
+          <strong>{t("Capture Shortcut")}</strong>
+          <span>{shortcutStatus?.label ?? "—"}</span>
+        </div>
+        <div className="kiri-shortcut-actions">
+          {shortcutStatus && (
+            <span className="kiri-settings-badge" role="status" aria-live="polite">
+              {t(shortcutStatus.status === "enabled" ? "Enabled" : "In Use")}
+            </span>
+          )}
+          {shortcutStatus?.status === "occupied" && (
+            <button
+              type="button"
+              className="kiri-button kiri-button--secondary"
+              disabled={shortcutBusy}
+              onClick={() => void retryShortcut()}
+            >
+              {t("Retry")}
+            </button>
+          )}
         </div>
       </div>
       <div className="kiri-settings-card kiri-storage-row">

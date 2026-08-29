@@ -23,3 +23,14 @@ test("the interactive runtime cannot replace the desktop with a capture fixture"
 
   assert.deepEqual(offenders, []);
 });
+
+test("the click ripple stays passive so recording hotkeys keep focus", () => {
+  const commands = readFileSync(join(rustRoot, "commands.rs"), "utf8");
+  const rippleBuilder = commands.match(
+    /fn create_ripple_window\([\s\S]*?(?=\nstruct StartedRecorder)/,
+  )?.[0];
+
+  assert.ok(rippleBuilder, "create_ripple_window must remain present");
+  assert.match(rippleBuilder, /\.focused\(false\)/);
+  assert.match(rippleBuilder, /set_window_click_through\(app, "ripple"\)/);
+});

@@ -51,7 +51,9 @@ unrestricted filesystem path.
 ## Capture flow
 
 1. The native global shortcut asks Rust to start a capture session and records
-   the previously focused application.
+   the previously focused application. Registration needs no TCC permission;
+   a conflicting binding leaves Kiri running and is surfaced in Settings for
+   retry.
 2. macOS freezes the active display with ScreenCaptureKit. Windows uses the
    Windows Graphics Capture path exposed through `xcap`.
 3. Rust keeps one reference-counted allocation for the full frozen PNG and
@@ -76,6 +78,13 @@ Escape cancels the active session and releases its frozen image. There is no
 runtime synthetic-desktop or temporary-library mode in development or
 production; deterministic capture data belongs in unit tests or an isolated
 test harness.
+
+On macOS, transient capture, countdown, recording-control, ripple, and
+completion windows explicitly join other applications' full-screen Spaces.
+Display coordinates use the fixed Core Graphics main-display baseline rather
+than the current key window's screen. Windows retains the selected monitor's
+virtual-desktop origin so a secondary-display capture is not shown on the
+primary display.
 
 ## Screenshot editing flow
 

@@ -17,7 +17,7 @@ use windows_capture::settings::{
 use crate::core::geometry::Rect;
 use crate::record::{AudioChunkSender, AudioQueueSendError, AudioSampleFormat, AudioSpec};
 
-use super::{CaptureHealth, CapturedDisplay, PlatformRecorder};
+use super::{logical_monitor_frame, CaptureHealth, CapturedDisplay, PlatformRecorder};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -46,6 +46,8 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
 
     let image = monitor.capture_image()?;
     let scale = monitor.scale_factor().unwrap_or(1.0).max(1.0) as f64;
+    let monitor_x = monitor.x()?;
+    let monitor_y = monitor.y()?;
     let width = monitor.width()? as i64;
     let height = monitor.height()? as i64;
 
@@ -106,7 +108,13 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         png_data: png_bytes.into(),
         pixel_width: width,
         pixel_height: height,
-        screen_frame: Rect::new(0.0, 0.0, width as f64 / scale, height as f64 / scale),
+        screen_frame: logical_monitor_frame(
+            monitor_x,
+            monitor_y,
+            width as u32,
+            height as u32,
+            scale,
+        ),
         window_rects,
         display_id: monitor_index(monitor)?,
         backing_scale: scale,

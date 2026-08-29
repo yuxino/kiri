@@ -87,6 +87,21 @@ pub struct CapturedDisplay {
     pub backing_scale: f64,
 }
 
+/// Converts one Windows monitor's physical virtual-desktop bounds into the
+/// logical coordinates expected by Tauri's initial window position and size.
+/// Keeping the monitor origin is essential: otherwise a frozen secondary
+/// display is shown by an overlay created at the primary display's `(0, 0)`.
+#[cfg(any(windows, test))]
+fn logical_monitor_frame(x: i32, y: i32, width: u32, height: u32, scale: f64) -> Rect {
+    let scale = scale.max(1.0);
+    Rect::new(
+        f64::from(x) / scale,
+        f64::from(y) / scale,
+        f64::from(width) / scale,
+        f64::from(height) / scale,
+    )
+}
+
 /// Platform recording session (SCK stream on macOS, WGC + WASAPI on Windows).
 pub trait PlatformRecorder: Send {
     fn stop(&mut self) -> anyhow::Result<()>;
@@ -94,7 +109,7 @@ pub trait PlatformRecorder: Send {
 
 #[cfg(test)]
 mod tests {
-    use super::CaptureHealth;
+    use super::{logical_monitor_frame, CaptureHealth};
 
     #[test]
     fn native_capture_failure_survives_a_later_stop_request() {
@@ -113,5 +128,13 @@ mod tests {
         health.begin_expected_stop();
         assert!(!health.report_unexpected_stop("normal close callback".into()));
         assert!(health.unexpected_failure().is_none());
+    }
+
+    #[test]
+    fn windows_monitor_frame_keeps_secondary_display_origin() {
+        assert_eq!(
+            logical_monitor_frame(-2560, 360, 2560, 1440, 2.0),
+            crate::core::geometry::Rect::new(-1280.0, 180.0, 1280.0, 720.0)
+        );
     }
 }

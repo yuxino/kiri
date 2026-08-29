@@ -15,7 +15,7 @@ use objc2::runtime::{NSObjectProtocol, ProtocolObject};
 use objc2::{AnyThread, DefinedClass, MainThreadMarker};
 use objc2_app_kit::{NSBitmapImageRep, NSEvent, NSScreen};
 use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
-use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGImage};
+use objc2_core_graphics::{CGDirectDisplayID, CGDisplayBounds, CGImage, CGMainDisplayID};
 use objc2_core_media::{
     CMAudioFormatDescriptionGetStreamBasicDescription, CMBlockBuffer, CMFormatDescription,
     CMSampleBuffer, CMTime,
@@ -188,6 +188,15 @@ struct ActiveScreen {
     backing_scale: f64,
 }
 
+fn appkit_frame_to_tauri(frame: CGRect, main_display_height: f64) -> Rect {
+    Rect::new(
+        frame.origin.x,
+        main_display_height - (frame.origin.y + frame.size.height),
+        frame.size.width,
+        frame.size.height,
+    )
+}
+
 fn active_screen() -> Result<ActiveScreen> {
     let mtm = objc2::MainThreadMarker::new().unwrap();
     let mouse = NSEvent::mouseLocation();
@@ -217,20 +226,52 @@ fn active_screen() -> Result<ActiveScreen> {
         .ok_or_else(|| anyhow!("display unavailable"))?;
     let backing_scale = screen.backingScaleFactor().max(1.0);
 
-    let main_height = NSScreen::mainScreen(mtm)
-        .map(|s| s.frame().origin.y + s.frame().size.height)
-        .unwrap_or(0.0);
-    let top_left = Rect::new(
-        frame.origin.x,
-        main_height - (frame.origin.y + frame.size.height),
-        frame.size.width,
-        frame.size.height,
-    );
+    // `NSScreen.mainScreen` follows the key window and can therefore switch
+    // to a fullscreen app's secondary display. Tauri/tao uses the fixed Core
+    // Graphics main display as its top-left coordinate baseline, so mirror
+    // that stable basis here to keep overlays on vertically arranged screens.
+    let main_bounds = CGDisplayBounds(CGMainDisplayID());
+    let main_height = main_bounds.origin.y + main_bounds.size.height;
+    let top_left = appkit_frame_to_tauri(frame, main_height);
     Ok(ActiveScreen {
         frame: top_left,
         display_id,
         backing_scale,
     })
+}
+
+#[cfg(test)]
+mod active_screen_tests {
+    use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+
+    use super::appkit_frame_to_tauri;
+
+    fn frame(x: f64, y: f64, width: f64, height: f64) -> CGRect {
+        CGRect {
+            origin: CGPoint { x, y },
+            size: CGSize { width, height },
+        }
+    }
+
+    #[test]
+    fn converts_primary_appkit_frame_to_tauri_top_left_coordinates() {
+        assert_eq!(
+            appkit_frame_to_tauri(frame(0.0, 0.0, 1440.0, 900.0), 900.0),
+            crate::core::geometry::Rect::new(0.0, 0.0, 1440.0, 900.0)
+        );
+    }
+
+    #[test]
+    fn converts_displays_above_and_below_the_primary() {
+        assert_eq!(
+            appkit_frame_to_tauri(frame(120.0, 900.0, 1920.0, 1080.0), 900.0),
+            crate::core::geometry::Rect::new(120.0, -1080.0, 1920.0, 1080.0)
+        );
+        assert_eq!(
+            appkit_frame_to_tauri(frame(-1920.0, -1080.0, 1920.0, 1080.0), 900.0),
+            crate::core::geometry::Rect::new(-1920.0, 900.0, 1920.0, 1080.0)
+        );
+    }
 }
 
 fn shareable_content(_main_thread: MainThreadMarker) -> Result<Retained<SCShareableContent>> {
