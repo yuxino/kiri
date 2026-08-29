@@ -37,7 +37,7 @@
 最新ビルドは [GitHub Releases](https://github.com/yuxino/kiri/releases/latest) からダウンロードできます。
 
 - **macOS 14 以降**: Apple Silicon と Intel の両方に対応する単一の Universal `.dmg` をダウンロードします。開いたら `Kiri.app` を「アプリケーション」へドラッグします。キャプチャには「画面とシステム音声の録画」が必要で、「入力監視」はクリック表示を使う場合のみ必要です。マイク録音には macOS 15 以降と「マイク」権限が必要です。
-- **Windows**: 画面キャプチャに追加権限は不要で、マイクは Windows のプライバシー設定に従います。インストーラーは Authenticode 署名されておらず、Windows の実機検証も未完了です。
+- **Windows 11 (x64)**: `.exe` インストーラーを実行します。画面キャプチャに追加権限は不要で、マイクは Windows のプライバシー設定に従います。インストーラーは Authenticode 署名されておらず、Windows の実機検証も未完了です。
 
 v1.4.5 macOS 版は、プロジェクトが管理するローカルの自己署名 ID を使用しています。Developer ID 署名や Apple 公証ではないため、Gatekeeper が初回起動を止める場合があります。その場合は Control クリックから「開く」、または「プライバシーとセキュリティ」の「このまま開く」を使用してください。
 

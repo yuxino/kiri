@@ -29,7 +29,7 @@ Kiri 主要在 macOS 上开发和测试。Windows 尚未完成真机验收，安
 从 [GitHub Releases](https://github.com/yuxino/kiri/releases/latest) 下载最新版本。
 
 - **macOS 14+**：下载一个 Universal `.dmg`，同时支持 Apple 芯片和 Intel。打开后把 `Kiri.app` 拖入“应用程序”。截图与录屏需要“屏幕与系统音频录制”权限；点击高亮才需要“输入监控”。麦克风录制需要 macOS 15+，并只在启用时请求“麦克风”权限。
-- **Windows**：运行安装程序即可；屏幕捕获不需要额外系统授权，麦克风权限由 Windows 隐私设置控制。安装程序未经过 Authenticode 签名，SmartScreen 可能警告；Windows 也尚未完成真机测试。
+- **Windows 11（x64）**：运行 `.exe` 安装程序即可；屏幕捕获不需要额外系统授权，麦克风权限由 Windows 隐私设置控制。安装程序未经过 Authenticode 签名，SmartScreen 可能警告；Windows 也尚未完成真机测试。
 
 > v1.4.5 macOS 发布包使用项目维护的本地自签名身份，不是 ad-hoc、Developer ID 签名或 Apple 公证。首次启动可能需要按住 Control 点按 `Kiri.app` 并选择“打开”，或在“系统设置 → 隐私与安全性”中选择“仍要打开”；不需要关闭 Gatekeeper。
 >
