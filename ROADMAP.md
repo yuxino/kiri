@@ -17,7 +17,7 @@ history.
 - [x] Annotation canvas: pen, rectangle, line, arrow, text, mosaic
 - [x] Annotation history (undo/redo), inline text editing, live sizing
 - [x] Local library with search, favorites, and recoverable trash
-- [x] Click and rubber-band library selection with batch actions
+- [x] Direct-open library cards with rubber-band-only batch selection
 - [x] Clipboard-first screenshot completion with focus restoration
 - [x] Local OCR (macOS Vision, Windows.Media.Ocr)
 - [x] Region recording (SCK / WGC) with ffmpeg H.264 + AAC pipeline

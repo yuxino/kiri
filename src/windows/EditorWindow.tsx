@@ -404,7 +404,7 @@ export function EditorWindow(props: { id: string }) {
           style={{ minHeight: 32, borderRadius: 10 }}
           onClick={() => void complete(true)}
         >
-          {t("Copy")}
+          {t("Save & Copy")}
         </button>
       </div>
 

@@ -48,6 +48,9 @@ application or a durable product decision.
 - [`adr/0018-managed-library-location-and-recovery.md`](adr/0018-managed-library-location-and-recovery.md)
   — one managed library, whole-library migration, offline handling, and media
   recovery.
+- [`adr/0019-direct-open-library-cards.md`](adr/0019-direct-open-library-cards.md)
+  — direct card opening, rubber-band-only batch selection, and explicit editor
+  completion wording.
 
 Completed implementation plans and the former Swift migration specifications
 are intentionally not kept in the working tree. Git history and release tags

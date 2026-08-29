@@ -19,6 +19,7 @@ import {
 import { t, fmt } from "../i18n";
 import brandIcon from "../../src-tauri/icons/128x128.png";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
+import { getLibraryCardInteraction } from "./library-card-interaction.js";
 
 const SettingsView = React.lazy(() =>
   import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })),
@@ -87,8 +88,8 @@ export function LibraryWindow() {
   const [kindFilter, setKindFilter] = useState<"all" | "image" | "video" | "gif">("all");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [tagFilter, setTagFilter] = useState<string | null>(null);
-  // Selection works like macOS Photos: click selects (single), ⌘-click
-  // adds/removes, ⌘A selects all, Esc clears. No separate "mode" toggle.
+  // Batch selection starts only from a rubber-band drag. Ordinary card clicks
+  // open the asset and never introduce selection chrome.
   const [selection, setSelection] = useState<Set<string>>(new Set());
   // Drag-to-select (rubber band): pointer origin + current corner in the
   // scroll container's coordinates; null when not band-selecting.
@@ -119,20 +120,7 @@ export function LibraryWindow() {
     [filteredAssets],
   );
 
-  // Select a single card (clears others) — the default click behavior.
-  const selectSingle = (id: string) => setSelection(new Set([id]));
-  // Toggle one card in/out — used for ⌘-click.
-  const toggleSelect = (id: string) => {
-    setSelection((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const clearSelection = () => setSelection(new Set());
-  const selectAll = () => setSelection(new Set(filteredAssets.map((asset) => asset.id)));
 
   // Only visible assets are actionable. A library refresh can remove a card
   // before React has committed the effect that prunes its stale selection.
@@ -344,7 +332,8 @@ export function LibraryWindow() {
     };
   }, [refresh]);
 
-  // ⌘/Ctrl+F focuses search; ⌘/Ctrl+A selects the visible filtered cards.
+  // ⌘/Ctrl+F focuses search. Batch selection is intentionally pointer-only
+  // so selection chrome appears only after a visible rubber-band gesture.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -357,17 +346,6 @@ export function LibraryWindow() {
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
-      } else if (
-        destination === "captures" &&
-        mod &&
-        !e.altKey &&
-        e.key.toLowerCase() === "a" &&
-        !(e.target instanceof HTMLInputElement) &&
-        !(e.target instanceof HTMLTextAreaElement) &&
-        !(e.target instanceof HTMLSelectElement)
-      ) {
-        e.preventDefault();
-        selectAll();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -957,8 +935,7 @@ export function LibraryWindow() {
                     onMenu={(x, y) => openMenu(asset.id, x, y)}
                     menu={menuFor === asset.id ? itemMenu(asset) : null}
                     selected={selection.has(asset.id)}
-                    onSelect={() => selectSingle(asset.id)}
-                    onToggleSelect={() => toggleSelect(asset.id)}
+                    selectionActive={selectionIds.length > 0}
                     registerRef={(el) => {
                       if (el) cardElsRef.current.set(asset.id, el);
                       else cardElsRef.current.delete(asset.id);
@@ -973,7 +950,7 @@ export function LibraryWindow() {
                       }
                     }}
                     onRestoreMissing={() => restoreMissing(asset.id)}
-                    onDoubleClick={() =>
+                    onOpen={() =>
                       assetAvailability[asset.id] === undefined ||
                       assetAvailability[asset.id] === "ready"
                         ? void (asset.kind === "image"
@@ -1197,10 +1174,9 @@ function AssetCard(props: {
   menuOpen: boolean;
   onMenu(x: number, y: number): void;
   menu: React.ReactNode;
-  onDoubleClick(): void;
+  onOpen(): void;
   selected: boolean;
-  onSelect(): void;
-  onToggleSelect(): void;
+  selectionActive: boolean;
   registerRef(el: HTMLDivElement | null): void;
   onAvailability(availability: AssetAvailability): void;
   onRestoreMissing(): Promise<void>;
@@ -1212,10 +1188,9 @@ function AssetCard(props: {
     menuOpen,
     onMenu,
     menu,
-    onDoubleClick,
+    onOpen,
     selected,
-    onSelect,
-    onToggleSelect,
+    selectionActive,
     registerRef,
     onAvailability,
     onRestoreMissing,
@@ -1281,35 +1256,19 @@ function AssetCard(props: {
     observer.observe(preview);
     return () => observer.disconnect();
   }, []);
-  // Single-click toggles selection; a double-click opens instead. Delay the
-  // toggle ~220ms and cancel it when a second click arrives (dblclick).
-  const clickTimer = useRef<number | null>(null);
-  const handleClick = (e: React.MouseEvent) => {
-    if (e.defaultPrevented || editingTitle) return;
-    if (clickTimer.current) {
-      window.clearTimeout(clickTimer.current);
-      clickTimer.current = null;
-      return; // second click of a double — the open (dblclick) takes over
-    }
-    const additive = e.metaKey || e.ctrlKey;
-    clickTimer.current = window.setTimeout(() => {
-      clickTimer.current = null;
-      if (additive) {
-        onToggleSelect();
-      } else if (selected) {
-        // Clicking an already-selected card deselects it (single-select).
-        onToggleSelect();
-      } else {
-        onSelect();
-      }
-    }, 220);
-  };
-  const handleDoubleClick = () => {
-    if (clickTimer.current) {
-      window.clearTimeout(clickTimer.current);
-      clickTimer.current = null;
-    }
-    onDoubleClick();
+  const lastOpenAtRef = useRef(0);
+  const interaction = getLibraryCardInteraction({
+    selectionActive,
+    selected,
+    menuOpen,
+    editingTitle,
+  });
+  const handleClick = (event: React.MouseEvent) => {
+    if (event.defaultPrevented || !interaction.opensOnClick) return;
+    const now = Date.now();
+    if (now - lastOpenAtRef.current < 500) return;
+    lastOpenAtRef.current = now;
+    onOpen();
   };
   const [titleDraft, setTitleDraft] = useState(asset.title ?? "");
   const [addingTag, setAddingTag] = useState(false);
@@ -1345,7 +1304,6 @@ function AssetCard(props: {
       ref={registerRef}
       data-card={asset.id}
       onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
       onContextMenu={(e) => {
         // Right-click shows the localized action menu at the cursor
         // (same as ⋯), never the webview's system context menu.
@@ -1550,16 +1508,12 @@ function AssetCard(props: {
           <div
             title={asset.filename}
             onClick={(e) => {
-              // Title double-click is rename; single click on it should not
-              // toggle card selection.
+              // Keep title gestures separate from opening the asset because
+              // double-click edits the title inline.
               e.stopPropagation();
             }}
             onDoubleClick={(e) => {
               e.stopPropagation();
-              if (clickTimer.current) {
-                window.clearTimeout(clickTimer.current);
-                clickTimer.current = null;
-              }
               setTitleDraft(asset.title ?? "");
               setEditingTitle(true);
             }}
@@ -1603,16 +1557,14 @@ function AssetCard(props: {
             </span>
           </div>
         )}
-        <div
+        {interaction.showsActions && <div
           style={{
             display: "flex",
             alignItems: "center",
             gap: 1,
             padding: 2,
             borderRadius: 9,
-            background: hovered || menuOpen ? "var(--kiri-group-fill)" : "transparent",
-            opacity: hovered || menuOpen || selected ? 1 : 0.72,
-            transition: "background 0.16s ease-out, opacity 0.16s ease-out",
+            background: "var(--kiri-group-fill)",
           }}
         >
           <button
@@ -1717,7 +1669,7 @@ function AssetCard(props: {
           >
             <KiriIcon name="ellipsis.circle" size={14} />
           </button>
-        </div>
+        </div>}
         {menuOpen &&
           createPortal(
             // Render the context menu outside the card subtree: the card's
