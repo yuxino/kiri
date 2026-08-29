@@ -100,6 +100,12 @@ pnpm build
 git diff --check
 ```
 
+`src-tauri/target` is disposable Cargo build cache, not application or user
+data. Keep it after builds by default so later verification does not require a
+full multi-gigabyte rebuild. Remove it only when the user explicitly requests
+cleanup or disk pressure makes cleanup necessary. Never remove the shared
+Cargo registry as part of repository cleanup.
+
 Do not add a runtime synthetic-capture mode to the user-facing application.
 Capture QA must use unit-level injected data or an isolated test harness, never
 replace the visible desktop with a mock screen inside normal dev or prod Kiri.

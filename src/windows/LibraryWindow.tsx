@@ -19,7 +19,10 @@ import {
 import { t, fmt } from "../i18n";
 import brandIcon from "../../src-tauri/icons/128x128.png";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
-import { getLibraryCardInteraction } from "./library-card-interaction.js";
+import {
+  getLibraryCardInteraction,
+  getLibraryCardPrimaryAction,
+} from "./library-card-interaction.js";
 
 const SettingsView = React.lazy(() =>
   import("../settings/SettingsView").then((module) => ({ default: module.SettingsView })),
@@ -1262,7 +1265,9 @@ function AssetCard(props: {
     selected,
     menuOpen,
     editingTitle,
+    hovered,
   });
+  const primaryAction = getLibraryCardPrimaryAction(asset.kind);
   const handleClick = (event: React.MouseEvent) => {
     if (event.defaultPrevented || !interaction.opensOnClick) return;
     const now = Date.now();
@@ -1569,16 +1574,26 @@ function AssetCard(props: {
         >
           <button
             className="kiri-icon-button"
-            title={t("View")}
+            title={t(primaryAction.title)}
             disabled={!contentAvailable}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
-              if (contentAvailable) void api.openAsset(asset.id).catch(() => {});
+              if (contentAvailable) {
+                void (primaryAction.opensEditor
+                  ? api.openEditor(asset.id)
+                  : api.openAsset(asset.id)
+                ).catch(() => {});
+              }
             }}
             onDoubleClick={(e) => {
               e.stopPropagation();
-              if (contentAvailable) void api.openAsset(asset.id).catch(() => {});
+              if (contentAvailable) {
+                void (primaryAction.opensEditor
+                  ? api.openEditor(asset.id)
+                  : api.openAsset(asset.id)
+                ).catch(() => {});
+              }
             }}
             style={{
               width: 26,
@@ -1588,7 +1603,7 @@ function AssetCard(props: {
               cursor: contentAvailable ? "pointer" : "default",
             }}
           >
-            <KiriIcon name="eye" size={14} />
+            <KiriIcon name={primaryAction.icon} size={14} />
           </button>
           <button
             className="kiri-icon-button"

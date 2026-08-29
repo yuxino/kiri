@@ -53,6 +53,8 @@ application or a durable product decision.
   completion wording.
 - [`adr/0020-destructive-editor-cropping.md`](adr/0020-destructive-editor-cropping.md)
   — pending crop geometry, destructive library saves, and export-only Save As.
+- [`adr/0021-hover-card-quick-actions.md`](adr/0021-hover-card-quick-actions.md)
+  — hover-revealed card actions with Edit for images and View for media.
 
 Completed implementation plans and the former Swift migration specifications
 are intentionally not kept in the working tree. Git history and release tags
