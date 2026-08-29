@@ -58,7 +58,7 @@ export type IconName =
   | "trash.slash" // notice: trash emptied
   | "pause.circle.fill" // notice: recording paused
   | "play.circle.fill" // notice: recording resumed
-  | "ellipsis.circle" // More / close editor
+  | "ellipsis.circle" // More
   | "xmark" // Cancel
   | "camera.viewfinder" // Screenshot mode
   | "record.circle" // Record mode

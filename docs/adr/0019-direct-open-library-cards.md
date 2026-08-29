@@ -24,6 +24,8 @@ to the managed library asset. That label hid the normal edit-save workflow.
 - Context-click remains available without entering batch selection.
 - The editor's primary action saves the current library asset and is labelled
   Save in every language. Save As remains a separate export action.
+- Closing without saving is labelled Cancel. It is not hidden behind an
+  overflow icon because no editor overflow menu exists.
 
 ## Consequences
 
