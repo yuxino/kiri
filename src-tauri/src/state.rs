@@ -99,6 +99,9 @@ pub struct StagedCaptureAnnotation {
 pub struct StagedEditorAnnotation {
     pub token: uuid::Uuid,
     pub document: AnnotationDocument,
+    /// Backend-derived crop of the exact content-addressed clean source.
+    pub replacement_source_png: Option<Vec<u8>>,
+    pub output_size: (i64, i64),
     /// Content-addressed baseline returned when the editor loaded its source.
     pub revision_sha256: String,
 }

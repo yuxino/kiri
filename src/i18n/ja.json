@@ -91,6 +91,8 @@
   "Cancel (Esc)": "キャンセル (Esc)",
   "Cancel capture · Esc": "キャプチャをキャンセル · Esc",
   "Select (V)": "選択 (V)",
+  "Crop (C)": "トリミング (C)",
+  "Crop area": "トリミング範囲",
   "Pen (P)": "ペン (P)",
   "Rectangle (R)": "矩形 (R)",
   "Line (L)": "線 (L)",

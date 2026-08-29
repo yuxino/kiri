@@ -15,12 +15,12 @@ Kiri is primarily developed and tested on macOS. Windows has not completed real-
 
 ## Features
 
-- **Screenshots and re-editable annotation**: click a window or drag a region, then use pen, shapes, arrows, text, mosaic, undo, and redo. Annotations created by current `main` can be reopened from the completion card or library; marks flattened into older screenshots cannot be reconstructed.
+- **Screenshots, crop, and re-editable annotation**: click a window or drag a region, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Annotations created by current `main` can be reopened from the completion card or library, while marks flattened into older screenshots cannot be reconstructed.
 - **OCR**: recognize text locally with macOS Vision or Windows.Media.Ocr by default; optional remote OCR asks before every upload.
 - **Recording and GIF**: record a region with optional system audio, microphone, pointer, and click highlights; save as MP4 or GIF.
 - **Local library**: search, favorite, tag, rename, and move captures to recoverable Trash. Settings can use another local directory or external disk for the library.
 
-> Editable screenshot projects and library location/recovery are now on `main`; the current v1.4.4 download does not include these features yet.
+> Editable screenshot projects, crop, and library location/recovery are now on `main`; the current v1.4.4 download does not include these features yet.
 
 If the library is offline, retry or locate it again. Choose a file to replace a missing asset. Recordings that could not be imported are kept for retry.
 
@@ -37,7 +37,7 @@ Download the latest version from [GitHub Releases](https://github.com/yuxino/kir
 
 Remote OCR is optional. API keys stay in macOS Keychain or Windows Credential Manager; creating or selecting a profile sends nothing, and every request requires an explicit **Send** or **Retry** action.
 
-Current `main` stores the flattened screenshot, clean source, and annotation document locally. The source may still contain pixels hidden by mosaic or shapes; editing never uploads it, Trash keeps it recoverable, and permanent deletion removes it with the screenshot.
+Current `main` stores the flattened screenshot, clean source, and annotation document locally. The source may still contain pixels hidden by mosaic or shapes; saving a crop also removes out-of-frame pixels from that source. Editing never uploads this content.
 
 Recording and GIF conversion use FFmpeg. If no usable copy is available, Kiri downloads and caches it when you first record or manually convert a GIF; browsing the library never triggers this download, and encoding stays local.
 
@@ -60,6 +60,7 @@ macOS development builds require a stable signing identity, and `pnpm tauri dev`
 - **⇧⌘A** (macOS) / **Shift+Ctrl+A** (Windows): open Kiri
 - **Esc**: cancel capture; stop while recording
 - **Return**: confirm a screenshot
+- **C**: crop in the screenshot editor
 - **⌘F** (macOS) / **Ctrl+F** (Windows): search the library
 - **⌘Z / ⇧⌘Z** (macOS) / **Ctrl+Z / Shift+Ctrl+Z** (Windows): undo / redo
 

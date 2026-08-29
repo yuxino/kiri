@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AnnotationDocumentV1 } from "../annotation/model";
+import type { CropPixels } from "../annotation/crop.js";
 
 // ---------------------------------------------------------------------------
 // Shared DTO types (mirror src-tauri/src/commands.rs)
@@ -311,6 +312,7 @@ export const api = {
     document: AnnotationDocumentV1,
     options: {
       action: "save" | "saveAs";
+      cropPixels: CropPixels | null;
       saveToken: string | null;
       revisionSha256: string;
     },
@@ -318,6 +320,7 @@ export const api = {
     return invoke<string>("prepare_asset_annotation", {
       id,
       documentJson: JSON.stringify(document),
+      cropPixels: options.cropPixels,
       revisionSha256: options.revisionSha256,
     }).then((annotationToken) => invoke<EditorUpdateDto>("update_asset", png, {
       headers: {

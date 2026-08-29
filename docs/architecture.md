@@ -94,11 +94,18 @@ current flat image; invalid data produces a visible warning and is never
 applied.
 
 Save stages a bounded document with a one-time token tied to the matching
-`editor-<uuid>` window. The library compare-and-swaps against the revision that
-was opened, then updates the flat image and project together with best-effort
-rollback for ordinary write failures. Any intervening flat, document, or source
-change rejects the stale save. Native Save As destinations are likewise
-represented in the WebView by a single-use token rather than a filesystem path.
+`editor-<uuid>` window. A pending crop is pixel-aligned in the WebView, while
+Rust derives the replacement clean source from the exact opened revision. The
+WebView translates intersecting marks into the new canvas and removes marks
+fully outside it; Rust validates the resulting document. The library then
+compare-and-swaps against the opened revision and updates the flat image,
+project, and indexed dimensions together with best-effort rollback for ordinary
+write failures. Any intervening flat, document, source, or dimension change
+rejects the stale save.
+
+Native Save As destinations are represented in the WebView by a single-use
+token rather than a filesystem path. Save As writes the prepared output only;
+it never mutates the library asset or editable project.
 
 ## Managed library flow
 
@@ -252,7 +259,8 @@ display without taking focus and is protected/excluded from subsequent captures.
 - Editable screenshot state is stored only in `Annotations/`. Moving to Trash
   retains it; permanent deletion removes the sidecar and clean source together
   with the flat asset. A clean source can contain pixels covered by annotations
-  in the flattened image.
+  in the flattened image. Saving a crop removes out-of-frame pixels from both
+  the flat asset and clean source.
 - Editor sources and saves are content-addressed. Hash or revision mismatch
   fails closed instead of pairing marks with changed image bytes.
 - Batch asset mutations validate every identifier, publish `library.json` once,

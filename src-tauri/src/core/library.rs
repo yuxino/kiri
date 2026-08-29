@@ -29,6 +29,8 @@ pub enum AssetLibraryError {
     AssetFileStillPresent,
     #[error("the selected replacement does not match the asset type")]
     InvalidReplacementFile,
+    #[error("image dimensions must be positive")]
+    InvalidImageDimensions,
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("library index is corrupted: {0}")]
@@ -119,6 +121,8 @@ pub struct AssetLibrary {
     #[cfg(test)]
     persist_count: Cell<usize>,
     #[cfg(test)]
+    persist_fail: Cell<bool>,
+    #[cfg(test)]
     annotation_replace_fail_at_write: Cell<Option<usize>>,
 }
 
@@ -173,6 +177,8 @@ impl AssetLibrary {
             index,
             #[cfg(test)]
             persist_count: Cell::new(0),
+            #[cfg(test)]
+            persist_fail: Cell::new(false),
             #[cfg(test)]
             annotation_replace_fail_at_write: Cell::new(None),
         })
@@ -637,11 +643,51 @@ impl AssetLibrary {
     /// editable project; `None` updates the flattened image and removes project
     /// files. The expected revision must be the one returned at editor open.
     pub fn save_editor_snapshot(
-        &self,
+        &mut self,
         id: &uuid::Uuid,
         expected_revision_sha256: &str,
         rendered: &[u8],
         document: Option<&serde_json::Value>,
+    ) -> Result<CaptureAsset> {
+        self.save_editor_snapshot_inner(
+            id,
+            expected_revision_sha256,
+            rendered,
+            document,
+            None,
+            None,
+        )
+    }
+
+    /// Replaces the editor's clean source and rendered image after a crop,
+    /// then commits the new pixel dimensions to the library index.
+    pub fn save_editor_cropped_snapshot(
+        &mut self,
+        id: &uuid::Uuid,
+        expected_revision_sha256: &str,
+        rendered: &[u8],
+        replacement_source: &[u8],
+        output_size: (i64, i64),
+        document: Option<&serde_json::Value>,
+    ) -> Result<CaptureAsset> {
+        self.save_editor_snapshot_inner(
+            id,
+            expected_revision_sha256,
+            rendered,
+            document,
+            Some(replacement_source),
+            Some(output_size),
+        )
+    }
+
+    fn save_editor_snapshot_inner(
+        &mut self,
+        id: &uuid::Uuid,
+        expected_revision_sha256: &str,
+        rendered: &[u8],
+        document: Option<&serde_json::Value>,
+        replacement_source: Option<&[u8]>,
+        output_size: Option<(i64, i64)>,
     ) -> Result<CaptureAsset> {
         let snapshot = self.read_editor_snapshot_files(id)?;
         if !is_sha256_hex(expected_revision_sha256)
@@ -649,11 +695,37 @@ impl AssetLibrary {
         {
             return Err(AssetLibraryError::AnnotationRevisionMismatch);
         }
+        if output_size.is_some_and(|(width, height)| width <= 0 || height <= 0) {
+            return Err(AssetLibraryError::InvalidImageDimensions);
+        }
         match document {
-            Some(document) => self.write_editor_project_snapshot(&snapshot, rendered, document)?,
+            Some(document) => self.write_editor_project_snapshot(
+                &snapshot,
+                rendered,
+                document,
+                replacement_source,
+            )?,
             None => self.write_editor_flat_snapshot(&snapshot, rendered)?,
         }
-        Ok(snapshot.asset)
+
+        let Some((pixel_width, pixel_height)) = output_size else {
+            return Ok(snapshot.asset);
+        };
+        let position = self
+            .index
+            .iter()
+            .position(|asset| &asset.id == id)
+            .ok_or(AssetLibraryError::AssetNotFound)?;
+        let mut next_index = self.index.clone();
+        next_index[position].pixel_width = pixel_width;
+        next_index[position].pixel_height = pixel_height;
+        if let Err(error) = self.persist_index(&next_index) {
+            restore_editor_snapshot(&snapshot, &self.asset_url(&snapshot.asset));
+            return Err(error);
+        }
+        let updated = next_index[position].clone();
+        self.index = next_index;
+        Ok(updated)
     }
 
     #[cfg(test)]
@@ -881,8 +953,13 @@ impl AssetLibrary {
             ) => (EditorAnnotationState::Invalid, None),
             Err(error) => return Err(error),
         };
-        let revision_sha256 =
-            editor_revision_sha256(state, &rendered, encoded.as_deref(), source.as_deref());
+        let revision_sha256 = editor_revision_sha256(
+            state,
+            (asset.pixel_width, asset.pixel_height),
+            &rendered,
+            encoded.as_deref(),
+            source.as_deref(),
+        );
         Ok(EditorSnapshotFiles {
             asset,
             rendered,
@@ -901,13 +978,17 @@ impl AssetLibrary {
         snapshot: &EditorSnapshotFiles,
         rendered: &[u8],
         document: &serde_json::Value,
+        replacement_source: Option<&[u8]>,
     ) -> Result<()> {
-        let clean_source = match snapshot.state {
-            EditorAnnotationState::Valid => snapshot
-                .source
-                .as_deref()
-                .ok_or(AssetLibraryError::IncompleteAnnotationProject)?,
-            EditorAnnotationState::None | EditorAnnotationState::Invalid => &snapshot.rendered,
+        let clean_source = match replacement_source {
+            Some(source) => source,
+            None => match snapshot.state {
+                EditorAnnotationState::Valid => snapshot
+                    .source
+                    .as_deref()
+                    .ok_or(AssetLibraryError::IncompleteAnnotationProject)?,
+                EditorAnnotationState::None | EditorAnnotationState::Invalid => &snapshot.rendered,
+            },
         };
         let stored = StoredAnnotationProject {
             project_version: ANNOTATION_PROJECT_VERSION,
@@ -917,12 +998,17 @@ impl AssetLibrary {
         };
         let encoded = encode_annotation_project(&stored)?;
         let asset_url = self.asset_url(&snapshot.asset);
-        let writes = match snapshot.state {
-            EditorAnnotationState::Valid => vec![
+        let writes = match (replacement_source.is_some(), snapshot.state) {
+            (true, _) => vec![
+                (snapshot.source_url.as_path(), clean_source),
                 (snapshot.document_url.as_path(), encoded.as_slice()),
                 (asset_url.as_path(), rendered),
             ],
-            EditorAnnotationState::None | EditorAnnotationState::Invalid => vec![
+            (false, EditorAnnotationState::Valid) => vec![
+                (snapshot.document_url.as_path(), encoded.as_slice()),
+                (asset_url.as_path(), rendered),
+            ],
+            (false, EditorAnnotationState::None | EditorAnnotationState::Invalid) => vec![
                 (snapshot.source_url.as_path(), clean_source),
                 (snapshot.document_url.as_path(), encoded.as_slice()),
                 (asset_url.as_path(), rendered),
@@ -1034,6 +1120,12 @@ impl AssetLibrary {
     fn persist_index(&self, index: &[CaptureAsset]) -> Result<()> {
         #[cfg(test)]
         self.persist_count.set(self.persist_count.get() + 1);
+        #[cfg(test)]
+        if self.persist_fail.get() {
+            return Err(AssetLibraryError::Io(std::io::Error::other(
+                "injected index persistence failure",
+            )));
+        }
         self.validate_storage_layout()?;
         let data = serde_json::to_vec_pretty(index).map_err(AssetLibraryError::CorruptIndex)?;
         atomic_write(&self.index_url, &data)
@@ -1378,12 +1470,13 @@ fn encode_annotation_project(project: &StoredAnnotationProject) -> Result<Vec<u8
 
 fn editor_revision_sha256(
     state: EditorAnnotationState,
+    dimensions: (i64, i64),
     rendered: &[u8],
     encoded: Option<&[u8]>,
     source: Option<&[u8]>,
 ) -> String {
     let mut digest = Sha256::new();
-    digest.update(b"kiri-editor-snapshot-v1\0");
+    digest.update(b"kiri-editor-snapshot-v2\0");
     digest.update([match state {
         EditorAnnotationState::None => 0,
         EditorAnnotationState::Valid => 1,
@@ -1392,6 +1485,9 @@ fn editor_revision_sha256(
     update_revision_part(&mut digest, b"rendered", Some(rendered));
     update_revision_part(&mut digest, b"document", encoded);
     update_revision_part(&mut digest, b"source", source);
+    digest.update(b"dimensions");
+    digest.update(dimensions.0.to_be_bytes());
+    digest.update(dimensions.1.to_be_bytes());
     format!("{:x}", digest.finalize())
 }
 
@@ -1584,7 +1680,7 @@ mod tests {
     #[test]
     fn imports_and_lists_assets() {
         let (_dir, root) = temp_root();
-        let mut library = AssetLibrary::open(root).unwrap();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
         let asset = library
             .import_data(
                 b"png-bytes",
@@ -2240,7 +2336,7 @@ mod tests {
         let original_document = std::fs::read(&project.document_url).unwrap();
         let original_source = std::fs::read(&project.source_url).unwrap();
 
-        let assert_rejected = |library: &AssetLibrary| {
+        let assert_rejected = |library: &mut AssetLibrary| {
             let changed = library.load_editor_snapshot(&asset.id).unwrap();
             assert_ne!(changed.revision_sha256, baseline.revision_sha256);
             assert!(matches!(
@@ -2255,17 +2351,17 @@ mod tests {
         };
 
         std::fs::write(&asset_url, b"changed-flat").unwrap();
-        assert_rejected(&library);
+        assert_rejected(&mut library);
         std::fs::write(&asset_url, &original_flat).unwrap();
 
         let mut reformatted_document = original_document.clone();
         reformatted_document.push(b'\n');
         std::fs::write(&project.document_url, reformatted_document).unwrap();
-        assert_rejected(&library);
+        assert_rejected(&mut library);
         std::fs::write(&project.document_url, &original_document).unwrap();
 
         std::fs::write(&project.source_url, b"changed-source").unwrap();
-        assert_rejected(&library);
+        assert_rejected(&mut library);
         std::fs::write(&project.source_url, &original_source).unwrap();
 
         let restored = library.load_editor_snapshot(&asset.id).unwrap();
@@ -2341,6 +2437,135 @@ mod tests {
             std::fs::read(library.asset_url(&asset)).unwrap(),
             b"repaired-rendered"
         );
+    }
+
+    #[test]
+    fn editor_crop_replaces_clean_source_rendered_image_and_index_dimensions() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let asset = library
+            .import_data_with_annotation_project(
+                b"original-rendered",
+                CaptureKind::Image,
+                "png",
+                100,
+                80,
+                None,
+                None,
+                None,
+                b"original-source",
+                &annotation_document("before crop"),
+            )
+            .unwrap();
+        let baseline = library.load_editor_snapshot(&asset.id).unwrap();
+        let cropped_document = serde_json::json!({
+            "schemaVersion": 1,
+            "canvas": { "width": 40, "height": 30 },
+            "sourcePixels": { "width": 40, "height": 30 },
+            "marks": [{
+                "kind": "text",
+                "id": 1,
+                "text": "after crop",
+                "rect": { "x": 1, "y": 1, "width": 20, "height": 10 },
+                "color": "white",
+                "background": "transparent",
+                "fontSize": 14
+            }]
+        });
+
+        let updated = library
+            .save_editor_cropped_snapshot(
+                &asset.id,
+                &baseline.revision_sha256,
+                b"cropped-rendered",
+                b"cropped-source",
+                (40, 30),
+                Some(&cropped_document),
+            )
+            .unwrap();
+
+        assert_eq!((updated.pixel_width, updated.pixel_height), (40, 30));
+        let snapshot = library.load_editor_snapshot(&asset.id).unwrap();
+        assert_eq!(snapshot.source, b"cropped-source");
+        assert_eq!(snapshot.document, Some(cropped_document));
+        assert_ne!(snapshot.revision_sha256, baseline.revision_sha256);
+        assert_eq!(
+            std::fs::read(library.asset_url(&updated)).unwrap(),
+            b"cropped-rendered"
+        );
+        let reopened = AssetLibrary::open(root).unwrap();
+        let reopened_asset = reopened.asset_by_id(&asset.id).unwrap();
+        assert_eq!(
+            (reopened_asset.pixel_width, reopened_asset.pixel_height),
+            (40, 30)
+        );
+    }
+
+    #[test]
+    fn editor_crop_rolls_back_files_and_dimensions_after_each_write_failure() {
+        for failed_write in [Some(1), Some(2), Some(3), None] {
+            let (_dir, root) = temp_root();
+            let mut library = AssetLibrary::open(root.clone()).unwrap();
+            let asset = library
+                .import_data_with_annotation_project(
+                    b"original-rendered",
+                    CaptureKind::Image,
+                    "png",
+                    100,
+                    80,
+                    None,
+                    None,
+                    None,
+                    b"original-source",
+                    &annotation_document("original"),
+                )
+                .unwrap();
+            let baseline = library.load_editor_snapshot(&asset.id).unwrap();
+            let (document_url, source_url) = library.annotation_project_urls(&asset);
+            let asset_url = library.asset_url(&asset);
+            let original_document = std::fs::read(&document_url).unwrap();
+            let original_source = std::fs::read(&source_url).unwrap();
+            let original_rendered = std::fs::read(&asset_url).unwrap();
+            let cropped_document = serde_json::json!({
+                "schemaVersion": 1,
+                "canvas": { "width": 40, "height": 30 },
+                "sourcePixels": { "width": 40, "height": 30 },
+                "marks": []
+            });
+            library.annotation_replace_fail_at_write.set(failed_write);
+            library.persist_fail.set(failed_write.is_none());
+
+            assert!(matches!(
+                library.save_editor_cropped_snapshot(
+                    &asset.id,
+                    &baseline.revision_sha256,
+                    b"cropped-rendered",
+                    b"cropped-source",
+                    (40, 30),
+                    Some(&cropped_document),
+                ),
+                Err(AssetLibraryError::Io(_))
+            ));
+
+            library.annotation_replace_fail_at_write.set(None);
+            library.persist_fail.set(false);
+            assert_eq!(std::fs::read(document_url).unwrap(), original_document);
+            assert_eq!(std::fs::read(source_url).unwrap(), original_source);
+            assert_eq!(std::fs::read(asset_url).unwrap(), original_rendered);
+            assert_eq!(
+                library
+                    .load_editor_snapshot(&asset.id)
+                    .unwrap()
+                    .revision_sha256,
+                baseline.revision_sha256
+            );
+            let reopened = AssetLibrary::open(root).unwrap();
+            let reopened_asset = reopened.asset_by_id(&asset.id).unwrap();
+            assert_eq!(
+                (reopened_asset.pixel_width, reopened_asset.pixel_height),
+                (100, 80)
+            );
+        }
     }
 
     #[test]

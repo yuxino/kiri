@@ -12,6 +12,7 @@ import {
   CircleDot,
   CirclePause,
   CirclePlay,
+  Crop,
   Copy,
   Film,
   Folder,
@@ -43,6 +44,7 @@ import {
 
 export type IconName =
   | "cursorarrow" // Select (V)
+  | "crop" // Crop (C)
   | "pencil.tip" // Pen (P)
   | "rectangle.dashed" // Rectangle (R)
   | "line.diagonal" // Line (L)
@@ -85,6 +87,7 @@ export type IconName =
 
 const ICONS: Record<IconName, React.ComponentType<Record<string, unknown>>> = {
   cursorarrow: MousePointer2,
+  crop: Crop,
   "pencil.tip": Pen,
   "rectangle.dashed": SquareDashed,
   "line.diagonal": Slash,

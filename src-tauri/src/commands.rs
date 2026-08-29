@@ -2018,7 +2018,20 @@ fn parse_editor_save_action(
 }
 
 fn write_editor_save(path: &Path, png: &[u8]) -> Result<(), String> {
-    std::fs::write(path, png).map_err(|_| EDITOR_SAVE_ERROR.to_string())
+    let parent = path.parent().ok_or_else(|| EDITOR_SAVE_ERROR.to_string())?;
+    let mut temporary = tempfile::Builder::new()
+        .prefix(".kiri-export-")
+        .suffix(".tmp")
+        .tempfile_in(parent)
+        .map_err(|_| EDITOR_SAVE_ERROR.to_string())?;
+    std::io::Write::write_all(temporary.as_file_mut(), png)
+        .and_then(|_| std::io::Write::flush(temporary.as_file_mut()))
+        .and_then(|_| temporary.as_file().sync_all())
+        .map_err(|_| EDITOR_SAVE_ERROR.to_string())?;
+    temporary
+        .persist(path)
+        .map_err(|_| EDITOR_SAVE_ERROR.to_string())?;
+    Ok(())
 }
 
 #[derive(Debug, Serialize)]
@@ -2034,6 +2047,15 @@ pub struct AnnotationProjectDto {
 pub struct EditorUpdateDto {
     revision_sha256: String,
     action_succeeded: bool,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditorCropPixels {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
 }
 
 fn require_editor_window(window: &WebviewWindow, id: &uuid::Uuid) -> Result<(), String> {
@@ -2091,6 +2113,31 @@ fn validate_editor_annotation_document(
     document.validate_for_image_pixels(expected_size.0, expected_size.1)
 }
 
+fn crop_editor_source(
+    source_png: &[u8],
+    expected_size: (i64, i64),
+    crop: EditorCropPixels,
+) -> Result<Vec<u8>, String> {
+    if validate_capture_png(source_png, expected_size.0, expected_size.1)? != expected_size {
+        return Err("The editable screenshot source dimensions changed unexpectedly.".into());
+    }
+    if crop.width == 0
+        || crop.height == 0
+        || u64::from(crop.x) + u64::from(crop.width) > expected_size.0 as u64
+        || u64::from(crop.y) + u64::from(crop.height) > expected_size.1 as u64
+    {
+        return Err("The crop area is invalid.".into());
+    }
+    let image = image::load_from_memory_with_format(source_png, image::ImageFormat::Png)
+        .map_err(|_| "The editable screenshot source is invalid.".to_string())?;
+    let cropped = image.crop_imm(crop.x, crop.y, crop.width, crop.height);
+    let mut output = std::io::Cursor::new(Vec::new());
+    cropped
+        .write_to(&mut output, image::ImageFormat::Png)
+        .map_err(|_| "The cropped screenshot source could not be prepared.".to_string())?;
+    Ok(output.into_inner())
+}
+
 #[tauri::command]
 pub fn get_asset_annotation_project(
     window: WebviewWindow,
@@ -2135,12 +2182,13 @@ pub fn get_asset_annotation_project(
 }
 
 #[tauri::command]
-pub fn prepare_asset_annotation(
+pub async fn prepare_asset_annotation(
     window: WebviewWindow,
     app: AppHandle,
     id: String,
     document_json: String,
     revision_sha256: String,
+    crop_pixels: Option<EditorCropPixels>,
 ) -> Result<String, String> {
     let parsed =
         uuid::Uuid::parse_str(&id).map_err(|_| "The edited asset id is invalid.".to_string())?;
@@ -2150,7 +2198,7 @@ pub fn prepare_asset_annotation(
     if !is_annotation_revision(&revision_sha256) {
         return Err("The editor source revision is invalid.".into());
     }
-    let expected_size = {
+    let (expected_size, source_png) = {
         let mut context = state.library.lock().unwrap();
         let library = context.library().map_err(|error| error.to_string())?;
         let asset = library
@@ -2159,22 +2207,36 @@ pub fn prepare_asset_annotation(
         if asset.kind != CaptureKind::Image {
             return Err("Only image captures can be edited.".into());
         }
-        let current_revision = library
+        let snapshot = library
             .load_editor_snapshot(&parsed)
-            .map_err(|error| error.to_string())?
-            .revision_sha256;
-        if current_revision != revision_sha256 {
+            .map_err(|error| error.to_string())?;
+        if snapshot.revision_sha256 != revision_sha256 {
             return Err(EDITOR_REVISION_MISMATCH_ERROR.into());
         }
-        (asset.pixel_width, asset.pixel_height)
+        ((asset.pixel_width, asset.pixel_height), snapshot.source)
     };
-    validate_editor_annotation_document(&document, expected_size)?;
+    let replacement_source_png = match crop_pixels {
+        Some(crop) => Some(
+            tauri::async_runtime::spawn_blocking(move || {
+                crop_editor_source(&source_png, expected_size, crop)
+            })
+            .await
+            .map_err(|_| "The cropped screenshot source could not be prepared.".to_string())??,
+        ),
+        None => None,
+    };
+    let output_size = crop_pixels
+        .map(|crop| (i64::from(crop.width), i64::from(crop.height)))
+        .unwrap_or(expected_size);
+    validate_editor_annotation_document(&document, output_size)?;
     let token = uuid::Uuid::new_v4();
     state.editor_annotations.lock().unwrap().insert(
         window.label().to_string(),
         StagedEditorAnnotation {
             token,
             document,
+            replacement_source_png,
+            output_size,
             revision_sha256,
         },
     );
@@ -2228,7 +2290,7 @@ pub fn update_asset(
     };
 
     let state = app.state::<AppState>();
-    let expected_size = {
+    let current_size = {
         let mut context = state.library.lock().unwrap();
         let library = context.library().map_err(|error| error.to_string())?;
         let asset = library
@@ -2239,32 +2301,73 @@ pub fn update_asset(
         }
         (asset.pixel_width, asset.pixel_height)
     };
-    if validate_capture_png(png, expected_size.0, expected_size.1)? != expected_size {
-        return Err("The edited image dimensions changed unexpectedly.".into());
-    }
     let mut annotations = state.editor_annotations.lock().unwrap();
     let staged = annotations
         .get(window.label())
         .filter(|staged| staged.token == annotation_token)
         .cloned()
         .ok_or_else(|| "The editor annotation snapshot changed before saving.".to_string())?;
-    validate_editor_annotation_document(&staged.document, expected_size)?;
+    if staged.replacement_source_png.is_none() && staged.output_size != current_size {
+        return Err("The edited image dimensions changed unexpectedly.".into());
+    }
+    if validate_capture_png(png, staged.output_size.0, staged.output_size.1)? != staged.output_size
+    {
+        return Err("The edited image dimensions changed unexpectedly.".into());
+    }
+    validate_editor_annotation_document(&staged.document, staged.output_size)?;
     let mut destinations = state.editor_save_destinations.lock().unwrap();
     let save_path = editor_save_destination(&destinations, window.label(), save_token)?;
     let store = app.state::<crate::protocol::ProtocolStore>();
     let document_value = serde_json::to_value(&staged.document)
         .map_err(|_| "The annotation document could not be encoded.".to_string())?;
+    if editor_action == EditorSaveAction::SaveAs {
+        let current_revision = {
+            let mut context = state.library.lock().unwrap();
+            let library = context.library().map_err(|error| error.to_string())?;
+            library
+                .load_editor_snapshot(&parsed)
+                .map_err(|error| error.to_string())?
+                .revision_sha256
+        };
+        if current_revision != staged.revision_sha256 {
+            return Err(EDITOR_REVISION_MISMATCH_ERROR.into());
+        }
+        annotations.remove(window.label());
+        if save_token.is_some() {
+            destinations.remove(window.label());
+        }
+        drop(destinations);
+        drop(annotations);
+        let action_succeeded = save_path
+            .as_ref()
+            .is_some_and(|path| write_editor_save(path, png).is_ok());
+        return Ok(EditorUpdateDto {
+            revision_sha256: current_revision,
+            action_succeeded,
+        });
+    }
     let mutation: Result<(String, bool), LibraryLocationError> = commit_editor_update(
         || {
             crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
                 let mut context = state.library.lock().unwrap();
-                let library = context.library()?;
-                library.save_editor_snapshot(
-                    &parsed,
-                    &staged.revision_sha256,
-                    png,
-                    staged.document.has_marks().then_some(&document_value),
-                )?;
+                let library = context.library_mut()?;
+                if let Some(source_png) = staged.replacement_source_png.as_deref() {
+                    library.save_editor_cropped_snapshot(
+                        &parsed,
+                        &staged.revision_sha256,
+                        png,
+                        source_png,
+                        staged.output_size,
+                        staged.document.has_marks().then_some(&document_value),
+                    )?;
+                } else {
+                    library.save_editor_snapshot(
+                        &parsed,
+                        &staged.revision_sha256,
+                        png,
+                        staged.document.has_marks().then_some(&document_value),
+                    )?;
+                }
                 Ok::<String, LibraryLocationError>(
                     library.load_editor_snapshot(&parsed)?.revision_sha256,
                 )
@@ -2278,18 +2381,8 @@ pub fn update_asset(
             drop(destinations);
             drop(annotations);
 
-            let mut action_succeeded = true;
-            if let Some(save_path) = &save_path {
-                if let Err(error) = write_editor_save(save_path, png) {
-                    log::error!("update_asset: {error}");
-                    action_succeeded = false;
-                }
-            }
-            debug_assert_eq!(
-                save_path.is_some(),
-                editor_action == EditorSaveAction::SaveAs
-            );
-            action_succeeded
+            debug_assert!(save_path.is_none());
+            true
         },
     );
     let (revision_sha256, action_succeeded) = match mutation {
@@ -3869,10 +3962,10 @@ pub fn quit_app(app: AppHandle) -> Result<(), String> {
 mod command_security_tests {
     use super::{
         capture_failure_requires_global_error, cleanup_finalization_files, commit_editor_update,
-        crop_annotation_source, editor_save_destination, parse_editor_save_action,
-        recording_channels, sanitize_frontend_log, validate_capture_png,
+        crop_annotation_source, crop_editor_source, editor_save_destination,
+        parse_editor_save_action, recording_channels, sanitize_frontend_log, validate_capture_png,
         validate_editor_annotation_document, validate_replacement_metadata,
-        validate_staged_capture_annotation, write_editor_save, EditorSaveAction,
+        validate_staged_capture_annotation, write_editor_save, EditorCropPixels, EditorSaveAction,
         EDITOR_ACTION_INVALID_ERROR, EDITOR_SAVE_ERROR,
     };
     use crate::core::annotation::AnnotationDocument;
@@ -4042,6 +4135,63 @@ mod command_security_tests {
     }
 
     #[test]
+    fn editor_crop_uses_the_exact_staged_source_pixels_and_rejects_bad_bounds() {
+        let image = image::RgbaImage::from_fn(8, 6, |x, y| image::Rgba([x as u8, y as u8, 0, 255]));
+        let mut png = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let png = png.into_inner();
+
+        let cropped = crop_editor_source(
+            &png,
+            (8, 6),
+            EditorCropPixels {
+                x: 2,
+                y: 1,
+                width: 4,
+                height: 3,
+            },
+        )
+        .unwrap();
+        let cropped = image::load_from_memory_with_format(&cropped, image::ImageFormat::Png)
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(cropped.dimensions(), (4, 3));
+        assert_eq!(cropped.get_pixel(0, 0).0, [2, 1, 0, 255]);
+        assert_eq!(cropped.get_pixel(3, 2).0, [5, 3, 0, 255]);
+
+        assert!(crop_editor_source(
+            &png,
+            (8, 6),
+            EditorCropPixels {
+                x: 7,
+                y: 0,
+                width: 2,
+                height: 1,
+            },
+        )
+        .is_err());
+
+        let smaller = image::DynamicImage::new_rgba8(4, 3);
+        let mut smaller_png = Cursor::new(Vec::new());
+        smaller
+            .write_to(&mut smaller_png, image::ImageFormat::Png)
+            .unwrap();
+        assert!(crop_editor_source(
+            &smaller_png.into_inner(),
+            (8, 6),
+            EditorCropPixels {
+                x: 0,
+                y: 0,
+                width: 4,
+                height: 3,
+            },
+        )
+        .is_err());
+    }
+
+    #[test]
     fn editor_save_action_matches_its_native_destination() {
         assert_eq!(
             parse_editor_save_action(None, false).unwrap_err(),
@@ -4132,13 +4282,22 @@ mod command_security_tests {
     fn editor_save_failures_return_stable_errors() {
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("capture.png");
-        write_editor_save(&output, b"png").unwrap();
-        assert_eq!(std::fs::read(&output).unwrap(), b"png");
+        std::fs::write(&output, b"old").unwrap();
+        write_editor_save(&output, b"new-png").unwrap();
+        assert_eq!(std::fs::read(&output).unwrap(), b"new-png");
 
         assert_eq!(
             write_editor_save(directory.path(), b"png").unwrap_err(),
             EDITOR_SAVE_ERROR
         );
+        assert!(directory.path().is_dir());
+        assert!(!std::fs::read_dir(directory.path())
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".kiri-export-")));
     }
 }
 

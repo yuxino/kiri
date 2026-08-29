@@ -1,5 +1,5 @@
 // EditorWindow — annotation editor for saved captures
-// (EditorWindowController.swift): 880×620, dark, 58pt toolbar, same canvas.
+// Dark screenshot editor with one compact toolbar and an aspect-fit canvas.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -18,13 +18,23 @@ import {
   type Tool,
 } from "../annotation/model";
 import AnnotationCanvas, { type AnnotationCanvasHandle } from "../annotation/AnnotationCanvas";
+import { CropOverlay } from "../annotation/CropOverlay";
+import {
+  cropAnnotationDocument,
+  fullCropRect,
+  isFullCrop,
+  type CropPixels,
+} from "../annotation/crop.js";
 import { resolveInitialEditorDocument } from "../annotation/editor-document.js";
 import { AnnotationInteractionLock } from "../annotation/interaction-lock.js";
 import { parseAnnotationDocument } from "../annotation/project.js";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 
-const TOOLS: { tool: Tool; icon: IconName; title: string }[] = [
+type EditorTool = Tool | "crop";
+
+const TOOLS: { tool: EditorTool; icon: IconName; title: string }[] = [
   { tool: "select", icon: "cursorarrow", title: "Select (V)" },
+  { tool: "crop", icon: "crop", title: "Crop (C)" },
   { tool: "pen", icon: "pencil.tip", title: "Pen (P)" },
   { tool: "rectangle", icon: "rectangle.dashed", title: "Rectangle (R)" },
   { tool: "line", icon: "line.diagonal", title: "Line (L)" },
@@ -38,7 +48,10 @@ export function EditorWindow(props: { id: string }) {
   const [imageSize, setImageSize] = useState<{ w: number; h: number } | null>(null);
   const [document, setDocument] = useState<AnnotationDocumentV1 | null>(null);
   const [containerSize, setContainerSize] = useState({ width: 800, height: 560 });
-  const [tool, setTool] = useState<Tool>("select");
+  const [tool, setTool] = useState<EditorTool>("select");
+  const [cropSelection, setCropSelection] = useState<Rect | null>(null);
+  const [cropUndo, setCropUndo] = useState<Rect[]>([]);
+  const [cropRedo, setCropRedo] = useState<Rect[]>([]);
   const [appearance, setAppearance] = useState<AppearanceSettings>(DEFAULT_APPEARANCE);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
@@ -60,6 +73,9 @@ export function EditorWindow(props: { id: string }) {
     setImageSize(null);
     setDocument(null);
     setHasMarks(false);
+    setCropSelection(null);
+    setCropUndo([]);
+    setCropRedo([]);
     revisionRef.current = null;
     setActionError(null);
 
@@ -169,6 +185,13 @@ export function EditorWindow(props: { id: string }) {
         return;
       }
       if (e.key === "Escape") {
+        if (tool === "crop") {
+          setCropSelection(null);
+          setCropUndo([]);
+          setCropRedo([]);
+          setTool("select");
+          return;
+        }
         void closeWindow();
         return;
       }
@@ -179,17 +202,21 @@ export function EditorWindow(props: { id: string }) {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "z") {
         e.preventDefault();
-        if (e.shiftKey) canvasRef.current?.redo();
+        if (tool === "crop") {
+          if (e.shiftKey) redoCrop();
+          else undoCrop();
+        } else if (e.shiftKey) canvasRef.current?.redo();
         else canvasRef.current?.undo();
         return;
       }
       if (e.key === "Delete" || e.key === "Backspace") {
-        canvasRef.current?.deleteSelection();
+        if (tool !== "crop") canvasRef.current?.deleteSelection();
         return;
       }
       if (!mod && !e.altKey) {
-        const keyMap: Record<string, Tool> = {
+        const keyMap: Record<string, EditorTool> = {
           v: "select",
+          c: "crop",
           p: "pen",
           r: "rectangle",
           l: "line",
@@ -198,12 +225,42 @@ export function EditorWindow(props: { id: string }) {
           m: "mosaic",
         };
         const next = keyMap[e.key.toLowerCase()];
-        if (next) setTool(next);
+        if (next) selectTool(next);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [completionLock]);
+  }, [completionLock, cropRedo, cropSelection, cropUndo, document, tool]);
+
+  function selectTool(next: EditorTool) {
+    if (tool === "crop" && next !== "crop") return;
+    setTool(next);
+    if (next === "crop" && document) {
+      setCropSelection((current) => current ?? fullCropRect(document));
+    }
+  }
+
+  function commitCrop(previous: Rect, next: Rect) {
+    if (sameRect(previous, next)) return;
+    setCropUndo((history) => [...history.slice(-99), previous]);
+    setCropRedo([]);
+  }
+
+  function undoCrop() {
+    if (!cropSelection || cropUndo.length === 0) return;
+    const previous = cropUndo[cropUndo.length - 1];
+    setCropUndo(cropUndo.slice(0, -1));
+    setCropRedo([...cropRedo.slice(-99), cropSelection]);
+    setCropSelection(previous);
+  }
+
+  function redoCrop() {
+    if (!cropSelection || cropRedo.length === 0) return;
+    const next = cropRedo[cropRedo.length - 1];
+    setCropRedo(cropRedo.slice(0, -1));
+    setCropUndo([...cropUndo.slice(-99), cropSelection]);
+    setCropSelection(next);
+  }
 
   async function closeWindow() {
     await getCurrentWindow().close();
@@ -225,14 +282,24 @@ export function EditorWindow(props: { id: string }) {
         setActionError(failureMessage);
         return;
       }
+      let outputPng = result.png;
+      let outputDocument = result.document;
+      let cropPixels: CropPixels | null = null;
+      if (cropSelection && !isFullCrop(result.document, cropSelection)) {
+        const cropped = cropAnnotationDocument(result.document, cropSelection);
+        outputPng = await cropPng(result.png, cropped.cropPixels);
+        outputDocument = cropped.document;
+        cropPixels = cropped.cropPixels;
+      }
       const saveToken = action === "saveAs"
         ? await api.saveFileDialog(`kiri-${props.id}.png`)
         : null;
       // Cancelling Save As must be a true no-op: do not replace the library
       // asset when the system file picker returns no one-time authorization.
       if (action === "saveAs" && saveToken === null) return;
-      const update = await api.updateAsset(props.id, result.png, result.document, {
+      const update = await api.updateAsset(props.id, outputPng, outputDocument, {
         action,
+        cropPixels,
         saveToken,
         revisionSha256,
       });
@@ -288,17 +355,30 @@ export function EditorWindow(props: { id: string }) {
           transition: "opacity 0.12s ease-out",
         }}
       >
+        <div
+          style={{
+            minWidth: 0,
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            overflowX: "auto",
+            scrollbarWidth: "none",
+          }}
+        >
         {TOOLS.map(({ tool: t2, icon, title }) => (
           <EditorToolButton
             key={t2}
             icon={icon}
             title={t(title)}
             active={tool === t2}
-            onClick={() => setTool(t2)}
+            disabled={tool === "crop" && t2 !== "crop"}
+            onClick={() => selectTool(t2)}
           />
         ))}
-        <div style={{ width: 1, height: 26, background: "#383838", margin: "0 4px" }} />
-        {tool === "text" ? (
+        {tool !== "crop" && tool !== "select" && <>
+          <div style={{ width: 1, height: 26, background: "#383838", margin: "0 4px" }} />
+          {tool === "text" ? (
           <EditorSegments
             segments={[
               { icon: "square.dashed", label: t("Transparent"), title: t("No background") },
@@ -329,8 +409,8 @@ export function EditorWindow(props: { id: string }) {
               }
             />
           </>
-        ) : null}
-        {slider && (
+          ) : null}
+          {slider && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
             <input
               type="range"
@@ -357,26 +437,38 @@ export function EditorWindow(props: { id: string }) {
               {slider.value}
             </span>
           </div>
-        )}
-        <div style={{ width: 1, height: 26, background: "#383838", margin: "0 4px" }} />
-        {COLOR_PRESETS.map((preset) => (
+          )}
+          <div style={{ width: 1, height: 26, background: "#383838", margin: "0 4px" }} />
+          {COLOR_PRESETS.map((preset) => (
           <EditorSwatch
             key={preset}
             color={COLOR_HEX[preset]}
             selected={appearance.colorPreset === preset}
             onClick={() => setAppearance({ ...appearance, colorPreset: preset })}
           />
-        ))}
+          ))}
+        </>}
         <div style={{ width: 1, height: 26, background: "#383838", margin: "0 4px" }} />
-        <EditorToolButton icon="arrow.uturn.backward" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={() => canvasRef.current?.undo()} />
-        <EditorToolButton icon="arrow.uturn.forward" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={() => canvasRef.current?.redo()} />
+        <EditorToolButton
+          icon="arrow.uturn.backward"
+          title={t("Undo (⌘Z)")}
+          disabled={tool === "crop" ? cropUndo.length === 0 : !canUndo}
+          onClick={() => tool === "crop" ? undoCrop() : canvasRef.current?.undo()}
+        />
+        <EditorToolButton
+          icon="arrow.uturn.forward"
+          title={t("Redo (⇧⌘Z)")}
+          disabled={tool === "crop" ? cropRedo.length === 0 : !canRedo}
+          onClick={() => tool === "crop" ? redoCrop() : canvasRef.current?.redo()}
+        />
         <EditorToolButton
           icon="xmark"
           title={t("Clear Annotations")}
-          disabled={!hasMarks}
+          disabled={tool === "crop" || !hasMarks}
           onClick={() => canvasRef.current?.clearAnnotations()}
         />
-        <div style={{ flex: 1 }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
         <button
           className="editor-secondary-button"
           style={{
@@ -419,6 +511,7 @@ export function EditorWindow(props: { id: string }) {
         >
           {t("Save")}
         </button>
+        </div>
       </div>
 
       {actionError && (
@@ -481,9 +574,9 @@ export function EditorWindow(props: { id: string }) {
               region={documentRegion}
               viewSize={viewSize}
               initialDocument={document}
-              interactionDisabled={completing}
+              interactionDisabled={completing || tool === "crop"}
               interactionLock={completionLock}
-              tool={tool}
+              tool={tool === "crop" ? "select" : tool}
               appearance={appearance}
               onHistoryChange={(u, r, populated) => {
                 setCanUndo(u);
@@ -492,11 +585,58 @@ export function EditorWindow(props: { id: string }) {
               }}
               onCancel={closeWindow}
             />
+            {cropSelection && (
+              <CropOverlay
+                document={document}
+                viewSize={viewSize}
+                selection={cropSelection}
+                active={tool === "crop" && !completing}
+                onChange={setCropSelection}
+                onCommit={commitCrop}
+              />
+            )}
           </div>
         )}
       </div>
     </div>
   );
+}
+
+function sameRect(left: Rect, right: Rect): boolean {
+  return left.x === right.x && left.y === right.y &&
+    left.width === right.width && left.height === right.height;
+}
+
+async function cropPng(png: Uint8Array, crop: CropPixels): Promise<Uint8Array> {
+  const url = URL.createObjectURL(new Blob([png.slice().buffer], { type: "image/png" }));
+  const image = new Image();
+  try {
+    image.src = url;
+    await image.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = crop.width;
+    canvas.height = crop.height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("crop canvas unavailable");
+    context.drawImage(
+      image,
+      crop.x,
+      crop.y,
+      crop.width,
+      crop.height,
+      0,
+      0,
+      crop.width,
+      crop.height,
+    );
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
+    canvas.width = 0;
+    canvas.height = 0;
+    if (!blob) throw new Error("crop export failed");
+    return new Uint8Array(await blob.arrayBuffer());
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function EditorToolButton(props: {
@@ -525,6 +665,7 @@ function EditorToolButton(props: {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        flexShrink: 0,
       }}
     >
       <KiriIcon name={props.icon} size={15} />
@@ -547,6 +688,7 @@ function EditorSwatch(props: { color: string; selected: boolean; onClick(): void
         justifyContent: "center",
         cursor: "pointer",
         position: "relative",
+        flexShrink: 0,
       }}
     >
       {props.selected && (
@@ -571,7 +713,7 @@ function EditorSegments(props: {
   onChange(i: number): void;
 }) {
   return (
-    <div style={{ display: "flex", background: "rgba(255,255,255,0.06)", borderRadius: 8, padding: 2, gap: 2 }}>
+    <div style={{ display: "flex", flexShrink: 0, background: "rgba(255,255,255,0.06)", borderRadius: 8, padding: 2, gap: 2 }}>
       {props.segments.map((segment, index) => (
         <button
           key={index}
