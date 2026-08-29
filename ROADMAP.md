@@ -40,6 +40,7 @@ history.
 - [x] One transparent desktop icon source with dev, production, and CI validation
 - [x] Release jobs verify release tools and app icons before packaging
 - [x] Release CI verifies tags and produces Windows drafts without an intentional macOS policy failure
+- [x] One maintainer-signed Universal macOS DMG supports both Apple silicon and Intel
 - [x] FFmpeg is downloaded on the first recording or explicit GIF conversion when absent, then cached locally
 - [x] Interactive screenshot and recording completion preview with open, copy, recoverable Trash, and Undo actions
 - [x] Re-editable local screenshot annotations with completion-card and library editor entry points
@@ -55,8 +56,8 @@ Release validation still open:
 - [ ] Windows acceptance testing (capture, recording, audio, OCR, ripple)
 - [ ] Pause/resume and exported-control exclusion acceptance on both platforms
 - [ ] Mixed-scale multi-display acceptance testing
-- [ ] Maintainer-packaged macOS DMGs retain one stable local signing identity and pass manual Gatekeeper install/launch acceptance
-- [ ] Verify each release's final arm64, x64, and Windows installers
+- [ ] The maintainer-packaged Universal macOS DMG retains one stable local signing identity and passes manual Gatekeeper install/launch acceptance
+- [ ] Verify each release's final arm64 and x86_64 slices plus the Windows installer
 
 ## Later
 

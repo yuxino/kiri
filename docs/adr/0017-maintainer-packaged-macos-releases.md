@@ -4,6 +4,7 @@
 - Date: 2026-08-29
 - Supersedes: The deliberately failing macOS CI job in ADR 0013
 - Preserves: ADR 0013's prohibition on ad-hoc signing
+- Packaging format: Superseded by ADR 0023
 
 ## Context
 

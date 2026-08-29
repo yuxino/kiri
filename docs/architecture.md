@@ -18,7 +18,8 @@ boundary.
   availability, and whole-library migration rules.
 - `src-tauri/src/capture/` and `src-tauri/src/platform/` contain platform
   implementations.
-- `scripts/` contains release checks, icon generation, and stable macOS signing.
+- `scripts/` contains release checks, icon generation, stable macOS signing,
+  and Universal DMG verification.
 
 There is deliberately no second root Cargo workspace or parallel Tauri app.
 Commands should use `--manifest-path src-tauri/Cargo.toml` when they are run

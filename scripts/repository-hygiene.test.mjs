@@ -51,6 +51,7 @@ test("permission-sensitive macOS entry points never allow ad-hoc signing", () =>
     "scripts/install-app.sh",
     "scripts/kiri-macos-dev-runner",
     "scripts/package-app.sh",
+    "scripts/package-macos-release.sh",
   ];
   for (const relativePath of paths) {
     const source = readFileSync(join(repositoryRoot, relativePath), "utf8");
@@ -65,6 +66,21 @@ test("permission-sensitive macOS entry points never allow ad-hoc signing", () =>
       `${relativePath} must not publish with an ad-hoc identity`,
     );
   }
+});
+
+test("macOS releases use one verified Universal DMG", () => {
+  const source = readFileSync(
+    join(repositoryRoot, "scripts", "package-macos-release.sh"),
+    "utf8",
+  );
+
+  assert.match(source, /--target universal-apple-darwin --bundles dmg/);
+  assert.match(source, /aarch64-apple-darwin/);
+  assert.match(source, /x86_64-apple-darwin/);
+  assert.match(source, /hdiutil verify/);
+  assert.match(source, /lipo -archs/);
+  assert.match(source, /codesign --verify --deep --strict/);
+  assert.doesNotMatch(source, /--no-sign|KIRI_ALLOW_ADHOC_SIGNING/);
 });
 
 test("release CI does not create an intentional red light or ad-hoc macOS package", () => {

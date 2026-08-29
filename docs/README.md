@@ -44,7 +44,7 @@ application or a durable product decision.
   completion/library editor entry points.
 - [`adr/0017-maintainer-packaged-macos-releases.md`](adr/0017-maintainer-packaged-macos-releases.md)
   — developer-installable GitHub distribution with maintainer-packaged,
-  stable self-signed macOS DMGs and no intentional CI red light.
+  stable self-signed macOS artifacts and no intentional CI red light.
 - [`adr/0018-managed-library-location-and-recovery.md`](adr/0018-managed-library-location-and-recovery.md)
   — one managed library, whole-library migration, offline handling, and media
   recovery.
@@ -57,6 +57,8 @@ application or a durable product decision.
   — hover-revealed card actions with Edit for images and View for media.
 - [`adr/0022-persistent-annotation-appearance.md`](adr/0022-persistent-annotation-appearance.md)
   — shared last-used annotation styling without persisting the active tool.
+- [`adr/0023-universal-macos-release.md`](adr/0023-universal-macos-release.md)
+  — one verified Universal DMG for Apple silicon and Intel.
 
 Completed implementation plans and the former Swift migration specifications
 are intentionally not kept in the working tree. Git history and release tags
