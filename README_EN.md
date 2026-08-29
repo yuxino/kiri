@@ -15,12 +15,12 @@ Kiri is primarily developed and tested on macOS. Windows has not completed real-
 
 ## Features
 
-- **Screenshots, crop, and re-editable annotation**: click a window or drag a region, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Color, widths, text, and mosaic styling remember the last choice. Annotations created by current `main` can be reopened from the completion card or library, while marks flattened into older screenshots cannot be reconstructed.
+- **Screenshots, crop, and re-editable annotation**: click a window or drag a region, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Color, widths, text, and mosaic styling remember the last choice. Annotations created by v1.4.5 or later can be reopened from the completion card or library, while marks flattened into older screenshots cannot be reconstructed.
 - **OCR**: recognize text locally with macOS Vision or Windows.Media.Ocr by default; optional remote OCR asks before every upload.
 - **Recording and GIF**: record a region with optional system audio, microphone, pointer, and click highlights; save as MP4 or GIF.
 - **Local library**: search, favorite, tag, rename, and move captures to recoverable Trash. Settings can use another local directory or external disk for the library.
 
-> Editable screenshot projects, crop, remembered annotation styling, and library location/recovery are now on `main`; the current v1.4.4 download does not include these features yet.
+> v1.4.5 includes editable screenshot projects, crop, remembered annotation styling, and library location/recovery.
 
 If the library is offline, retry or locate it again. Choose a file to replace a missing asset. Recordings that could not be imported are kept for retry.
 
@@ -31,13 +31,13 @@ Download the latest version from [GitHub Releases](https://github.com/yuxino/kir
 - **macOS 14+**: download the Apple Silicon (`arm64`) or Intel (`x64`) `.dmg`, open it, and drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording**; **Input Monitoring** is needed only for click highlights. Microphone recording requires macOS 15+ and requests **Microphone** permission only when enabled.
 - **Windows**: run the installer. Screen capture needs no extra system permission; microphone access follows Windows privacy settings. The installer is not Authenticode-signed, so SmartScreen may warn, and Windows has not completed real-device testing.
 
-> The current v1.4.4 macOS releases use the project's maintained local self-signed identity, not ad-hoc, Developer ID signing, or Apple notarization. First launch may require Control-clicking `Kiri.app` and choosing **Open**, or selecting **Open Anyway** in System Settings → Privacy & Security. Gatekeeper does not need to be disabled.
+> The v1.4.5 macOS releases use the project's maintained local self-signed identity, not ad-hoc, Developer ID signing, or Apple notarization. First launch may require Control-clicking `Kiri.app` and choosing **Open**, or selecting **Open Anyway** in System Settings → Privacy & Security. Gatekeeper does not need to be disabled.
 >
 > A maintainer packages the macOS DMGs on a trusted Mac and attaches them to the Release; GitHub Actions produces the Windows draft. If the signing identity changes later, macOS may request the related permissions again.
 
 Remote OCR is optional. API keys stay in macOS Keychain or Windows Credential Manager; creating or selecting a profile sends nothing, and every request requires an explicit **Send** or **Retry** action.
 
-Current `main` stores the flattened screenshot, clean source, and annotation document locally. The source may still contain pixels hidden by mosaic or shapes; saving a crop also removes out-of-frame pixels from that source. Editing never uploads this content.
+Starting with v1.4.5, Kiri stores the flattened screenshot, clean source, and annotation document locally. The source may still contain pixels hidden by mosaic or shapes; saving a crop also removes out-of-frame pixels from that source. Editing never uploads this content.
 
 Recording and GIF conversion use FFmpeg. If no usable copy is available, Kiri downloads and caches it when you first record or manually convert a GIF; browsing the library never triggers this download, and encoding stays local.
 
