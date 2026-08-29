@@ -74,6 +74,8 @@ pub fn run() {
                 log::info!("[app] activation policy = Regular (Dock icon enabled)");
             }
             let state = AppState::new(app.handle())?;
+            let appearance = state::load_annotation_appearance(app.handle());
+            *state.saved_annotation_appearance.lock().unwrap() = appearance;
             let options = state::load_recording_options(app.handle());
             *state.saved_recording_options.lock().unwrap() = options;
             app.manage(state);
@@ -190,6 +192,8 @@ pub fn run() {
             commands::quit_app,
             commands::get_recording_options,
             commands::set_recording_options,
+            commands::get_annotation_appearance,
+            commands::set_annotation_appearance,
             updates::check_for_updates,
             updates::open_release_page,
         ])

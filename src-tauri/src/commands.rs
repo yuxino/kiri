@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 use crate::capture::current as capture_backend;
-use crate::core::annotation::{AnnotationDocument, AnnotationPixelSize};
+use crate::core::annotation::{AnnotationAppearance, AnnotationDocument, AnnotationPixelSize};
 use crate::core::asset::{CaptureAsset, CaptureKind};
 use crate::core::geometry::Rect;
 use crate::core::library::{AssetLibraryError, EditorAnnotationState};
@@ -4309,6 +4309,30 @@ pub fn get_recording_options(app: AppHandle) -> Result<RecordingOptions, String>
         *guard
     };
     Ok(options)
+}
+
+#[tauri::command]
+pub fn get_annotation_appearance(app: AppHandle) -> Result<AnnotationAppearance, String> {
+    let appearance = {
+        let state = app.state::<AppState>();
+        let saved = *state.saved_annotation_appearance.lock().unwrap();
+        saved
+    };
+    Ok(appearance)
+}
+
+#[tauri::command]
+pub fn set_annotation_appearance(
+    app: AppHandle,
+    appearance: AnnotationAppearance,
+) -> Result<(), String> {
+    let normalized = appearance.normalized();
+    let state = app.state::<AppState>();
+    let mut saved = state.saved_annotation_appearance.lock().unwrap();
+    crate::state::save_annotation_appearance(&app, &normalized)
+        .map_err(|_| "The annotation preferences could not be saved.".to_string())?;
+    *saved = normalized;
+    Ok(())
 }
 
 #[tauri::command]

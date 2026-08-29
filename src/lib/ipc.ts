@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { AnnotationDocumentV1 } from "../annotation/model";
+import type { AnnotationDocumentV1, AppearanceSettings } from "../annotation/model";
 import type { CropPixels } from "../annotation/crop.js";
 
 // ---------------------------------------------------------------------------
@@ -301,6 +301,10 @@ export const api = {
   getRecordingOptions: () => invoke<RecordingOptions>("get_recording_options"),
   setRecordingOptions: (options: RecordingOptions) =>
     invoke<void>("set_recording_options", { options }),
+  getAnnotationAppearance: () =>
+    invoke<AppearanceSettings>("get_annotation_appearance"),
+  setAnnotationAppearance: (appearance: AppearanceSettings) =>
+    invoke<void>("set_annotation_appearance", { appearance }),
 
   saveFileDialog: (defaultName: string) =>
     invoke<string | null>("save_file_dialog", { defaultName }),

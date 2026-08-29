@@ -91,6 +91,47 @@ pub enum MosaicStyle {
     Blur,
 }
 
+/// Last-used annotation styling shared by the capture overlay and editor.
+/// The active tool is deliberately excluded so every new surface still opens
+/// in its predictable selection state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct AnnotationAppearance {
+    pub color_preset: AnnotationColor,
+    pub text_background_style: TextBackground,
+    pub mosaic_intensity: MosaicIntensity,
+    pub mosaic_style: MosaicStyle,
+    pub pen_width: u16,
+    pub shape_width: u16,
+    pub text_font_size: u16,
+    pub mosaic_brush_diameter: u16,
+}
+
+impl Default for AnnotationAppearance {
+    fn default() -> Self {
+        Self {
+            color_preset: AnnotationColor::Violet,
+            text_background_style: TextBackground::Transparent,
+            mosaic_intensity: MosaicIntensity::Standard,
+            mosaic_style: MosaicStyle::Pixel,
+            pen_width: 3,
+            shape_width: 3,
+            text_font_size: 18,
+            mosaic_brush_diameter: 20,
+        }
+    }
+}
+
+impl AnnotationAppearance {
+    pub fn normalized(mut self) -> Self {
+        self.pen_width = self.pen_width.clamp(1, 24);
+        self.shape_width = self.shape_width.clamp(1, 16);
+        self.text_font_size = self.text_font_size.clamp(12, 64);
+        self.mosaic_brush_diameter = self.mosaic_brush_diameter.clamp(12, 120);
+        self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -437,5 +478,35 @@ mod tests {
         let mut wrong_ratio = document;
         wrong_ratio.canvas.width = 120.0;
         assert!(wrong_ratio.validate_for_image_pixels(200, 160).is_err());
+    }
+
+    #[test]
+    fn annotation_appearance_defaults_and_clamps_visual_sizes() {
+        let defaults: AnnotationAppearance = serde_json::from_str("{}").unwrap();
+        assert_eq!(defaults, AnnotationAppearance::default());
+
+        let oversized: AnnotationAppearance = serde_json::from_str(
+            r#"{
+                "colorPreset":"cherry",
+                "textBackgroundStyle":"dark",
+                "mosaicIntensity":"strong",
+                "mosaicStyle":"blur",
+                "penWidth":0,
+                "shapeWidth":99,
+                "textFontSize":2,
+                "mosaicBrushDiameter":999
+            }"#,
+        )
+        .unwrap();
+        let normalized = oversized.normalized();
+        assert_eq!(normalized.color_preset, AnnotationColor::Cherry);
+        assert_eq!(normalized.text_background_style, TextBackground::Dark);
+        assert_eq!(normalized.mosaic_intensity, MosaicIntensity::Strong);
+        assert_eq!(normalized.mosaic_style, MosaicStyle::Blur);
+        assert_eq!(normalized.pen_width, 1);
+        assert_eq!(normalized.shape_width, 16);
+        assert_eq!(normalized.text_font_size, 12);
+        assert_eq!(normalized.mosaic_brush_diameter, 120);
+        assert!(serde_json::from_str::<AnnotationAppearance>(r#"{"extra":true}"#).is_err());
     }
 }

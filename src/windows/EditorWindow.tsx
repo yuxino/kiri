@@ -9,14 +9,13 @@ import type { Rect } from "../annotation/geom";
 import {
   COLOR_HEX,
   COLOR_PRESETS,
-  DEFAULT_APPEARANCE,
   type AnnotationDocumentV1,
-  type AppearanceSettings,
   type MosaicIntensity,
   type MosaicStyle,
   type TextBackgroundStyle,
   type Tool,
 } from "../annotation/model";
+import { useAnnotationAppearance } from "../annotation/useAnnotationAppearance";
 import AnnotationCanvas, { type AnnotationCanvasHandle } from "../annotation/AnnotationCanvas";
 import { CropOverlay } from "../annotation/CropOverlay";
 import {
@@ -52,7 +51,7 @@ export function EditorWindow(props: { id: string }) {
   const [cropSelection, setCropSelection] = useState<Rect | null>(null);
   const [cropUndo, setCropUndo] = useState<Rect[]>([]);
   const [cropRedo, setCropRedo] = useState<Rect[]>([]);
-  const [appearance, setAppearance] = useState<AppearanceSettings>(DEFAULT_APPEARANCE);
+  const [appearance, setAppearance] = useAnnotationAppearance();
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [hasMarks, setHasMarks] = useState(false);

@@ -13,7 +13,7 @@ use tauri::{
 };
 
 use crate::capture::{CapturedDisplay, PlatformRecorder};
-use crate::core::annotation::AnnotationDocument;
+use crate::core::annotation::{AnnotationAppearance, AnnotationDocument};
 use crate::core::asset::CaptureAsset;
 use crate::core::geometry::Rect;
 use crate::core::library::AssetLibrary;
@@ -28,6 +28,7 @@ pub struct AppState {
     pub capture: std::sync::Mutex<CaptureFlow>,
     pub recording: std::sync::Mutex<RecordingFlow>,
     pub ffmpeg_path: std::sync::OnceLock<PathBuf>,
+    pub saved_annotation_appearance: std::sync::Mutex<AnnotationAppearance>,
     pub saved_recording_options: std::sync::Mutex<RecordingOptions>,
     pub recording_recovery: std::sync::Mutex<RecordingRecoveryStore>,
     pub recording_recovery_transition: std::sync::Mutex<()>,
@@ -355,6 +356,7 @@ impl AppState {
             capture: Default::default(),
             recording: Default::default(),
             ffmpeg_path: std::sync::OnceLock::new(),
+            saved_annotation_appearance: std::sync::Mutex::new(AnnotationAppearance::default()),
             saved_recording_options: std::sync::Mutex::new(RecordingOptions::default()),
             recording_recovery: std::sync::Mutex::new(recording_recovery),
             recording_recovery_transition: std::sync::Mutex::new(()),
@@ -833,6 +835,37 @@ pub fn save_recording_options(app: &AppHandle, options: &RecordingOptions) {
     if let Ok(data) = serde_json::to_vec_pretty(&options.normalized()) {
         let _ = std::fs::write(path, data);
     }
+}
+
+// Annotation appearance is shared by the capture overlay and editor. Keep it
+// in the native config directory because Tauri WebViews do not share reliable
+// localStorage across windows.
+pub fn annotation_appearance_path(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_config_dir()
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join("annotation-appearance.json")
+}
+
+pub fn load_annotation_appearance(app: &AppHandle) -> AnnotationAppearance {
+    std::fs::read(annotation_appearance_path(app))
+        .ok()
+        .and_then(|data| serde_json::from_slice::<AnnotationAppearance>(&data).ok())
+        .unwrap_or_default()
+        .normalized()
+}
+
+pub fn save_annotation_appearance(
+    app: &AppHandle,
+    appearance: &AnnotationAppearance,
+) -> std::io::Result<()> {
+    let path = annotation_appearance_path(app);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let data =
+        serde_json::to_vec_pretty(&appearance.normalized()).map_err(std::io::Error::other)?;
+    std::fs::write(path, data)
 }
 
 // ---------------------------------------------------------------------------

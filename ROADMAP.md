@@ -43,6 +43,7 @@ history.
 - [x] FFmpeg is downloaded on the first recording or explicit GIF conversion when absent, then cached locally
 - [x] Interactive screenshot and recording completion preview with open, copy, recoverable Trash, and Undo actions
 - [x] Re-editable local screenshot annotations with completion-card and library editor entry points
+- [x] Shared last-used annotation styling across capture and editor windows
 - [x] Destructive screenshot cropping with editable-mark translation and export-only Save As
 - [x] Explicit MP4/GIF recording output choice; direct GIF is silent and preserves the MP4 when GIF finalization fails
 - [x] One managed library that can move to another local directory or external disk

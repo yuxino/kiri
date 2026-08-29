@@ -33,13 +33,13 @@ import {
 import {
   COLOR_HEX,
   COLOR_PRESETS,
-  DEFAULT_APPEARANCE,
   type AppearanceSettings,
   type MosaicIntensity,
   type MosaicStyle,
   type TextBackgroundStyle,
   type Tool,
 } from "../annotation/model";
+import { useAnnotationAppearance } from "../annotation/useAnnotationAppearance";
 import AnnotationCanvas, { type AnnotationCanvasHandle } from "../annotation/AnnotationCanvas";
 import { AnnotationInteractionLock } from "../annotation/interaction-lock.js";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
@@ -117,7 +117,7 @@ export function OverlayWindow() {
   const [resizeHandle, setResizeHandle] = useState<string | null>(null);
   const [moveDrag, setMoveDrag] = useState<{ start: Point; original: Rect } | null>(null);
   const [tool, setTool] = useState<Tool>("select");
-  const [appearance, setAppearance] = useState<AppearanceSettings>(DEFAULT_APPEARANCE);
+  const [appearance, setAppearance] = useAnnotationAppearance();
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [ocrText, setOcrText] = useState("");
@@ -816,7 +816,6 @@ export function OverlayWindow() {
           setPhase("selecting");
           setSelection(null);
           setTool("select");
-          setAppearance(DEFAULT_APPEARANCE);
         } else {
           cancel();
         }
