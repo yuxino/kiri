@@ -79,6 +79,10 @@ export function ConfirmWindow(props: ConfirmProps) {
       }}
     >
       <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="kiri-confirm-title"
+        aria-describedby={props.message ? "kiri-confirm-message" : undefined}
         style={{
           background: "var(--kiri-elevated)",
           borderRadius: 14,
@@ -88,11 +92,12 @@ export function ConfirmWindow(props: ConfirmProps) {
           boxShadow: "none",
         }}
       >
-        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>
+        <div id="kiri-confirm-title" style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 6 }}>
           {t(props.title)}
         </div>
         {props.message && (
           <div
+            id="kiri-confirm-message"
             style={{
               fontSize: 12.5,
               color: "var(--kiri-secondary-label)",
@@ -116,13 +121,18 @@ export function ConfirmWindow(props: ConfirmProps) {
           </div>
         )}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" className="kiri-secondary-button" disabled={busy} onClick={close}>
+          <button
+            type="button"
+            className="kiri-button kiri-button--secondary"
+            disabled={busy}
+            autoFocus
+            onClick={close}
+          >
             {t("Cancel")}
           </button>
           <button
             type="button"
-            className="kiri-primary-button"
-            style={{ background: "var(--kiri-coral)" }}
+            className="kiri-button kiri-button--destructive kiri-button--destructive-fill"
             disabled={busy}
             onClick={() => void confirm()}
           >

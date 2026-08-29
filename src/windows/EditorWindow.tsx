@@ -8,6 +8,7 @@ import { t } from "../i18n";
 import type { Rect } from "../annotation/geom";
 import {
   COLOR_HEX,
+  COLOR_LABELS,
   COLOR_PRESETS,
   type AnnotationDocumentV1,
   type MosaicIntensity,
@@ -413,6 +414,8 @@ export function EditorWindow(props: { id: string }) {
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
             <input
               type="range"
+              className="kiri-range"
+              aria-label={t(tool === "text" ? "Font" : tool === "mosaic" || tool === "pen" ? "Brush" : "Line")}
               min={slider.min}
               max={slider.max}
               value={slider.value}
@@ -442,6 +445,7 @@ export function EditorWindow(props: { id: string }) {
           <EditorSwatch
             key={preset}
             color={COLOR_HEX[preset]}
+            label={t(COLOR_LABELS[preset])}
             selected={appearance.colorPreset === preset}
             onClick={() => setAppearance({ ...appearance, colorPreset: preset })}
           />
@@ -469,41 +473,30 @@ export function EditorWindow(props: { id: string }) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
         <button
-          className="editor-secondary-button"
+          type="button"
+          className="kiri-button kiri-button--secondary"
           style={{
             height: 32,
-            padding: "0 12px",
             borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.16)",
-            background: "transparent",
-            color: "#fff",
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: "pointer",
           }}
           onClick={() => void complete("saveAs")}
         >
           {t("Save As…")}
         </button>
         <button
-          className="editor-secondary-button"
+          type="button"
+          className="kiri-button kiri-button--ghost"
           title={t("Cancel (Esc)")}
           style={{
             height: 32,
-            padding: "0 12px",
             borderRadius: 10,
-            border: "1px solid transparent",
-            background: "transparent",
-            color: "#fff",
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: "pointer",
           }}
           onClick={closeWindow}
         >
           {t("Cancel")}
         </button>
         <button
+          type="button"
           className="kiri-primary-button"
           style={{ minHeight: 32, borderRadius: 10 }}
           onClick={() => void complete("save")}
@@ -541,21 +534,14 @@ export function EditorWindow(props: { id: string }) {
           </span>
           <button
             type="button"
+            className="kiri-icon-button kiri-inline-dismiss"
             aria-label={t("Close")}
             title={t("Close")}
             onClick={() => setActionError(null)}
             style={{
               width: 20,
               height: 20,
-              flexShrink: 0,
-              display: "grid",
-              placeItems: "center",
-              padding: 0,
-              border: "none",
-              borderRadius: 6,
-              background: "transparent",
-              color: "var(--kiri-secondary-label)",
-              cursor: "pointer",
+              flexBasis: 20,
             }}
           >
             <KiriIcon name="xmark" size={9} />
@@ -647,47 +633,34 @@ function EditorToolButton(props: {
 }) {
   return (
     <button
+      type="button"
+      className="kiri-toolbar-button"
+      data-active={props.active || undefined}
       title={props.title}
+      aria-label={props.title}
+      aria-pressed={props.active}
       onClick={props.onClick}
       disabled={props.disabled}
-      style={{
-        width: 32,
-        height: 32,
-        borderRadius: 10,
-        border: "1px solid transparent",
-        background: props.active ? "#fff" : "transparent",
-        color: props.active ? "#000" : "#fff",
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: props.disabled ? "default" : "pointer",
-        opacity: props.disabled ? 0.35 : 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-      }}
     >
       <KiriIcon name={props.icon} size={15} />
     </button>
   );
 }
 
-function EditorSwatch(props: { color: string; selected: boolean; onClick(): void }) {
+function EditorSwatch(props: { color: string; label: string; selected: boolean; onClick(): void }) {
   return (
     <button
+      type="button"
+      className="kiri-toolbar-swatch"
+      data-selected={props.selected || undefined}
+      aria-label={props.label}
+      title={props.label}
+      aria-pressed={props.selected}
       onClick={props.onClick}
       style={{
         width: 24,
-        height: 28,
-        borderRadius: 8,
-        border: "none",
-        background: props.selected ? `${props.color}33` : "transparent",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        position: "relative",
         flexShrink: 0,
+        ...(props.selected ? { background: `${props.color}33` } : {}),
       }}
     >
       {props.selected && (
@@ -712,28 +685,16 @@ function EditorSegments(props: {
   onChange(i: number): void;
 }) {
   return (
-    <div style={{ display: "flex", flexShrink: 0, background: "rgba(255,255,255,0.06)", borderRadius: 8, padding: 2, gap: 2 }}>
+    <div className="kiri-toolbar-segments">
       {props.segments.map((segment, index) => (
         <button
+          type="button"
+          className="kiri-toolbar-segment"
+          data-active={props.value === index || undefined}
           key={index}
           title={segment.title}
+          aria-pressed={props.value === index}
           onClick={() => props.onChange(index)}
-          style={{
-            minWidth: 28,
-            height: 24,
-            padding: "0 7px",
-            borderRadius: 6,
-            border: "none",
-            background: props.value === index ? "#fff" : "transparent",
-            color: props.value === index ? "#000" : "#fff",
-            fontSize: 10,
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 4,
-            whiteSpace: "nowrap",
-          }}
         >
           {segment.icon ? <KiriIcon name={segment.icon} size={12} style={{ opacity: 0.85 }} /> : null}
           {segment.label}

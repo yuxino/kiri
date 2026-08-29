@@ -72,6 +72,10 @@
   background: rgba(255, 255, 255, 0.1);
 }
 
+.kiri-remote-consent__close:active {
+  transform: scale(0.92);
+}
+
 .kiri-remote-consent__summary,
 .kiri-remote-consent__hint {
   margin: 0;

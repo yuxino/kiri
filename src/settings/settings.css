@@ -179,12 +179,16 @@
     transform var(--kiri-motion-hover) ease-out;
 }
 
-.kiri-language-picker button:hover:not([data-active]) {
+.kiri-language-option:hover:not([data-active]) {
   background: var(--kiri-accent-soft-alpha-10);
   color: var(--kiri-label);
 }
 
-.kiri-language-picker button[data-active] {
+.kiri-language-option:active {
+  transform: scale(0.96);
+}
+
+.kiri-language-option[data-active] {
   background: var(--kiri-accent-strong);
   color: var(--kiri-on-accent);
   box-shadow: none;
@@ -231,6 +235,10 @@
 
 .ocr-engine-choice:hover:not(:disabled) {
   background: var(--kiri-accent-soft-alpha-10);
+}
+
+.ocr-engine-choice:active:not(:disabled) {
+  transform: scale(0.99);
 }
 
 .ocr-engine-choice:disabled {
@@ -500,23 +508,9 @@
   gap: 8px;
 }
 
-.kiri-settings-destructive-fill {
-  color: #fff;
-  background: var(--kiri-coral);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-.library-settings-button[data-active] {
-  background: var(--kiri-accent-soft-alpha-10);
-  border-color: var(--kiri-accent-alpha-18);
-  color: var(--kiri-accent-strong);
-}
-
 .kiri-settings button:focus-visible,
 .kiri-settings input:focus-visible,
-.kiri-settings select:focus-visible,
-.library-root > div:first-child > div > button:focus-visible,
-.library-settings-button:focus-visible {
+.kiri-settings select:focus-visible {
   outline: 3px solid var(--kiri-accent-alpha-32);
   outline-offset: 2px;
 }

@@ -58,13 +58,12 @@ export function OcrSettingsSection({
         </div>
       )}
 
-      <div className="kiri-settings-card ocr-engine-list" role="radiogroup" aria-label={t("Active OCR engine")}>
+      <div className="kiri-settings-card ocr-engine-list" role="group" aria-label={t("Active OCR engine")}>
         <div className="ocr-engine-row" data-active={localActive || undefined}>
           <button
             type="button"
             className="ocr-engine-choice"
-            role="radio"
-            aria-checked={localActive}
+            aria-pressed={localActive}
             onClick={() => onActivate({ kind: "local" })}
             disabled={busy}
           >
@@ -90,8 +89,7 @@ export function OcrSettingsSection({
               <button
                 type="button"
                 className="ocr-engine-choice"
-                role="radio"
-                aria-checked={active}
+                aria-pressed={active}
                 onClick={() => onActivate({ kind: "profile", profileId: profile.id })}
                 disabled={busy || !profile.hasApiKey}
                 title={

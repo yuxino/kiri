@@ -146,6 +146,7 @@ export function ViewerWindow(props: { id: string }) {
 
   return (
     <div
+      className="kiri-dark"
       style={{
         position: "fixed",
         inset: 0,
@@ -262,7 +263,10 @@ export function ViewerWindow(props: { id: string }) {
       ) : null}
 
       <button
+        type="button"
+        className="kiri-icon-button kiri-icon-button--hud"
         onClick={close}
+        aria-label={t("Close · Esc")}
         title={t("Close · Esc")}
         style={{
           position: "absolute",
@@ -271,13 +275,6 @@ export function ViewerWindow(props: { id: string }) {
           width: 30,
           height: 30,
           borderRadius: 10,
-          border: "1px solid rgba(255,255,255,0.16)",
-          background: "rgba(0,0,0,0.55)",
-          color: "#fff",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
         }}
       >
         <KiriIcon name="xmark" size={14} />
@@ -332,22 +329,10 @@ function ViewerButton(props: {
   return (
     <button
       type="button"
+      className="kiri-button kiri-button--secondary kiri-viewer-button"
+      data-destructive={props.destructive || undefined}
       disabled={props.disabled}
       onClick={props.onClick}
-      style={{
-        minHeight: 30,
-        padding: "0 11px",
-        border: "1px solid rgba(255,255,255,0.18)",
-        borderRadius: 9,
-        background: "rgba(255,255,255,0.07)",
-        color: props.disabled
-          ? "rgba(255,255,255,0.36)"
-          : props.destructive
-            ? "var(--kiri-coral)"
-            : "rgba(255,255,255,0.84)",
-        font: "600 11.5px var(--kiri-font-ui)",
-        cursor: props.disabled ? "default" : "pointer",
-      }}
     >
       {props.children}
     </button>

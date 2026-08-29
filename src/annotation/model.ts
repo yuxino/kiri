@@ -48,6 +48,17 @@ export const COLOR_HEX: Record<ColorPreset, string> = {
   black: "#141414",
 };
 
+export const COLOR_LABELS: Record<ColorPreset, string> = {
+  violet: "Violet",
+  cherry: "Cherry",
+  orange: "Orange",
+  yellow: "Yellow",
+  mint: "Mint",
+  blue: "Blue",
+  white: "White",
+  black: "Black",
+};
+
 export type TextBackgroundStyle = "transparent" | "dark";
 export type MosaicIntensity = "soft" | "standard" | "strong";
 export type MosaicStyle = "pixel" | "blur";

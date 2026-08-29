@@ -1198,7 +1198,6 @@ function TextEditor(props: {
         border: `1px solid ${editing.color}cc`,
         borderRadius: 7,
         resize: "none",
-        outline: "none",
         overflow: "hidden",
         whiteSpace: "pre-wrap",
         wordBreak: "break-word",

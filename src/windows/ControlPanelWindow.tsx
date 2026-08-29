@@ -106,6 +106,7 @@ export function ControlPanelWindow() {
 
   return (
     <div
+      className="kiri-dark"
       style={{
         position: "fixed",
         inset: 0,
@@ -203,51 +204,13 @@ function ControlButton(props: {
 }) {
   return (
     <button
+      type="button"
+      className="kiri-record-control-button"
+      data-danger={props.danger || undefined}
       title={props.title}
       aria-label={props.title}
       disabled={props.disabled}
       onClick={props.onClick}
-      style={{
-        width: 28,
-        height: 28,
-        borderRadius: 9,
-        border: "1px solid transparent",
-        background: props.danger ? RED : "rgba(255,255,255,0.12)",
-        color: "#fff",
-        fontSize: 13,
-        cursor: props.disabled ? "default" : "pointer",
-        opacity: props.disabled ? 0.46 : 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        transition:
-          "background 0.14s ease-out, transform 0.14s ease-out, box-shadow 0.14s ease-out, color 0.14s ease-out",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = props.danger
-          ? "#FF4D42"
-          : "#fff";
-        e.currentTarget.style.boxShadow = "none";
-        e.currentTarget.style.color = props.danger ? "#fff" : "#000";
-        e.currentTarget.style.transform = "scale(1.04)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = props.danger
-          ? RED
-          : "rgba(255,255,255,0.12)";
-        e.currentTarget.style.boxShadow = "none";
-        e.currentTarget.style.color = "#fff";
-        e.currentTarget.style.transform = "scale(1)";
-      }}
-      onMouseDown={(e) => {
-        e.currentTarget.style.transform = "scale(0.92)";
-      }}
-      onMouseUp={(e) => {
-        e.currentTarget.style.transform = "scale(1)";
-      }}
-      onPointerLeave={(e) => {
-        e.currentTarget.style.transform = "scale(1)";
-      }}
     >
       <KiriIcon name={props.icon} size={13} />
     </button>

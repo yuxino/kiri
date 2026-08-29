@@ -32,6 +32,7 @@ import {
 } from "../annotation/geom";
 import {
   COLOR_HEX,
+  COLOR_LABELS,
   COLOR_PRESETS,
   type AppearanceSettings,
   type MosaicIntensity,
@@ -1179,6 +1180,7 @@ function ModeButton(props: {
 }) {
   return (
     <button
+      type="button"
       onClick={props.onClick}
       className="kiri-mode-btn"
       data-active={props.active || undefined}
@@ -1390,18 +1392,13 @@ function OcrPanel(props: {
         </div>
         <button
           type="button"
+          className="kiri-icon-button kiri-icon-button--hud"
           aria-label={t("Close")}
           title={t("Close")}
           onClick={onClose}
           style={{
-            ...iconButtonStyle,
             width: 28,
             height: 28,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            border: "1px solid rgba(255,255,255,0.15)",
-            background: "rgba(255,255,255,0.055)",
           }}
         >
           <KiriIcon name="xmark" size={11} />
@@ -1460,19 +1457,7 @@ const sizeInputStyle: React.CSSProperties = {
   color: "#fff",
   fontSize: 11,
   textAlign: "center",
-  outline: "none",
   fontFamily: "var(--kiri-font-ui)",
-};
-
-const iconButtonStyle: React.CSSProperties = {
-  width: 24,
-  height: 24,
-  borderRadius: 8,
-  border: "none",
-  background: "transparent",
-  color: "#fff",
-  fontSize: 11,
-  cursor: "pointer",
 };
 
 function RecordOptionsPanel(props: {
@@ -1559,7 +1544,7 @@ function RecordOptionsPanel(props: {
         <span style={{ font: "700 13px var(--kiri-font-ui)" }}>{t("Record Region")}</span>
       </div>
       <div
-        role="radiogroup"
+        role="group"
         aria-label={t("Recording format")}
         style={{
           display: "grid",
@@ -1577,20 +1562,10 @@ function RecordOptionsPanel(props: {
             <button
               key={format}
               type="button"
-              role="radio"
-              aria-checked={selected}
+              className="kiri-output-format"
+              data-active={selected || undefined}
+              aria-pressed={selected}
               onClick={() => onChange({ ...options, outputFormat: format })}
-              style={{
-                height: 32,
-                border: "none",
-                borderRadius: 9,
-                background: selected ? "#fff" : "transparent",
-                color: selected ? "#000" : "rgba(255,255,255,0.68)",
-                font: "700 11.5px var(--kiri-font-ui)",
-                cursor: "pointer",
-                boxShadow: selected ? "0 2px 8px rgba(0,0,0,0.2)" : "none",
-                transition: "background 0.16s ease-out, color 0.16s ease-out, box-shadow 0.16s ease-out",
-              }}
             >
               {t(format === "mp4" ? "MP4" : "GIF")}
             </button>
@@ -1657,22 +1632,18 @@ function RecordOptionsPanel(props: {
         />
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <button className="kiri-primary-button" style={{ flex: 1, minHeight: 38, borderRadius: 10 }} onClick={onStart}>
+        <button type="button" className="kiri-primary-button" style={{ flex: 1, minHeight: 38, borderRadius: 10 }} onClick={onStart}>
           {gifOutput ? t("Start GIF Recording") : t("Start Recording")}
         </button>
         <button
+          type="button"
+          className="kiri-icon-button kiri-icon-button--hud"
           aria-label={t("Cancel")}
           title={t("Cancel")}
           style={{
-            ...iconButtonStyle,
             width: 38,
             height: 38,
             flexShrink: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "rgba(255,255,255,0.06)",
             borderRadius: 10,
           }}
           onClick={onCancel}
@@ -1695,31 +1666,13 @@ function ToggleRow(props: {
   return (
     <button
       type="button"
+      className="kiri-switch-row"
       role="switch"
       aria-checked={props.checked}
       disabled={props.disabled}
       onClick={props.onToggle}
       style={{
-        width: "100%",
-        minHeight: 34,
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: "5px 10px",
-        border: "none",
         borderTop: props.divider ? "1px solid rgba(255,255,255,0.08)" : "none",
-        background: "transparent",
-        color: "#fff",
-        textAlign: "left",
-        opacity: props.disabled ? 0.4 : 1,
-        cursor: props.disabled ? "default" : "pointer",
-        transition: "background 0.14s ease-out, opacity 0.14s ease-out",
-      }}
-      onMouseEnter={(event) => {
-        if (!props.disabled) event.currentTarget.style.background = "rgba(255,255,255,0.055)";
-      }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.background = "transparent";
       }}
     >
       <span style={{ font: "550 12px var(--kiri-font-ui)" }}>
@@ -1957,6 +1910,7 @@ function Toolbar(props: ToolbarProps) {
             <input
               type="range"
               className="kiri-range"
+              aria-label={t(tool === "text" ? "Font" : tool === "mosaic" || tool === "pen" ? "Brush" : "Line")}
               min={slider.min}
               max={slider.max}
               value={slider.value}
@@ -1984,6 +1938,7 @@ function Toolbar(props: ToolbarProps) {
           <ColorSwatch
             key={preset}
             color={COLOR_HEX[preset]}
+            label={t(COLOR_LABELS[preset])}
             selected={appearance.colorPreset === preset}
             onClick={() => setAppearance({ ...appearance, colorPreset: preset })}
           />
@@ -2043,51 +1998,14 @@ function ToolButton(props: {
 }) {
   return (
     <button
+      type="button"
+      className="kiri-toolbar-button"
+      data-active={props.primary || props.active || undefined}
       title={props.title}
+      aria-label={props.title}
+      aria-pressed={props.active}
       onClick={props.onClick}
       disabled={props.disabled}
-      style={{
-        width: 32,
-        height: 32,
-        borderRadius: 10,
-        border: props.primary || props.active
-          ? "1px solid #fff"
-          : "1px solid transparent",
-        background: props.primary || props.active ? "#fff" : "transparent",
-        color: props.primary || props.active ? "#000" : "#fff",
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: props.disabled ? "default" : "pointer",
-        opacity: props.disabled ? 0.35 : 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        boxShadow: "none",
-        transition: "transform 0.14s ease-out, background 0.14s ease-out",
-      }}
-      onMouseEnter={(e) => {
-        if (props.primary && !props.disabled) {
-          e.currentTarget.style.opacity = "0.82";
-        } else if (!props.active && !props.disabled) {
-          e.currentTarget.style.background = "rgba(255,255,255,0.10)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (props.primary) {
-          e.currentTarget.style.opacity = "1";
-        } else if (!props.active) {
-          e.currentTarget.style.background = "transparent";
-        }
-      }}
-      onMouseDown={(e) => {
-        e.currentTarget.style.transform = "scale(0.94)";
-      }}
-      onMouseUp={(e) => {
-        e.currentTarget.style.transform = "scale(1)";
-      }}
-      onPointerLeave={(e) => {
-        e.currentTarget.style.transform = "scale(1)";
-      }}
     >
       {props.icon ? (
         <KiriIcon name={props.icon} size={15} />
@@ -2098,21 +2016,19 @@ function ToolButton(props: {
   );
 }
 
-function ColorSwatch(props: { color: string; selected: boolean; onClick(): void }) {
+function ColorSwatch(props: { color: string; label: string; selected: boolean; onClick(): void }) {
   return (
     <button
+      type="button"
+      className="kiri-toolbar-swatch"
+      data-selected={props.selected || undefined}
+      aria-label={props.label}
+      title={props.label}
+      aria-pressed={props.selected}
       onClick={props.onClick}
       style={{
         width: 22,
-        height: 28,
-        borderRadius: 8,
-        border: "none",
-        background: props.selected ? `${props.color}33` : "transparent",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        position: "relative",
+        ...(props.selected ? { background: `${props.color}33` } : {}),
       }}
     >
       {props.selected && (
@@ -2146,36 +2062,18 @@ function SegmentedControl(props: {
   onChange(index: number): void;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        background: "rgba(255,255,255,0.08)",
-        borderRadius: 8,
-        padding: 2,
-        gap: 2,
-      }}
-    >
+    <div className="kiri-toolbar-segments">
       {props.segments.map((segment, index) => (
         <button
+          type="button"
+          className="kiri-toolbar-segment"
+          data-active={props.value === index || undefined}
           key={index}
           title={segment.title}
+          aria-pressed={props.value === index}
           onClick={() => props.onChange(index)}
           style={{
             minWidth: props.width,
-            height: 24,
-            padding: "0 7px",
-            borderRadius: 6,
-            border: "none",
-            background: props.value === index ? "#fff" : "transparent",
-            color: props.value === index ? "#000" : "#fff",
-            fontSize: 10,
-            fontWeight: 500,
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 4,
-            whiteSpace: "nowrap",
           }}
         >
           {segment.icon ? (

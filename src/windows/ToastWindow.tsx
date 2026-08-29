@@ -597,9 +597,23 @@ function ToastStyles() {
         background: var(--kiri-group-fill);
         color: var(--kiri-label);
         cursor: pointer;
+        transition:
+          border-color var(--kiri-motion-hover) ease-out,
+          background var(--kiri-motion-hover) ease-out,
+          transform var(--kiri-motion-hover) ease-out;
       }
 
-      .kiri-completion-preview:disabled { cursor: default; }
+      .kiri-completion-preview:hover:not(:disabled) {
+        border-color: var(--kiri-accent-alpha-32);
+        background: var(--kiri-accent-soft-alpha-10);
+      }
+
+      .kiri-completion-preview:active:not(:disabled) { transform: scale(0.97); }
+
+      .kiri-completion-preview:disabled {
+        cursor: default;
+        opacity: 0.72;
+      }
 
       .kiri-completion-preview img {
         width: 100%;
@@ -703,6 +717,11 @@ function ToastStyles() {
         font: 600 11.5px var(--kiri-font-ui);
         white-space: nowrap;
         cursor: pointer;
+        transition:
+          background var(--kiri-motion-hover) ease-out,
+          border-color var(--kiri-motion-hover) ease-out,
+          color var(--kiri-motion-hover) ease-out,
+          transform var(--kiri-motion-hover) ease-out;
       }
 
       .kiri-completion-action.is-accent {
@@ -717,6 +736,8 @@ function ToastStyles() {
       }
 
       .kiri-completion-action:hover:not(:disabled) { border-color: var(--kiri-accent-alpha-32); }
+
+      .kiri-completion-action:active:not(:disabled) { transform: scale(0.96); }
 
       .kiri-completion-action:disabled {
         color: var(--kiri-disabled-label);

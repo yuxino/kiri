@@ -22,6 +22,7 @@ import { KiriIcon, type IconName } from "../components/KiriIcons";
 import {
   getLibraryCardInteraction,
   getLibraryCardPrimaryAction,
+  getMenuFocusIndex,
 } from "./library-card-interaction.js";
 
 const SettingsView = React.lazy(() =>
@@ -99,6 +100,7 @@ export function LibraryWindow() {
   const [band, setBand] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const gridScrollRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const refreshGenerationRef = useRef(0);
   const queryRef = useRef(query);
   queryRef.current = query;
@@ -227,18 +229,42 @@ export function LibraryWindow() {
     return { x, y, w, h };
   }, [band]);
 
-  // Esc clears the selection.
+  const closeMenu = useCallback((restoreFocus = false) => {
+    const trigger = menuTriggerRef.current;
+    setMenuFor(null);
+    setMenuPos(null);
+    menuTriggerRef.current = null;
+    if (restoreFocus && trigger?.isConnected) {
+      requestAnimationFrame(() => trigger.focus());
+    }
+  }, []);
+
+  // Esc closes the active menu first, otherwise it clears batch selection.
   useEffect(() => {
-    if (selection.size === 0) return;
+    if (selection.size === 0 && menuFor === null) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        clearSelection();
+        if (menuFor !== null) {
+          closeMenu(true);
+        } else {
+          clearSelection();
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selection.size]);
+  }, [closeMenu, menuFor, selection.size]);
+
+  useEffect(() => {
+    if (menuFor === null) return;
+    const frame = requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLButtonElement>(".kiri-card-menu button:not(:disabled)")
+        ?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [menuFor]);
 
   // Changing section/query clears the selection so the bar never points at
   // assets that are no longer visible.
@@ -379,12 +405,12 @@ export function LibraryWindow() {
     loaded && (libraryStatusError || libraryStatus?.availability === "unavailable");
   const libraryMigrating = loaded && libraryStatus?.availability === "migrating";
 
-  const openMenu = (id: string, x: number, y: number) => {
+  const openMenu = (id: string, x: number, y: number, trigger?: HTMLButtonElement) => {
     if (menuFor === id) {
-      setMenuFor(null);
-      setMenuPos(null);
+      closeMenu();
       return;
     }
+    menuTriggerRef.current = trigger ?? null;
     setMenuFor(id);
     setMenuPos({ x, y });
   };
@@ -394,12 +420,11 @@ export function LibraryWindow() {
     const close = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && target.closest(".kiri-card-menu")) return;
-      setMenuFor(null);
-      setMenuPos(null);
+      closeMenu();
     };
     window.addEventListener("mousedown", close);
     return () => window.removeEventListener("mousedown", close);
-  }, []);
+  }, [closeMenu]);
 
   // Keep the open menu inside the window (flip when near the right/bottom
   // edge) — mirrors how native context menus avoid the screen edges.
@@ -424,14 +449,10 @@ export function LibraryWindow() {
   }, [menuPos]);
 
   // Run a menu action then close the menu (native menus dismiss on click).
-  const closeMenu = useCallback(() => {
-    setMenuFor(null);
-    setMenuPos(null);
-  }, []);
   const run = useCallback(
-    (fn: () => void) => () => {
+    (fn: () => void, restoreFocus = true) => () => {
       fn();
-      closeMenu();
+      closeMenu(restoreFocus);
     },
     [closeMenu],
   );
@@ -494,7 +515,32 @@ export function LibraryWindow() {
   const itemMenu = useCallback(
     (asset: AssetDto) => (
       <div
+        id={`kiri-card-menu-${asset.id}`}
         className="kiri-card-menu"
+        role="menu"
+        aria-label={t("More Actions")}
+        onKeyDown={(event) => {
+          if (event.key === "Tab") {
+            event.preventDefault();
+            closeMenu(true);
+            return;
+          }
+          if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+          const items = [
+            ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+              '[role="menuitem"]:not(:disabled)',
+            ),
+          ];
+          if (items.length === 0) return;
+          event.preventDefault();
+          const current = items.indexOf(document.activeElement as HTMLButtonElement);
+          const next = getMenuFocusIndex(
+            event.key as "ArrowDown" | "ArrowUp" | "Home" | "End",
+            current,
+            items.length,
+          );
+          items[next]?.focus();
+        }}
         onClick={(event) => event.stopPropagation()}
         onDoubleClick={(event) => event.stopPropagation()}
         style={{
@@ -527,14 +573,14 @@ export function LibraryWindow() {
           label={t("Rename")}
           onClick={run(() => {
             window.dispatchEvent(new CustomEvent(`kiri-rename:${asset.id}`));
-          })}
+          }, false)}
         />
         <MenuRow
           icon="tag"
           label={t("Add Tag…")}
           onClick={run(() => {
             window.dispatchEvent(new CustomEvent(`kiri-addtag:${asset.id}`));
-          })}
+          }, false)}
         />
         <MenuRow
           icon={asset.kind === "image" ? "pencil.tip" : "photo.on.rectangle"}
@@ -619,6 +665,7 @@ export function LibraryWindow() {
     ),
     [
       assetAvailability,
+      closeMenu,
       gifConversionIds,
       menuStyle,
       restoreMissing,
@@ -685,6 +732,7 @@ export function LibraryWindow() {
                 {query && (
                   <button
                     type="button"
+                    className="kiri-search-clear"
                     aria-label={t("Clear Search")}
                     title={t("Clear Search")}
                     onClick={() => {
@@ -736,6 +784,7 @@ export function LibraryWindow() {
             />
             {showingTrash && assets.length > 0 && (
               <button
+                type="button"
                 className="kiri-button kiri-button--destructive"
                 title={t("Empty Trash")}
                 onClick={() =>
@@ -935,7 +984,7 @@ export function LibraryWindow() {
                     availability={assetAvailability[asset.id]}
                     thumbnailRevision={thumbnailRevisions[asset.id] ?? 0}
                     menuOpen={menuFor === asset.id}
-                    onMenu={(x, y) => openMenu(asset.id, x, y)}
+                    onMenu={(x, y, trigger) => openMenu(asset.id, x, y, trigger)}
                     menu={menuFor === asset.id ? itemMenu(asset) : null}
                     selected={selection.has(asset.id)}
                     selectionActive={selectionIds.length > 0}
@@ -1079,6 +1128,7 @@ export function LibraryWindow() {
           </span>
           {error.recovery && (
             <button
+              type="button"
               className="kiri-primary-button"
               style={{ minHeight: 30, flexShrink: 0, whiteSpace: "nowrap" }}
               onClick={() => {
@@ -1091,14 +1141,11 @@ export function LibraryWindow() {
             </button>
           )}
           <button
+            type="button"
+            className="kiri-icon-button kiri-inline-dismiss"
+            aria-label={t("Close")}
+            title={t("Close")}
             style={{
-              border: "none",
-              background: "transparent",
-              color: "var(--kiri-secondary-label)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
               flexShrink: 0,
             }}
             onClick={() => setError(null)}
@@ -1175,7 +1222,7 @@ function AssetCard(props: {
   availability?: AssetAvailability;
   thumbnailRevision: number;
   menuOpen: boolean;
-  onMenu(x: number, y: number): void;
+  onMenu(x: number, y: number, trigger?: HTMLButtonElement): void;
   menu: React.ReactNode;
   onOpen(): void;
   selected: boolean;
@@ -1199,6 +1246,7 @@ function AssetCard(props: {
     onRestoreMissing,
   } = props;
   const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
   const [previewVisible, setPreviewVisible] = useState(false);
@@ -1260,20 +1308,25 @@ function AssetCard(props: {
     return () => observer.disconnect();
   }, []);
   const lastOpenAtRef = useRef(0);
+  const highlighted = hovered || focused;
   const interaction = getLibraryCardInteraction({
     selectionActive,
     selected,
     menuOpen,
     editingTitle,
-    hovered,
+    highlighted,
   });
   const primaryAction = getLibraryCardPrimaryAction(asset.kind);
-  const handleClick = (event: React.MouseEvent) => {
-    if (event.defaultPrevented || !interaction.opensOnClick) return;
+  const openCard = () => {
+    if (!interaction.opensOnClick) return;
     const now = Date.now();
     if (now - lastOpenAtRef.current < 500) return;
     lastOpenAtRef.current = now;
     onOpen();
+  };
+  const handleClick = (event: React.MouseEvent) => {
+    if (event.defaultPrevented) return;
+    openCard();
   };
   const [titleDraft, setTitleDraft] = useState(asset.title ?? "");
   const [addingTag, setAddingTag] = useState(false);
@@ -1300,14 +1353,17 @@ function AssetCard(props: {
     objectFit: "contain",
     padding: 8,
     boxSizing: "border-box",
-    transform: hovered ? "scale(1.018)" : "scale(1)",
+    transform: highlighted ? "scale(1.018)" : "scale(1)",
     transition: "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)",
   };
   const contentAvailable = availability === undefined || availability === "ready";
   return (
     <div
       ref={registerRef}
+      className="library-asset-card"
       data-card={asset.id}
+      role="article"
+      aria-label={asset.title ?? asset.filename}
       onClick={handleClick}
       onContextMenu={(e) => {
         // Right-click shows the localized action menu at the cursor
@@ -1317,16 +1373,20 @@ function AssetCard(props: {
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocused(false);
+      }}
       style={{
         position: "relative",
         background: "var(--kiri-card)",
-        border: `1px solid ${selected ? "var(--kiri-accent-strong)" : hovered ? "color-mix(in srgb, var(--kiri-label) 34%, var(--kiri-surface-border))" : "var(--kiri-surface-border)"}`,
+        border: `1px solid ${selected ? "var(--kiri-accent-strong)" : highlighted ? "color-mix(in srgb, var(--kiri-label) 34%, var(--kiri-surface-border))" : "var(--kiri-surface-border)"}`,
         borderRadius: 16,
         padding: 9,
-        transform: hovered && !selected ? "translateY(-2px)" : "none",
+        transform: highlighted && !selected ? "translateY(-2px)" : "none",
         boxShadow: selected
           ? "0 0 0 2px var(--kiri-accent-alpha-18), 0 10px 24px rgba(0,0,0,0.08)"
-          : hovered
+          : highlighted
             ? "0 10px 24px rgba(0,0,0,0.075)"
             : "0 1px 0 rgba(0,0,0,0.025)",
         transition: "transform 0.18s ease-out, box-shadow 0.18s ease-out, border-color 0.18s ease-out",
@@ -1475,6 +1535,7 @@ function AssetCard(props: {
       <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 8, padding: "0 1px 1px", position: "relative" }}>
         {editingTitle ? (
           <input
+            className="kiri-inline-rename-input"
             autoFocus
             value={titleDraft}
             onChange={(e) => setTitleDraft(e.target.value)}
@@ -1504,7 +1565,6 @@ function AssetCard(props: {
               borderRadius: 9,
               background: "var(--kiri-group-fill)",
               padding: "0 10px",
-              outline: "none",
               boxShadow: "0 0 0 3px var(--kiri-accent-alpha-18)",
               caretColor: "var(--kiri-accent)",
             }}
@@ -1562,19 +1622,15 @@ function AssetCard(props: {
             </span>
           </div>
         )}
-        {interaction.showsActions && <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 1,
-            padding: 2,
-            borderRadius: 9,
-            background: "var(--kiri-group-fill)",
-          }}
+        <div
+          className="kiri-card-actions"
+          data-visible={interaction.showsActions || undefined}
         >
           <button
+            type="button"
             className="kiri-icon-button"
             title={t(primaryAction.title)}
+            aria-label={t(primaryAction.title)}
             disabled={!contentAvailable}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
@@ -1606,8 +1662,10 @@ function AssetCard(props: {
             <KiriIcon name={primaryAction.icon} size={14} />
           </button>
           <button
+            type="button"
             className="kiri-icon-button"
             title={t("Copy")}
+            aria-label={t("Copy")}
             disabled={!contentAvailable}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
@@ -1630,9 +1688,12 @@ function AssetCard(props: {
             <KiriIcon name="doc.on.doc" size={14} />
           </button>
           <button
-            className="kiri-icon-button"
+            type="button"
+            className="kiri-icon-button kiri-card-favorite"
             title={asset.isFavorite ? t("Remove Favorite") : t("Favorite")}
+            aria-label={asset.isFavorite ? t("Remove Favorite") : t("Favorite")}
             aria-pressed={asset.isFavorite}
+            data-favorite={asset.isFavorite || undefined}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
@@ -1647,29 +1708,27 @@ function AssetCard(props: {
               width: 26,
               height: 26,
               borderRadius: 8,
-              color: asset.isFavorite ? "var(--kiri-label)" : "var(--kiri-disabled-label)",
               fontSize: 13,
               cursor: "pointer",
-            }}
-            onMouseEnter={(e) => {
-              if (!asset.isFavorite) e.currentTarget.style.color = "var(--kiri-label)";
-            }}
-            onMouseLeave={(e) => {
-              if (!asset.isFavorite) e.currentTarget.style.color = "var(--kiri-disabled-label)";
             }}
           >
             <KiriIcon name={asset.isFavorite ? "star.fill" : "star"} size={15} />
           </button>
           <button
+            type="button"
             className="kiri-icon-button"
             title={t("More Actions")}
+            aria-label={t("More Actions")}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            aria-controls={`kiri-card-menu-${asset.id}`}
             onMouseDown={(e) => e.preventDefault()}
             onClick={(e) => {
               e.stopPropagation();
               const rect = e.currentTarget.getBoundingClientRect();
               // Anchor the menu below the ⋯ button; edge-flip handled in
               // menuStyle (left-aligned so a near-right flip stays sane).
-              onMenu(rect.left, rect.bottom + 4);
+              onMenu(rect.left, rect.bottom + 4, e.currentTarget);
             }}
             onDoubleClick={(e) => {
               e.stopPropagation();
@@ -1684,7 +1743,7 @@ function AssetCard(props: {
           >
             <KiriIcon name="ellipsis.circle" size={14} />
           </button>
-        </div>}
+        </div>
         {menuOpen &&
           createPortal(
             // Render the context menu outside the card subtree: the card's
@@ -1720,6 +1779,10 @@ function AssetCard(props: {
             >
               {tag}
               <button
+                type="button"
+                className="kiri-tag-remove-button"
+                aria-label={`${t("Remove tag")}: ${tag}`}
+                title={t("Remove tag")}
                 onClick={(e) => {
                   e.stopPropagation();
                   void api
@@ -1728,15 +1791,6 @@ function AssetCard(props: {
                       asset.tags.filter((existing) => existing !== tag),
                     )
                     .catch(() => {});
-                }}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  color: "inherit",
-                  cursor: "pointer",
-                  padding: 0,
-                  display: "flex",
-                  fontSize: 9,
                 }}
               >
                 <KiriIcon name="xmark" size={8} />
@@ -1771,7 +1825,6 @@ function AssetCard(props: {
                 borderRadius: 7,
                 background: "var(--kiri-group-fill)",
                 padding: "2px 6px",
-                outline: "none",
               }}
             />
           )}
@@ -1790,6 +1843,10 @@ function MenuRow(props: {
 }) {
   return (
     <button
+      type="button"
+      className="kiri-menu-row"
+      data-destructive={props.destructive || undefined}
+      role="menuitem"
       onClick={(event) => {
         // Portaled menu events still follow the React component tree. Stop at
         // the row before its action closes/unmounts the menu; otherwise the
@@ -1799,39 +1856,6 @@ function MenuRow(props: {
       }}
       onDoubleClick={(event) => event.stopPropagation()}
       disabled={props.disabled}
-      style={{
-        background: "transparent",
-        border: "none",
-        textAlign: "left",
-        padding: "7px 10px",
-        borderRadius: 9,
-        color: props.disabled
-          ? "var(--kiri-disabled-label)"
-          : props.destructive
-            ? "var(--kiri-coral)"
-            : "var(--kiri-label)",
-        font: "400 12.5px var(--kiri-font-ui)",
-        cursor: props.disabled ? "default" : "pointer",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        transition: "background 0.12s ease-out, transform 0.06s ease-out",
-      }}
-      onMouseEnter={(e) => {
-        if (!props.disabled) {
-          e.currentTarget.style.background =
-            "color-mix(in srgb, var(--kiri-accent) 18%, transparent)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-      }}
-      onMouseDown={(e) => {
-        e.currentTarget.style.transform = "translateY(0.5px)";
-      }}
-      onMouseUp={(e) => {
-        e.currentTarget.style.transform = "none";
-      }}
     >
       {props.icon && (
         <span
@@ -2013,49 +2037,10 @@ function BatchBarButton(props: {
   const { icon, label, onClick, destructive, accent } = props;
   return (
     <button
+      type="button"
+      className="kiri-batch-button"
+      data-variant={destructive ? "destructive" : accent ? "accent" : undefined}
       onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
-        height: 32,
-        padding: "0 12px",
-        borderRadius: 10,
-        border: "1px solid transparent",
-        background: destructive
-          ? "rgba(200,62,54,0.14)"
-          : accent
-            ? "var(--kiri-accent-soft-alpha-10)"
-            : "transparent",
-        color: destructive ? "var(--kiri-coral)" : accent ? "var(--kiri-accent)" : "var(--kiri-label)",
-        font: "600 12px var(--kiri-font-ui)",
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        transition: "background 0.14s ease-out, transform 0.14s ease-out",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = destructive
-          ? "rgba(200,62,54,0.24)"
-          : accent
-            ? "var(--kiri-accent-alpha-18)"
-            : "color-mix(in srgb, var(--kiri-group-fill) 70%, transparent)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = destructive
-          ? "rgba(200,62,54,0.14)"
-          : accent
-            ? "var(--kiri-accent-soft-alpha-10)"
-            : "transparent";
-      }}
-      onMouseDown={(e) => {
-        e.currentTarget.style.transform = "scale(0.95)";
-      }}
-      onMouseUp={(e) => {
-        e.currentTarget.style.transform = "scale(1)";
-      }}
-      onPointerLeave={(e) => {
-        e.currentTarget.style.transform = "scale(1)";
-      }}
     >
       <KiriIcon name={icon} size={13} />
       {label}

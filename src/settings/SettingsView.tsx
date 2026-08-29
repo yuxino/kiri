@@ -381,12 +381,12 @@ function GeneralSettingsSection() {
           <strong>{t("Language")}</strong>
           <span>{t("Changes apply to every Kiri window.")}</span>
         </div>
-        <div className="kiri-language-picker" role="radiogroup" aria-label={t("Language")}>
+        <div className="kiri-language-picker" role="group" aria-label={t("Language")}>
           {(["en", "zh-Hans", "ja"] as const).map((item) => (
             <button
               type="button"
-              role="radio"
-              aria-checked={language === item}
+              className="kiri-language-option"
+              aria-pressed={language === item}
               data-active={language === item || undefined}
               key={item}
               onClick={() => switchTo(item)}
@@ -549,7 +549,7 @@ function DeleteProfileDialog({
           </button>
           <button
             type="button"
-            className="kiri-button kiri-button--destructive kiri-settings-destructive-fill"
+            className="kiri-button kiri-button--destructive kiri-button--destructive-fill"
             onClick={onDelete}
             disabled={busy}
           >

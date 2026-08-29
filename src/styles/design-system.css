@@ -125,12 +125,13 @@ body,
   box-shadow: none;
 }
 
-.kiri-primary-button:active {
+.kiri-primary-button:active:not(:disabled) {
   transform: scale(0.97);
   box-shadow: none;
 }
 
 .kiri-primary-button:disabled {
+  cursor: default;
   filter: saturate(0.18);
   opacity: 0.48;
 }
@@ -336,6 +337,13 @@ textarea {
   -webkit-appearance: none;
 }
 
+/* The search container owns the focus ring, so the nested field must not
+   draw a second outline inside it. */
+.kiri-library-search input:focus-visible,
+.kiri-inline-rename-input:focus-visible {
+  outline: none;
+}
+
 .kiri-library-search input::placeholder {
   color: var(--kiri-secondary-label);
   opacity: 0.82;
@@ -359,9 +367,13 @@ textarea {
   cursor: pointer;
 }
 
-.kiri-library-search button:hover {
+.kiri-search-clear:hover {
   color: var(--kiri-label);
   background: var(--kiri-accent-soft-alpha-10);
+}
+
+.kiri-search-clear:active {
+  transform: scale(0.9);
 }
 
 .library-section-picker {
@@ -615,8 +627,19 @@ textarea {
   }
 }
 
-*:focus {
-  outline: none;
+/* Every native control keeps a visible keyboard focus indicator. Individual
+   surfaces may refine the color, but must not remove the interaction state. */
+:where(button, input, select, textarea, [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--kiri-accent);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.96);
 }
 
 /* ---------------------------------------------------------------------------
@@ -646,7 +669,7 @@ textarea {
   filter: none;
 }
 
-.kiri-button:active {
+.kiri-button:active:not(:disabled) {
   transform: scale(0.96);
 }
 
@@ -666,7 +689,7 @@ textarea {
   box-shadow: none;
 }
 
-.kiri-button--primary:hover {
+.kiri-button--primary:hover:not(:disabled) {
   box-shadow: none;
   opacity: 0.82;
 }
@@ -680,7 +703,7 @@ textarea {
   border: 1px solid var(--kiri-surface-border);
 }
 
-.kiri-button--secondary:hover {
+.kiri-button--secondary:hover:not(:disabled) {
   background: var(--kiri-group-fill);
   border-color: var(--kiri-accent);
 }
@@ -694,9 +717,33 @@ textarea {
   border: 1px solid transparent;
 }
 
-.kiri-button--destructive:hover {
+.kiri-button--destructive:hover:not(:disabled) {
   background: rgba(200, 62, 54, 0.1);
   border-color: rgba(200, 62, 54, 0.35);
+}
+
+.kiri-button--destructive-fill {
+  color: #ffffff;
+  background: var(--kiri-coral);
+  border-color: var(--kiri-coral);
+}
+
+.kiri-button--destructive-fill:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--kiri-coral) 86%, #000000);
+  border-color: color-mix(in srgb, var(--kiri-coral) 86%, #000000);
+}
+
+.kiri-button--ghost {
+  min-height: 32px;
+  padding: 0 12px;
+  color: var(--kiri-label);
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.kiri-button--ghost:hover:not(:disabled) {
+  background: var(--kiri-group-fill);
+  border-color: var(--kiri-surface-border);
 }
 
 /* Icon-only (round) */
@@ -717,13 +764,38 @@ textarea {
     transform var(--kiri-motion-hover) ease-out;
 }
 
-.kiri-icon-button:hover {
+.kiri-icon-button:hover:not(:disabled) {
   background: var(--kiri-group-fill);
   color: var(--kiri-label);
 }
 
-.kiri-icon-button:active {
+.kiri-icon-button:active:not(:disabled) {
   transform: scale(0.92);
+}
+
+.kiri-icon-button:disabled {
+  color: var(--kiri-disabled-label);
+  cursor: default;
+  opacity: 0.46;
+}
+
+.kiri-icon-button--hud {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+}
+
+.kiri-icon-button--hud:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.kiri-inline-dismiss {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  border-radius: 7px;
 }
 
 /* Context menu (library cards) — frosty elevated panel with a quick
@@ -793,7 +865,7 @@ textarea {
     opacity 0.14s ease-out;
 }
 
-.kiri-mode-btn:hover:not([data-active]) {
+.kiri-mode-btn:hover:not([data-active]):not(:active) {
   background: rgba(255, 255, 255, 0.12);
   color: rgba(255, 255, 255, 0.92);
   transform: translateY(-1px);
@@ -853,4 +925,382 @@ textarea {
   text-align: right;
   font: 500 9.5px ui-monospace, SFMono-Regular, Menlo, monospace;
   color: rgba(255, 255, 255, 0.6);
+}
+
+/* Dark capture/editor controls share the same explicit state model. */
+.kiri-toolbar-button {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #ffffff;
+  font: 600 12px var(--kiri-font-ui);
+  cursor: pointer;
+  box-shadow: none;
+  transition:
+    background var(--kiri-motion-hover) ease-out,
+    border-color var(--kiri-motion-hover) ease-out,
+    color var(--kiri-motion-hover) ease-out,
+    opacity var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-toolbar-button:hover:not(:disabled):not([data-active]) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.kiri-toolbar-button[data-active] {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #000000;
+}
+
+.kiri-toolbar-button[data-active]:hover:not(:disabled) {
+  opacity: 0.82;
+}
+
+.kiri-toolbar-button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.kiri-toolbar-button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.kiri-toolbar-swatch {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  transition:
+    background var(--kiri-motion-hover) ease-out,
+    border-color var(--kiri-motion-hover) ease-out,
+    filter var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-toolbar-swatch:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: scale(1.08);
+}
+
+.kiri-toolbar-swatch[data-selected]:hover:not(:disabled) {
+  filter: brightness(1.16);
+}
+
+.kiri-toolbar-swatch:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.kiri-toolbar-segments {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.kiri-toolbar-segment {
+  min-width: 28px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.76);
+  font: 500 10px var(--kiri-font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--kiri-motion-hover) ease-out,
+    border-color var(--kiri-motion-hover) ease-out,
+    color var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-toolbar-segment:hover:not([data-active]) {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.kiri-toolbar-segment[data-active] {
+  background: #ffffff;
+  color: #000000;
+}
+
+.kiri-toolbar-segment:active {
+  transform: scale(0.94);
+}
+
+.kiri-output-format {
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.68);
+  font: 700 11.5px var(--kiri-font-ui);
+  cursor: pointer;
+  transition:
+    background var(--kiri-motion-hover) ease-out,
+    border-color var(--kiri-motion-hover) ease-out,
+    color var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-output-format:hover:not([data-active]) {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.kiri-output-format[data-active] {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #000000;
+}
+
+.kiri-switch-row {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--kiri-motion-hover) ease-out,
+    opacity var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-switch-row:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.kiri-switch-row:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.kiri-switch-row:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* Viewer and recording HUD controls. */
+.kiri-viewer-button {
+  min-height: 30px;
+  padding: 0 11px;
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.84);
+  font-size: 11.5px;
+}
+
+.kiri-viewer-button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.38);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.kiri-viewer-button[data-destructive] {
+  color: var(--kiri-coral);
+}
+
+.kiri-record-control-button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  cursor: pointer;
+  transition:
+    background var(--kiri-motion-hover) ease-out,
+    color var(--kiri-motion-hover) ease-out,
+    opacity var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-record-control-button[data-danger] {
+  background: #ff3b30;
+}
+
+.kiri-record-control-button:hover:not(:disabled) {
+  background: #ffffff;
+  color: #000000;
+  transform: scale(1.04);
+}
+
+.kiri-record-control-button[data-danger]:hover:not(:disabled) {
+  background: #ff4d42;
+  color: #ffffff;
+}
+
+.kiri-record-control-button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.kiri-record-control-button:disabled {
+  cursor: default;
+  opacity: 0.46;
+}
+
+/* Library actions that previously relied on pointer-event style mutation. */
+.kiri-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--kiri-label);
+  font: 400 12.5px var(--kiri-font-ui);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--kiri-motion-hover) ease-out,
+    transform 0.06s ease-out;
+}
+
+.kiri-menu-row:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--kiri-accent) 18%, transparent);
+}
+
+.kiri-menu-row:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+.kiri-menu-row[data-destructive] {
+  color: var(--kiri-coral);
+}
+
+.kiri-menu-row:disabled {
+  color: var(--kiri-disabled-label);
+  cursor: default;
+}
+
+.kiri-batch-button {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--kiri-label);
+  font: 600 12px var(--kiri-font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--kiri-motion-hover) ease-out,
+    border-color var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-batch-button[data-variant="destructive"] {
+  background: rgba(200, 62, 54, 0.14);
+  color: var(--kiri-coral);
+}
+
+.kiri-batch-button[data-variant="accent"] {
+  background: var(--kiri-accent-soft-alpha-10);
+  color: var(--kiri-accent);
+}
+
+.kiri-batch-button:hover {
+  background: color-mix(in srgb, var(--kiri-group-fill) 70%, transparent);
+  border-color: var(--kiri-surface-border);
+}
+
+.kiri-batch-button[data-variant="destructive"]:hover {
+  background: rgba(200, 62, 54, 0.24);
+  border-color: rgba(200, 62, 54, 0.3);
+}
+
+.kiri-batch-button[data-variant="accent"]:hover {
+  background: var(--kiri-accent-alpha-18);
+  border-color: var(--kiri-accent-alpha-18);
+}
+
+.kiri-batch-button:active {
+  transform: scale(0.95);
+}
+
+.kiri-tag-remove-button {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.kiri-tag-remove-button:hover {
+  background: var(--kiri-accent-alpha-18);
+}
+
+.kiri-card-favorite {
+  color: var(--kiri-disabled-label);
+}
+
+.kiri-card-favorite[data-favorite],
+.kiri-card-favorite:hover:not(:disabled) {
+  color: var(--kiri-label);
+}
+
+.kiri-card-actions {
+  position: absolute;
+  top: 0;
+  right: 1px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--kiri-group-fill);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(1px);
+  transition:
+    opacity var(--kiri-motion-hover) ease-out,
+    transform var(--kiri-motion-hover) ease-out;
+}
+
+.kiri-card-actions[data-visible],
+.kiri-card-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
 }
