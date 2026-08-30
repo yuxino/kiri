@@ -130,15 +130,25 @@ fn cursor_position() -> Result<(i32, i32)> {
 }
 
 fn monitor_index(monitor: &xcap::Monitor) -> Result<u32> {
-    // xcap monitors order matches EnumDisplayMonitors ordering; reuse the
-    // enumeration index for the WGC Monitor::from_index lookup.
+    // Both crates follow EnumDisplayMonitors ordering, but xcap exposes the
+    // zero-based Vec position while windows-capture requires a one-based
+    // index. Store the one-based value in CapturedDisplay so recording cannot
+    // accidentally select the preceding monitor (or reject the primary one).
     let monitors = xcap::Monitor::all()?;
     let target_id = monitor.id().map_err(|e| anyhow!("{e}"))?;
     monitors
         .iter()
         .position(|m| m.id().map(|id| id == target_id).unwrap_or(false))
-        .map(|i| i as u32)
+        .map(windows_capture_monitor_index)
+        .transpose()?
         .ok_or_else(|| anyhow!("display unavailable"))
+}
+
+fn windows_capture_monitor_index(xcap_position: usize) -> Result<u32> {
+    let one_based = xcap_position
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("The display index is too large."))?;
+    u32::try_from(one_based).map_err(|_| anyhow!("The display index is too large."))
 }
 
 // ---------------------------------------------------------------------------
@@ -304,7 +314,10 @@ impl WindowsRecorder {
         if region.width < 2.0 || region.height < 2.0 {
             bail!("The recording region is too small.");
         }
-        let monitor = Monitor::from_index(display_id as usize).map_err(|e| anyhow!("{e}"))?;
+        let monitor = Monitor::from_index(
+            usize::try_from(display_id).map_err(|_| anyhow!("The display index is invalid."))?,
+        )
+        .map_err(|e| anyhow!("{e}"))?;
 
         let region_px = PixelRegion {
             x: (region.x * backing_scale).round().max(0.0) as usize,
@@ -548,6 +561,17 @@ fn audio_config_rank(config: &cpal::SupportedStreamConfig) -> (u8, u8, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_capture_monitor_indices_are_one_based() {
+        assert_eq!(windows_capture_monitor_index(0).unwrap(), 1);
+        assert_eq!(windows_capture_monitor_index(1).unwrap(), 2);
+    }
+
+    #[test]
+    fn windows_capture_monitor_index_rejects_overflow() {
+        assert!(windows_capture_monitor_index(usize::MAX).is_err());
+    }
 
     #[test]
     fn audio_config_rank_prefers_stereo_float_at_48khz() {

@@ -81,7 +81,8 @@ pub struct CapturedDisplay {
     /// Display-local window rectangles in points, front-to-back,
     /// already converted to top-left orientation.
     pub window_rects: Vec<Rect>,
-    /// Platform display identifier (CGDirectDisplayID on macOS).
+    /// Platform display identifier (CGDirectDisplayID on macOS; one-based
+    /// EnumDisplayMonitors position for windows-capture on Windows).
     pub display_id: u32,
     /// Backing scale factor (>= 1).
     pub backing_scale: f64,

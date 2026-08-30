@@ -288,9 +288,6 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
         let bounds = CGDisplayBounds(CGMainDisplayID());
         bounds.origin.y + bounds.size.height
     };
-    #[cfg(windows)]
-    let main_height = 0.0;
-
     let handle = app.clone();
     let callback: std::sync::Arc<dyn Fn(f64, f64) + Send + Sync> =
         std::sync::Arc::new(move |x, y| {
@@ -340,17 +337,16 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem};
     use tauri::tray::TrayIconBuilder;
 
-    // Simple OS-language lookup for the tray menu (the frontend i18n dict is
-    // the source of truth for the UI; the tray mirrors its strings).
-    let zh = std::env::var("LANG")
-        .or_else(|_| std::env::var("LC_ALL"))
-        .map(|lang| lang.to_lowercase().starts_with("zh"))
-        .unwrap_or(false);
-    let (open_label, capture_label, quit_label) = if zh {
-        ("打开素材库", "截屏", "退出 Kiri")
+    // Follow the same persisted preference and OS-locale fallback as the
+    // frontend. Explorer-launched Windows apps normally have no LANG/LC_ALL,
+    // so environment variables cannot represent the user's display language.
+    let selected_language = state::load_language(app);
+    let language = if selected_language.is_empty() {
+        commands::get_locale()
     } else {
-        ("Open Library", "Capture", "Quit Kiri")
+        selected_language
     };
+    let (open_label, capture_label, quit_label) = tray_labels(&language);
 
     let open_library = MenuItem::with_id(app, "open-library", open_label, true, None::<&str>)?;
     let capture = MenuItem::with_id(app, "capture", capture_label, true, None::<&str>)?;
@@ -391,4 +387,34 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     }
     builder.build(app)?;
     Ok(())
+}
+
+fn tray_labels(language: &str) -> (&'static str, &'static str, &'static str) {
+    match language {
+        "zh-Hans" => ("打开素材库", "截图 / 录屏", "退出 Kiri"),
+        "ja" => ("ライブラリを開く", "キャプチャ", "Kiri を終了"),
+        _ => ("Open Library", "Capture", "Quit Kiri"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tray_labels;
+
+    #[test]
+    fn tray_labels_cover_supported_languages_and_default_to_english() {
+        assert_eq!(tray_labels("en"), ("Open Library", "Capture", "Quit Kiri"));
+        assert_eq!(
+            tray_labels("zh-Hans"),
+            ("打开素材库", "截图 / 录屏", "退出 Kiri")
+        );
+        assert_eq!(
+            tray_labels("ja"),
+            ("ライブラリを開く", "キャプチャ", "Kiri を終了")
+        );
+        assert_eq!(
+            tray_labels("unknown"),
+            ("Open Library", "Capture", "Quit Kiri")
+        );
+    }
 }

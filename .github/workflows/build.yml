@@ -53,8 +53,8 @@ jobs:
         run: pnpm tauri build --no-bundle
 
   build-windows:
-    name: Build Windows app
-    runs-on: windows-latest
+    name: Build and test Windows app (Server 2025)
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -68,7 +68,8 @@ jobs:
           node-version: 22
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:release-tools
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Run Windows regression tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
