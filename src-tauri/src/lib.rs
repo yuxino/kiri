@@ -6,6 +6,7 @@
 mod capture;
 mod commands;
 mod core;
+mod diagnostics;
 mod gif;
 mod ocr;
 mod ocr_commands;
@@ -24,13 +25,23 @@ use crate::state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
+    diagnostics::init();
+    log::info!(
+        "[app] process starting version={} pid={} platform={}",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id(),
+        std::env::consts::OS
+    );
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("library") {
-                let _ = window.show();
-                let _ = window.set_focus();
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            log::info!(
+                "[single-instance] reopen requested args={} cwd_present={}",
+                args.len(),
+                !cwd.is_empty()
+            );
+            if let Err(error) = show_library_window(app, "single-instance") {
+                log::error!("[single-instance] library reopen failed: {error}");
             }
         }))
         .plugin(
@@ -59,6 +70,7 @@ pub fn run() {
             }));
         })
         .setup(|app| {
+            log::info!("[app] setup beginning");
             // Force a regular activation policy (macOS Dock icon). A bare
             // binary launched from a terminal may otherwise drop out of the
             // Dock once every window is hidden; the library window handles
@@ -79,10 +91,7 @@ pub fn run() {
             let options = state::load_recording_options(app.handle());
             *state.saved_recording_options.lock().unwrap() = options;
             app.manage(state);
-            if let Some(window) = app.get_webview_window("library") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_library_window(app.handle(), "startup").map_err(anyhow::Error::msg)?;
 
             // A conflicting system-wide shortcut must not prevent Kiri from
             // opening. Settings surfaces the unavailable binding and lets the
@@ -91,6 +100,7 @@ pub fn run() {
                 log::warn!("[shortcut] registration failed: {error}");
             }
             install_tray(app.handle())?;
+            log::info!("[app] setup complete");
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -99,6 +109,7 @@ pub fn run() {
             match event {
                 tauri::WindowEvent::CloseRequested { .. } => {}
                 tauri::WindowEvent::Destroyed => {
+                    log::info!("[window] destroyed label={}", window.label());
                     if let Some(state) = window.app_handle().try_state::<AppState>() {
                         let label = window.label();
                         state.editor_annotations.lock().unwrap().remove(label);
@@ -128,6 +139,7 @@ pub fn run() {
             }
             if window.label() == "library" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    log::info!("[window] library close requested; hiding resident window");
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -206,17 +218,51 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            if matches!(&event, tauri::RunEvent::Exit) {
+                log::info!("[app] process exiting");
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
                 // Dock icon click (macOS): bring the library back.
-                if let Some(window) = app.get_webview_window("library") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                if let Err(error) = show_library_window(app, "dock-reopen") {
+                    log::error!("[app] Dock reopen failed: {error}");
                 }
             }
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
         });
+}
+
+fn show_library_window(app: &tauri::AppHandle, reason: &str) -> Result<(), String> {
+    let window = match app.get_webview_window("library") {
+        Some(window) => window,
+        None => {
+            log::warn!("[window] library missing; recreating reason={reason}");
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "library",
+                tauri::WebviewUrl::App("index.html?window=library".into()),
+            )
+            .title("kiri")
+            .inner_size(960.0, 640.0)
+            .min_inner_size(820.0, 540.0)
+            .center()
+            .resizable(true)
+            .build()
+            .map_err(|error| format!("library window could not be recreated: {error}"))?
+        }
+    };
+    window
+        .show()
+        .map_err(|error| format!("library window could not be shown: {error}"))?;
+    window
+        .unminimize()
+        .map_err(|error| format!("library window could not be restored: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("library window could not be focused: {error}"))?;
+    log::info!("[window] library visible reason={reason}");
+    Ok(())
 }
 
 #[cfg(all(target_os = "macos", not(debug_assertions)))]
@@ -395,9 +441,8 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
         .tooltip("Kiri")
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open-library" => {
-                if let Some(window) = app.get_webview_window("library") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                if let Err(error) = show_library_window(app, "tray") {
+                    log::error!("[tray] library open failed: {error}");
                 }
             }
             "capture" => {

@@ -277,8 +277,10 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     // only into the overlay URL, never returned by the public IPC context.
     if route == "capture" {
         if let Some(bytes) = frozen_png_for_path(&store, &path) {
+            log::info!("[protocol] frozen capture served bytes={}", bytes.len());
             return respond_png(bytes);
         }
+        log::warn!("[protocol] frozen capture request rejected");
         return not_found();
     }
 

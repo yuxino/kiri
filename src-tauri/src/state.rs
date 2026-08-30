@@ -490,8 +490,12 @@ pub fn show_confirm_dialog(
             .focused(true)
             .inner_size(win_w, win_h)
             .position(0.0, 0.0);
-            let Ok(window) = builder.build() else {
-                return;
+            let window = match builder.build() {
+                Ok(window) => window,
+                Err(error) => {
+                    log::error!("[confirm] window creation failed: {error}");
+                    return;
+                }
             };
             window
         }
@@ -549,8 +553,12 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto, monitor: Option<Mo
             .visible(false)
             .inner_size(360.0, 60.0)
             .position(0.0, 0.0);
-            let Ok(window) = builder.build() else {
-                return;
+            let window = match builder.build() {
+                Ok(window) => window,
+                Err(error) => {
+                    log::error!("[toast] passive window creation failed: {error}");
+                    return;
+                }
             };
             window
         }
@@ -578,6 +586,7 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto, monitor: Option<Mo
         label,
         crate::platform::TransientWindowRole::CompletionFeedback,
     );
+    log::info!("[toast] passive notice presented");
 }
 
 /// Shows an interactive completion card in the same resident global-feedback
@@ -618,8 +627,12 @@ pub fn show_completion_preview(
                     .visible(false)
                     .inner_size(360.0, 124.0)
                     .position(0.0, 0.0);
-            let Ok(window) = builder.build() else {
-                return;
+            let window = match builder.build() {
+                Ok(window) => window,
+                Err(error) => {
+                    log::error!("[toast] completion window creation failed: {error}");
+                    return;
+                }
             };
             window
         }
@@ -644,6 +657,11 @@ pub fn show_completion_preview(
         app,
         label,
         crate::platform::TransientWindowRole::CompletionFeedback,
+    );
+    log::info!(
+        "[toast] completion preview presented phase={} kind={}",
+        preview.phase,
+        preview.kind
     );
 }
 

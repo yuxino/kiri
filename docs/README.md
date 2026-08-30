@@ -12,6 +12,8 @@ application or a durable product decision.
   needs product or platform validation.
 - [`../PRIVACY.md`](../PRIVACY.md) and [`../SECURITY.md`](../SECURITY.md) —
   network, credential, and local-data boundaries.
+- [`windows-capture-incident.md`](windows-capture-incident.md) — current
+  Windows screenshot lifecycle failure, diagnostics, and native retest gate.
 
 ## Decision records
 

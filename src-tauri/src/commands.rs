@@ -1225,6 +1225,11 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
         // The overlay frontend calls start_capture again when it loads; return
         // the existing session context instead of failing.
         if let Some(session) = capture.session.as_ref() {
+            log::info!(
+                "start_capture: returning active session capture_id={} overlays={}",
+                session.capture_id,
+                session.overlay_labels.len()
+            );
             let display = &session.display;
             return Ok(CaptureContextDto {
                 display_width: display.screen_frame.width,
@@ -1292,6 +1297,14 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
             return Err(message);
         }
     };
+    log::info!(
+        "start_capture: display frozen logical={}x{} pixels={}x{} scale={}",
+        display.screen_frame.width,
+        display.screen_frame.height,
+        display.pixel_width,
+        display.pixel_height,
+        display.backing_scale
+    );
 
     let context = CaptureContextDto {
         display_width: display.screen_frame.width,
@@ -1461,9 +1474,14 @@ pub fn cancel_capture(window: WebviewWindow, app: AppHandle) -> Result<(), Strin
         }
     };
     let Some(session) = session else {
+        log::info!("cancel_capture: no active session; closing orphan overlay");
         let _ = window.close();
         return Ok(());
     };
+    log::info!(
+        "cancel_capture: capture_id={} requested",
+        session.capture_id
+    );
     teardown_cancelled_capture(&app, session, true);
     Ok(())
 }
@@ -1605,6 +1623,13 @@ pub fn confirm_capture(
     // to the clipboard/library. This also bounds decoder allocation by the
     // dimensions of the frozen display that owns the request.
     let pixel_size = validate_capture_png(png, max_width, max_height)?;
+    log::info!(
+        "confirm_capture: validated capture_id={} bytes={} pixels={}x{}",
+        capture_id,
+        png.len(),
+        pixel_size.0,
+        pixel_size.1
+    );
     let editable_project = if staged.document.has_marks() {
         if (
             i64::from(staged.document.source_pixels.width),
@@ -1633,6 +1658,10 @@ pub fn confirm_capture(
         }
         capture.session.take().unwrap()
     };
+    log::info!(
+        "confirm_capture: session consumed capture_id={}",
+        session.capture_id
+    );
     invalidate_capture_resources(&app, &session);
     // Errors must be visible: show the library window before emitting.
     let session_failure =
@@ -1673,14 +1702,13 @@ fn confirm_capture_inner(
         app.get_webview_window(label)
             .and_then(|window| window.current_monitor().ok().flatten())
     });
-    for label in &session.overlay_labels {
-        if let Some(window) = app.get_webview_window(label) {
-            let _ = window.close();
-        }
-    }
+    defer_capture_overlay_close(app, &session.overlay_labels);
 
     let copied = match platform::write_image_to_clipboard(png) {
-        Ok(()) => true,
+        Ok(()) => {
+            log::info!("confirm_capture: clipboard write complete");
+            true
+        }
         Err(error) => {
             log::error!("confirm_capture: clipboard write failed: {error}");
             false
@@ -1757,6 +1785,11 @@ fn confirm_capture_inner(
         }
     };
     emit_library_changed(app);
+    log::info!(
+        "confirm_capture: library import complete asset_id={} copied={}",
+        asset.id,
+        copied
+    );
 
     let title = if copied {
         "Copied and Saved"
@@ -1776,7 +1809,43 @@ fn confirm_capture_inner(
     );
 
     restore_focus(app, &session);
+    log::info!("confirm_capture: completion flow returned to caller");
     Ok(())
+}
+
+/// Closing the WebView that owns a synchronous IPC request before its response
+/// is delivered can tear down WebView2 inside the command callback. Dispatch
+/// destruction from an async worker so the main loop processes it only after
+/// the current command has returned to the overlay renderer.
+fn defer_capture_overlay_close(app: &AppHandle, labels: &[String]) {
+    let app = app.clone();
+    let labels = labels.to_vec();
+    log::info!(
+        "confirm_capture: deferring overlay close until after IPC response labels={}",
+        labels.len()
+    );
+    std::mem::drop(tauri::async_runtime::spawn(async move {
+        tokio::task::yield_now().await;
+        let dispatcher = app.clone();
+        if let Err(error) = app.run_on_main_thread(move || {
+            for label in labels {
+                let Some(window) = dispatcher.get_webview_window(&label) else {
+                    log::info!("confirm_capture: overlay already gone label={label}");
+                    continue;
+                };
+                match window.close() {
+                    Ok(()) => log::info!("confirm_capture: deferred overlay close label={label}"),
+                    Err(error) => {
+                        log::error!(
+                            "confirm_capture: deferred overlay close failed label={label}: {error}"
+                        )
+                    }
+                }
+            }
+        }) {
+            log::error!("confirm_capture: deferred overlay close dispatch failed: {error}");
+        }
+    }));
 }
 
 fn validate_staged_capture_annotation(
