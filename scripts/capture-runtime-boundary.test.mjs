@@ -36,16 +36,18 @@ test("the click ripple stays passive so recording hotkeys keep focus", () => {
 });
 
 test("capture confirmation defers closing its owner WebView until IPC returns", () => {
-  const commands = readFileSync(join(rustRoot, "commands.rs"), "utf8");
-  const confirmation = commands.match(
-    /fn confirm_capture_inner\([\s\S]*?\n}\n\n(?=\/\/\/ Closing)/,
-  )?.[0];
+  const source = readFileSync(join(rustRoot, "commands.rs"), "utf8").replace(/\r\n?/g, "\n");
+  for (const commands of [source, source.replaceAll("\n", "\r\n")]) {
+    const confirmation = commands
+      .replace(/\r\n?/g, "\n")
+      .match(/fn confirm_capture_inner\([\s\S]*?\n}\n\n(?=\/\/\/ Closing)/)?.[0];
 
-  assert.ok(confirmation, "confirm_capture_inner must remain present");
-  assert.match(confirmation, /defer_capture_overlay_close\(app, &session\.overlay_labels\)/);
-  assert.doesNotMatch(
-    confirmation,
-    /get_webview_window\(label\)[\s\S]{0,120}window\.close\(\)/,
-    "the synchronous IPC callback must not directly destroy its owner WebView",
-  );
+    assert.ok(confirmation, "confirm_capture_inner must remain present");
+    assert.match(confirmation, /defer_capture_overlay_close\(app, &session\.overlay_labels\)/);
+    assert.doesNotMatch(
+      confirmation,
+      /get_webview_window\(label\)[\s\S]{0,120}window\.close\(\)/,
+      "the synchronous IPC callback must not directly destroy its owner WebView",
+    );
+  }
 });
