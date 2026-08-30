@@ -201,16 +201,81 @@ fn annotation_source_for_revision(
         .map(|snapshot| snapshot.source)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProtocolRoute {
+    route: String,
+    path: String,
+}
+
+fn is_protocol_route(route: &str) -> bool {
+    matches!(
+        route,
+        "capture" | "thumbnail" | "annotation-source" | "asset" | "media"
+    )
+}
+
+fn strict_percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            if index + 2 >= bytes.len()
+                || !bytes[index + 1].is_ascii_hexdigit()
+                || !bytes[index + 2].is_ascii_hexdigit()
+            {
+                return None;
+            }
+            index += 3;
+        } else {
+            index += 1;
+        }
+    }
+    percent_encoding::percent_decode_str(value)
+        .decode_utf8()
+        .ok()
+        .map(|decoded| decoded.into_owned())
+}
+
+fn protocol_route(host: Option<&str>, encoded_path: &str) -> Option<ProtocolRoute> {
+    let host = host.unwrap_or("");
+    let encoded_path = encoded_path.strip_prefix('/')?;
+    if encoded_path.starts_with('/') {
+        return None;
+    }
+    let decoded_path = strict_percent_decode(encoded_path)?;
+    let (route, path) = if host == "localhost" {
+        decoded_path.split_once('/')?
+    } else {
+        (host, decoded_path.as_str())
+    };
+    if !is_protocol_route(route)
+        || path.is_empty()
+        || path
+            .split('/')
+            .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+        || path.contains(['\\', '?', '#'])
+    {
+        return None;
+    }
+    Some(ProtocolRoute {
+        route: route.to_string(),
+        path: path.to_string(),
+    })
+}
+
 pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
     let uri = request.uri();
-    let host = uri.host().unwrap_or("").to_string();
-    let path = uri.path().trim_start_matches('/').to_string();
+    let Some(protocol_route) = protocol_route(uri.host(), uri.path()) else {
+        return not_found();
+    };
+    let route = protocol_route.route.as_str();
+    let path = protocol_route.path;
     let state = app.state::<AppState>();
     let store = app.state::<ProtocolStore>();
 
     // Frozen capture image: the unguessable per-capture token is injected
     // only into the overlay URL, never returned by the public IPC context.
-    if host == "capture" {
+    if route == "capture" {
         if let Some(bytes) = frozen_png_for_path(&store, &path) {
             return respond_png(bytes);
         }
@@ -220,7 +285,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     // Downsampled previews for the library grid. Generation is serialized so
     // several newly visible 4K captures cannot all allocate decoder surfaces
     // at once; encoded results live in the bounded LRU above.
-    if host == "thumbnail" {
+    if route == "thumbnail" {
         if let Ok(id) = uuid::Uuid::parse_str(&path) {
             let (kind, file_path) = {
                 let mut context = state.library.lock().unwrap();
@@ -271,7 +336,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     // Immutable clean source for a validated editable screenshot project.
     // Missing, corrupt, or stale sidecars fail closed; callers then fall back
     // to the current flattened asset instead of drawing old marks twice.
-    if host == "annotation-source" {
+    if route == "annotation-source" {
         if let (Ok(id), Some(expected_revision)) = (
             uuid::Uuid::parse_str(&path),
             annotation_source_revision(uri.query()),
@@ -290,7 +355,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     }
 
     // Library assets by id: kiri://asset/<id>
-    if host == "asset" {
+    if route == "asset" {
         let rest = &path;
         if let Ok(id) = uuid::Uuid::parse_str(rest) {
             // Resolve the file path while holding the lock, then drop it
@@ -343,7 +408,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     // Full media files for the in-app viewer: kiri://media/<id>
     // Serves the raw asset bytes with a media Content-Type so <img>/<video>
     // can play it. HTTP Range is honored so video seeking works.
-    if host == "media" {
+    if route == "media" {
         let rest = &path.trim_end_matches('/');
         if let Ok(id) = uuid::Uuid::parse_str(rest) {
             let (kind, file_path) = {
@@ -602,6 +667,88 @@ fn not_found() -> Response<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parsed_route(uri: &str) -> Option<ProtocolRoute> {
+        let request = Request::builder().uri(uri).body(Vec::<u8>::new()).unwrap();
+        protocol_route(request.uri().host(), request.uri().path())
+    }
+
+    #[test]
+    fn protocol_routes_accept_legacy_and_tauri_windows_forms() {
+        let id = "00000000-0000-4000-8000-000000000000";
+        let cases = [
+            ("capture", "frozen/abc.png"),
+            ("thumbnail", id),
+            ("media", id),
+            ("annotation-source", id),
+            ("asset", id),
+        ];
+        for (route, path) in cases {
+            let expected = ProtocolRoute {
+                route: route.to_string(),
+                path: path.to_string(),
+            };
+            assert_eq!(
+                parsed_route(&format!("kiri://{route}/{path}")),
+                Some(expected.clone()),
+            );
+            let joined_route = format!("{route}/{path}");
+            let encoded = percent_encoding::utf8_percent_encode(
+                &joined_route,
+                percent_encoding::NON_ALPHANUMERIC,
+            );
+            assert_eq!(
+                parsed_route(&format!("kiri://localhost/{encoded}")),
+                Some(expected),
+            );
+        }
+    }
+
+    #[test]
+    fn protocol_route_preserves_query_outside_the_encoded_path() {
+        let revision = "a".repeat(64);
+        let request = Request::builder()
+            .uri(format!(
+                "kiri://localhost/annotation%2Dsource%2F00000000%2D0000%2D4000%2D8000%2D000000000000?revision={revision}"
+            ))
+            .body(Vec::<u8>::new())
+            .unwrap();
+        assert_eq!(
+            protocol_route(request.uri().host(), request.uri().path()),
+            Some(ProtocolRoute {
+                route: "annotation-source".into(),
+                path: "00000000-0000-4000-8000-000000000000".into(),
+            })
+        );
+        assert_eq!(
+            annotation_source_revision(request.uri().query()),
+            Some(revision)
+        );
+    }
+
+    #[test]
+    fn protocol_routes_fail_closed_on_bad_or_ambiguous_paths() {
+        for (host, path) in [
+            (Some("localhost"), ""),
+            (Some("localhost"), "/capture"),
+            (Some("localhost"), "//media%2Fid"),
+            (Some("localhost"), "/unknown%2Fid"),
+            (Some("localhost"), "/media%252Fid"),
+            (Some("localhost"), "/media%2"),
+            (Some("localhost"), "/media%GGid"),
+            (Some("localhost"), "/media%2F%FF"),
+            (Some("localhost"), "/media%2F..%2Fsecret"),
+            (Some("localhost"), "/media%2Fid%5Csecret"),
+            (Some("localhost"), "/media%2Fid%3Fother"),
+            (Some("unknown"), "/id"),
+            (None, "/media%2Fid"),
+        ] {
+            assert!(
+                protocol_route(host, path).is_none(),
+                "host={host:?} path={path:?}"
+            );
+        }
+    }
 
     #[test]
     fn missing_media_responses_are_never_cached() {

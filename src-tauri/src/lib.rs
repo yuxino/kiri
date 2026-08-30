@@ -333,8 +333,40 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 /// Menu-bar (macOS) / tray (Windows) icon with Capture, Open Library, and Quit.
 /// The library window and global shortcut remain the primary entry points.
-fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+const MAIN_TRAY_ID: &str = "main-tray";
+
+fn tray_menu_entries(language: &str) -> [(&'static str, &'static str); 3] {
+    let (open_label, capture_label, quit_label) = tray_labels(language);
+    [
+        ("open-library", open_label),
+        ("capture", capture_label),
+        ("quit", quit_label),
+    ]
+}
+
+fn build_tray_menu(
+    app: &tauri::AppHandle,
+    language: &str,
+) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, MenuItem};
+
+    let [(open_id, open_label), (capture_id, capture_label), (quit_id, quit_label)] =
+        tray_menu_entries(language);
+    let open_library = MenuItem::with_id(app, open_id, open_label, true, None::<&str>)?;
+    let capture = MenuItem::with_id(app, capture_id, capture_label, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, quit_id, quit_label, true, None::<&str>)?;
+    Menu::with_items(app, &[&open_library, &capture, &quit])
+}
+
+pub(crate) fn refresh_tray_menu(app: &tauri::AppHandle, language: &str) -> Result<(), String> {
+    let tray = app
+        .tray_by_id(MAIN_TRAY_ID)
+        .ok_or_else(|| "The Kiri tray icon is unavailable.".to_string())?;
+    let menu = build_tray_menu(app, language).map_err(|error| error.to_string())?;
+    tray.set_menu(Some(menu)).map_err(|error| error.to_string())
+}
+
+fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::tray::TrayIconBuilder;
 
     // Follow the same persisted preference and OS-locale fallback as the
@@ -346,23 +378,21 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     } else {
         selected_language
     };
-    let (open_label, capture_label, quit_label) = tray_labels(&language);
+    let menu = build_tray_menu(app, &language)?;
 
-    let open_library = MenuItem::with_id(app, "open-library", open_label, true, None::<&str>)?;
-    let capture = MenuItem::with_id(app, "capture", capture_label, true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_library, &capture, &quit])?;
-
-    // Menu-bar icon: the Lucide Zap glyph, rendered as a black template
-    // image so macOS tints it automatically for light/dark menu bars.
+    // macOS tints the monochrome template for either menu-bar appearance.
+    // Windows has no template-image rendering, so use a dedicated light,
+    // colored icon that stays visible on dark and light taskbars.
     let icon = {
+        #[cfg(target_os = "macos")]
         let bytes = include_bytes!("../icons/tray-viewfinder.png");
+        #[cfg(not(target_os = "macos"))]
+        let bytes = include_bytes!("../icons/tray-viewfinder-windows.png");
         tauri::image::Image::from_bytes(bytes).ok()
     };
-    let mut builder = TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .menu(&menu)
         .tooltip("Kiri")
-        .icon_as_template(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open-library" => {
                 if let Some(window) = app.get_webview_window("library") {
@@ -382,6 +412,10 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             }
             _ => {}
         });
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.icon_as_template(true);
+    }
     if let Some(icon) = icon {
         builder = builder.icon(icon);
     }
@@ -399,7 +433,7 @@ fn tray_labels(language: &str) -> (&'static str, &'static str, &'static str) {
 
 #[cfg(test)]
 mod tests {
-    use super::tray_labels;
+    use super::{tray_labels, tray_menu_entries};
 
     #[test]
     fn tray_labels_cover_supported_languages_and_default_to_english() {
@@ -415,6 +449,75 @@ mod tests {
         assert_eq!(
             tray_labels("unknown"),
             ("Open Library", "Capture", "Quit Kiri")
+        );
+    }
+
+    #[test]
+    fn tray_language_switch_keeps_action_ids_and_replaces_every_label() {
+        let english = tray_menu_entries("en");
+        let chinese = tray_menu_entries("zh-Hans");
+        let japanese = tray_menu_entries("ja");
+        assert_eq!(english.map(|(id, _)| id), chinese.map(|(id, _)| id));
+        assert_eq!(english.map(|(id, _)| id), japanese.map(|(id, _)| id));
+        for index in 0..english.len() {
+            assert_ne!(english[index].1, chinese[index].1);
+            assert_ne!(english[index].1, japanese[index].1);
+        }
+    }
+
+    fn luminance(rgb: [f64; 3]) -> f64 {
+        let channel = |value: f64| {
+            let value = value / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2])
+    }
+
+    fn contrast_ratio(left: [f64; 3], right: [f64; 3]) -> f64 {
+        let (lighter, darker) = {
+            let left = luminance(left);
+            let right = luminance(right);
+            if left >= right {
+                (left, right)
+            } else {
+                (right, left)
+            }
+        };
+        (lighter + 0.05) / (darker + 0.05)
+    }
+
+    fn contrasting_tray_pixels(background: u8) -> usize {
+        let source =
+            image::load_from_memory(include_bytes!("../icons/tray-viewfinder-windows.png"))
+                .unwrap()
+                .to_rgba8();
+        let icon = image::imageops::resize(&source, 16, 16, image::imageops::FilterType::Lanczos3);
+        icon.pixels()
+            .filter(|pixel| {
+                let alpha = f64::from(pixel[3]) / 255.0;
+                let composite = [
+                    f64::from(pixel[0]) * alpha + f64::from(background) * (1.0 - alpha),
+                    f64::from(pixel[1]) * alpha + f64::from(background) * (1.0 - alpha),
+                    f64::from(pixel[2]) * alpha + f64::from(background) * (1.0 - alpha),
+                ];
+                contrast_ratio(composite, [f64::from(background); 3]) >= 3.0
+            })
+            .count()
+    }
+
+    #[test]
+    fn windows_tray_icon_has_three_to_one_contrast_on_light_and_dark_taskbars() {
+        assert!(
+            contrasting_tray_pixels(245) >= 24,
+            "16px tray icon needs a dark silhouette on a light taskbar"
+        );
+        assert!(
+            contrasting_tray_pixels(20) >= 24,
+            "16px tray icon needs a light core on a dark taskbar"
         );
     }
 }

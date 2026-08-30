@@ -45,6 +45,7 @@ import AnnotationCanvas, { type AnnotationCanvasHandle } from "../annotation/Ann
 import { AnnotationInteractionLock } from "../annotation/interaction-lock.js";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 import { RemoteOcrConsent } from "../ocr/RemoteOcrConsent";
+import { kiriResourceUrl } from "../lib/kiri-resource-url.js";
 
 type Phase =
   | "mode-select"
@@ -159,7 +160,7 @@ export function OverlayWindow() {
         disposed = true;
       };
     }
-    const frozenCaptureUrl = `kiri://capture/frozen/${captureToken}.png`;
+    const frozenCaptureUrl = kiriResourceUrl("capture", ["frozen", `${captureToken}.png`]);
     (window as unknown as { __kiriOverlay: boolean }).__kiriOverlay = true;
     api.startCapture()
       .then((ctx) => {

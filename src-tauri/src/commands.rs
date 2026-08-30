@@ -2522,6 +2522,7 @@ pub async fn start_recording_flow(
             completion_monitor,
             configuration: Some(RecordingConfiguration {
                 display_id: session.display.display_id,
+                display_identity: session.display.display_identity.clone(),
                 region: Rect::new(
                     request.region.x,
                     request.region.y,
@@ -2877,6 +2878,8 @@ fn start_recorder(
     configuration: &RecordingConfiguration,
     senders: RecorderSenders,
 ) -> Result<StartedRecorder, String> {
+    #[cfg(windows)]
+    let _ = app;
     #[cfg(target_os = "macos")]
     let ripple_excepted = platform::window_capture_id(app, "ripple")
         .into_iter()
@@ -2913,8 +2916,11 @@ fn start_recorder(
     }
     #[cfg(windows)]
     {
+        let display_identity = configuration.display_identity.as_ref().ok_or_else(|| {
+            "The selected display identity is unavailable. Select it again.".to_string()
+        })?;
         let recorder = crate::capture::windows::WindowsRecorder::start(
-            configuration.display_id,
+            display_identity,
             configuration.region,
             configuration.backing_scale,
             configuration.options,
@@ -3906,8 +3912,9 @@ pub fn get_language(app: AppHandle) -> String {
 }
 
 #[tauri::command]
-pub fn set_language(app: AppHandle, language: String) {
+pub fn set_language(app: AppHandle, language: String) -> Result<(), String> {
     crate::state::save_language(&app, &language);
+    crate::refresh_tray_menu(&app, &language)
 }
 
 #[tauri::command]
@@ -4189,6 +4196,7 @@ mod command_security_tests {
             screen_frame: Rect::new(0.0, 0.0, 4.0, 3.0),
             window_rects: Vec::new(),
             display_id: 1,
+            display_identity: None,
             backing_scale: 2.0,
         };
         let selection = Rect::new(0.25, 0.5, 2.0, 1.5);

@@ -29,6 +29,7 @@ import { resolveInitialEditorDocument } from "../annotation/editor-document.js";
 import { AnnotationInteractionLock } from "../annotation/interaction-lock.js";
 import { parseAnnotationDocument } from "../annotation/project.js";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
+import { kiriResourceUrl } from "../lib/kiri-resource-url.js";
 
 type EditorTool = Tool | "crop";
 
@@ -114,7 +115,9 @@ export function EditorWindow(props: { id: string }) {
       let img: HTMLImageElement;
       try {
         img = await loadImage(
-          `kiri://annotation-source/${props.id}?revision=${revisionSha256}`,
+          kiriResourceUrl("annotation-source", [props.id], {
+            revision: revisionSha256,
+          }),
         );
         if (
           initialDocument &&

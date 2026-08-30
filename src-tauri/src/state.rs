@@ -240,7 +240,10 @@ impl RecordingFlow {
 
 #[derive(Debug, Clone)]
 pub struct RecordingConfiguration {
+    #[cfg_attr(windows, allow(dead_code))]
     pub display_id: u32,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub display_identity: Option<crate::capture::DisplayIdentity>,
     /// Display-local, top-left orientation, in points.
     pub region: crate::core::geometry::Rect,
     /// Global display frame in points (top-left orientation).
@@ -981,6 +984,7 @@ mod tests {
                     screen_frame: Rect::new(0.0, 0.0, 1.0, 1.0),
                     window_rects: Vec::new(),
                     display_id: 1,
+                    display_identity: None,
                     backing_scale: 1.0,
                 },
                 source_application: None,
@@ -1013,6 +1017,7 @@ mod tests {
             active: Some(ActiveRecording::default()),
             configuration: Some(RecordingConfiguration {
                 display_id: 7,
+                display_identity: None,
                 region: Rect::new(10.0, 20.0, 640.0, 360.0),
                 screen_frame: Rect::new(0.0, 0.0, 1440.0, 900.0),
                 backing_scale: 2.0,
@@ -1041,6 +1046,7 @@ mod tests {
             active: Some(ActiveRecording::default()),
             configuration: Some(RecordingConfiguration {
                 display_id: 9,
+                display_identity: None,
                 region: Rect::new(0.0, 0.0, 320.0, 240.0),
                 screen_frame: Rect::new(0.0, 0.0, 320.0, 240.0),
                 backing_scale: 1.0,
@@ -1084,6 +1090,7 @@ mod tests {
     fn cancelled_startup_cannot_attach_to_a_replacement_session() {
         let configuration = RecordingConfiguration {
             display_id: 11,
+            display_identity: None,
             region: Rect::new(0.0, 0.0, 640.0, 480.0),
             screen_frame: Rect::new(0.0, 0.0, 640.0, 480.0),
             backing_scale: 1.0,
@@ -1115,6 +1122,7 @@ mod tests {
             is_starting: true,
             configuration: Some(RecordingConfiguration {
                 display_id: 12,
+                display_identity: None,
                 region: Rect::new(0.0, 0.0, 320.0, 240.0),
                 screen_frame: Rect::new(0.0, 0.0, 320.0, 240.0),
                 backing_scale: 2.0,

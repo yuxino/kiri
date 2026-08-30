@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AnnotationDocumentV1, AppearanceSettings } from "../annotation/model";
 import type { CropPixels } from "../annotation/crop.js";
+import { kiriResourceUrl } from "./kiri-resource-url.js";
 
 // ---------------------------------------------------------------------------
 // Shared DTO types (mirror src-tauri/src/commands.rs)
@@ -380,5 +381,5 @@ export function onRecordingState(
 }
 
 export function mediaUrl(id: string): string {
-  return `kiri://media/${id}`;
+  return kiriResourceUrl("media", [id]);
 }
