@@ -35,19 +35,45 @@ test("the click ripple stays passive so recording hotkeys keep focus", () => {
   assert.match(rippleBuilder, /set_window_click_through\(app, "ripple"\)/);
 });
 
-test("capture confirmation defers closing its owner WebView until IPC returns", () => {
-  const source = readFileSync(join(rustRoot, "commands.rs"), "utf8").replace(/\r\n?/g, "\n");
-  for (const commands of [source, source.replaceAll("\n", "\r\n")]) {
-    const confirmation = commands
-      .replace(/\r\n?/g, "\n")
-      .match(/fn confirm_capture_inner\([\s\S]*?\n}\n\n(?=\/\/\/ Closing)/)?.[0];
+test("capture confirmation finalizes only after its owner IPC returns", () => {
+  const commands = readFileSync(join(rustRoot, "commands.rs"), "utf8").replace(/\r\n?/g, "\n");
+  const overlay = readFileSync(
+    join(repositoryRoot, "src", "windows", "OverlayWindow.tsx"),
+    "utf8",
+  );
 
-    assert.ok(confirmation, "confirm_capture_inner must remain present");
-    assert.match(confirmation, /defer_capture_overlay_close\(app, &session\.overlay_labels\)/);
-    assert.doesNotMatch(
-      confirmation,
-      /get_webview_window\(label\)[\s\S]{0,120}window\.close\(\)/,
-      "the synchronous IPC callback must not directly destroy its owner WebView",
-    );
-  }
+  const confirmation = commands.match(
+    /fn confirm_capture_inner\([\s\S]*?(?=\npub\(crate\) fn finalize_confirmed_capture_after_overlay_destroyed)/,
+  )?.[0];
+  assert.ok(confirmation, "confirm_capture_inner must remain present");
+  assert.doesNotMatch(
+    confirmation,
+    /defer_capture_overlay_close|window\.close\(\)|show_completion_preview/,
+    "the synchronous backend callback must not destroy its owner or create feedback WebViews",
+  );
+  assert.match(
+    commands,
+    /pending_capture_completion[\s\S]*PendingCaptureCompletion/,
+    "successful capture feedback must wait for overlay destruction",
+  );
+  assert.match(
+    commands,
+    /fn finalize_confirmed_capture_after_overlay_destroyed[\s\S]*show_completion_preview/,
+    "completion preview creation must run from the overlay destruction path",
+  );
+  const confirmationAwait = overlay.indexOf("await api.confirmCapture");
+  const ownerCloseAwait = overlay.indexOf(
+    "await getCurrentWindow().close()",
+    confirmationAwait,
+  );
+  assert.ok(confirmationAwait >= 0, "the overlay must await capture confirmation");
+  assert.ok(
+    ownerCloseAwait > confirmationAwait,
+    "the overlay must wait for the confirmation response before closing itself",
+  );
+  assert.doesNotMatch(
+    overlay.slice(confirmationAwait, ownerCloseAwait),
+    /\bcatch\b|\bfinally\b/,
+    "the successful confirmation path must close before leaving its try block",
+  );
 });

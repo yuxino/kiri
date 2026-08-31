@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, Monitor, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 
 use crate::capture::current as capture_backend;
 use crate::core::annotation::{AnnotationAppearance, AnnotationDocument, AnnotationPixelSize};
@@ -26,8 +28,8 @@ use crate::state::RecoveryAction;
 use crate::state::{
     emit_asset_content_changed, emit_error, emit_library_changed, emit_notice, emit_notice_local,
     emit_notice_on_monitor, emit_recording_state, show_completion_preview, ActiveRecording,
-    AppState, ApprovedEditorSave, CaptureSession, CompletionPreviewDto, RecordingConfiguration,
-    RecordingFlow, StagedCaptureAnnotation, StagedEditorAnnotation,
+    AppState, ApprovedEditorSave, CaptureSession, CompletionPreviewDto, PendingCaptureCompletion,
+    RecordingConfiguration, RecordingFlow, StagedCaptureAnnotation, StagedEditorAnnotation,
 };
 
 // ---------------------------------------------------------------------------
@@ -1664,24 +1666,44 @@ pub fn confirm_capture(
     );
     invalidate_capture_resources(&app, &session);
     // Errors must be visible: show the library window before emitting.
-    let session_failure =
-        match confirm_capture_inner(&app, &state, session, png, pixel_size, editable_project) {
-            Ok(()) => return Ok(()),
-            Err(error) => error,
+    let session_feedback =
+        match confirm_capture_inner(&app, &state, &session, png, pixel_size, editable_project) {
+            Ok(feedback) => feedback,
+            Err(error) => {
+                if let Some(window) = app.get_webview_window("library") {
+                    let _ = window.show();
+                }
+                if capture_failure_requires_global_error(error.copied) {
+                    emit_error(&app, error.message.clone(), None);
+                }
+                return Err(error.message);
+            }
         };
-    if let Some(window) = app.get_webview_window("library") {
-        let _ = window.show();
+    let mut pending = state.pending_capture_completion.lock().unwrap();
+    if pending.is_some() {
+        return Err("The previous capture is still completing.".into());
     }
-    if capture_failure_requires_global_error(session_failure.copied) {
-        emit_error(&app, session_failure.message.clone(), None);
-    }
-    Err(session_failure.message)
+    log::info!(
+        "confirm_capture: completion queued until overlay destruction labels={}",
+        session.overlay_labels.len()
+    );
+    *pending = Some(PendingCaptureCompletion {
+        session,
+        preview: session_feedback.preview,
+        monitor: session_feedback.monitor,
+    });
+    Ok(())
 }
 
 #[derive(Debug)]
 struct CaptureConfirmationFailure {
     message: String,
     copied: bool,
+}
+
+struct CaptureCompletionFeedback {
+    preview: CompletionPreviewDto,
+    monitor: Option<Monitor>,
 }
 
 fn capture_failure_requires_global_error(copied: bool) -> bool {
@@ -1691,19 +1713,17 @@ fn capture_failure_requires_global_error(copied: bool) -> bool {
 fn confirm_capture_inner(
     app: &AppHandle,
     state: &AppState,
-    session: CaptureSession,
+    session: &CaptureSession,
     png: &[u8],
     pixel_size: (i64, i64),
     editable_project: Option<(Vec<u8>, AnnotationDocument)>,
-) -> Result<(), CaptureConfirmationFailure> {
+) -> Result<CaptureCompletionFeedback, CaptureConfirmationFailure> {
     log::info!("confirm_capture: bytes={}", png.len());
 
     let completion_monitor = session.overlay_labels.iter().find_map(|label| {
         app.get_webview_window(label)
             .and_then(|window| window.current_monitor().ok().flatten())
     });
-    defer_capture_overlay_close(app, &session.overlay_labels);
-
     let copied = match platform::write_image_to_clipboard(png) {
         Ok(()) => {
             log::info!("confirm_capture: clipboard write complete");
@@ -1796,56 +1816,64 @@ fn confirm_capture_inner(
     } else {
         "Saved — Copy Failed"
     };
-    show_completion_preview(
-        app,
-        &CompletionPreviewDto::ready(
+    Ok(CaptureCompletionFeedback {
+        preview: CompletionPreviewDto::ready(
             uuid::Uuid::new_v4().to_string(),
             &asset,
             title,
             completion_asset_detail(&asset),
             copied,
         ),
-        completion_monitor,
-    );
-
-    restore_focus(app, &session);
-    log::info!("confirm_capture: completion flow returned to caller");
-    Ok(())
+        monitor: completion_monitor,
+    })
 }
 
-/// Closing the WebView that owns a synchronous IPC request before its response
-/// is delivered can tear down WebView2 inside the command callback. Dispatch
-/// destruction from an async worker so the main loop processes it only after
-/// the current command has returned to the overlay renderer.
-fn defer_capture_overlay_close(app: &AppHandle, labels: &[String]) {
-    let app = app.clone();
-    let labels = labels.to_vec();
-    log::info!(
-        "confirm_capture: deferring overlay close until after IPC response labels={}",
-        labels.len()
-    );
-    std::mem::drop(tauri::async_runtime::spawn(async move {
-        tokio::task::yield_now().await;
-        let dispatcher = app.clone();
-        if let Err(error) = app.run_on_main_thread(move || {
-            for label in labels {
-                let Some(window) = dispatcher.get_webview_window(&label) else {
-                    log::info!("confirm_capture: overlay already gone label={label}");
-                    continue;
-                };
-                match window.close() {
-                    Ok(()) => log::info!("confirm_capture: deferred overlay close label={label}"),
-                    Err(error) => {
-                        log::error!(
-                            "confirm_capture: deferred overlay close failed label={label}: {error}"
-                        )
-                    }
-                }
-            }
-        }) {
-            log::error!("confirm_capture: deferred overlay close dispatch failed: {error}");
+/// Finalizes a successful capture only after its owner WebView has gone away.
+/// This callback runs outside the synchronous confirmation IPC, so creating
+/// the completion preview cannot prevent WebView2 from delivering that IPC
+/// response. The first destroyed overlay also closes any peers on other
+/// monitors; the last one presents feedback and restores the capture origin.
+pub(crate) fn finalize_confirmed_capture_after_overlay_destroyed(app: &AppHandle, label: &str) {
+    let state = app.state::<AppState>();
+    let (remaining_labels, completed) = {
+        let mut slot = state.pending_capture_completion.lock().unwrap();
+        let Some(pending) = slot.as_mut() else {
+            return;
+        };
+        if !pending
+            .session
+            .overlay_labels
+            .iter()
+            .any(|owner| owner == label)
+        {
+            return;
         }
-    }));
+        pending
+            .session
+            .overlay_labels
+            .retain(|owner| owner != label && app.get_webview_window(owner).is_some());
+        let remaining_labels = pending.session.overlay_labels.clone();
+        let completed = if remaining_labels.is_empty() {
+            slot.take()
+        } else {
+            None
+        };
+        (remaining_labels, completed)
+    };
+
+    for owner in remaining_labels {
+        if let Some(window) = app.get_webview_window(&owner) {
+            if let Err(error) = window.close() {
+                log::error!("confirm_capture: peer overlay close failed label={owner}: {error}");
+            }
+        }
+    }
+
+    if let Some(completed) = completed {
+        show_completion_preview(app, &completed.preview, completed.monitor);
+        restore_focus(app, &completed.session);
+        log::info!("confirm_capture: completion flow returned after overlay destruction");
+    }
 }
 
 fn validate_staged_capture_annotation(

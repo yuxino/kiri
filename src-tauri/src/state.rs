@@ -26,6 +26,10 @@ pub struct AppState {
     pub library: std::sync::Mutex<LibraryContext>,
     pub library_transition: std::sync::Mutex<()>,
     pub capture: std::sync::Mutex<CaptureFlow>,
+    /// Successful capture feedback waits here until the owner overlay has
+    /// actually been destroyed. Creating another WebView from the synchronous
+    /// confirmation IPC can block WebView2 before its response is delivered.
+    pub pending_capture_completion: std::sync::Mutex<Option<PendingCaptureCompletion>>,
     pub recording: std::sync::Mutex<RecordingFlow>,
     pub ffmpeg_path: std::sync::OnceLock<PathBuf>,
     pub saved_annotation_appearance: std::sync::Mutex<AnnotationAppearance>,
@@ -87,6 +91,12 @@ pub struct CaptureSession {
     /// Present only after an overlay with committed marks stages the matching
     /// selection/document pair. Confirmation consumes the whole session.
     pub annotation: Option<StagedCaptureAnnotation>,
+}
+
+pub struct PendingCaptureCompletion {
+    pub session: CaptureSession,
+    pub preview: CompletionPreviewDto,
+    pub monitor: Option<Monitor>,
 }
 
 #[derive(Debug, Clone)]
@@ -357,6 +367,7 @@ impl AppState {
             library: std::sync::Mutex::new(library),
             library_transition: std::sync::Mutex::new(()),
             capture: Default::default(),
+            pending_capture_completion: Default::default(),
             recording: Default::default(),
             ffmpeg_path: std::sync::OnceLock::new(),
             saved_annotation_appearance: std::sync::Mutex::new(AnnotationAppearance::default()),

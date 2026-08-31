@@ -134,6 +134,10 @@ pub fn run() {
                             }
                         }
                     }
+                    commands::finalize_confirmed_capture_after_overlay_destroyed(
+                        window.app_handle(),
+                        window.label(),
+                    );
                 }
                 _ => {}
             }
