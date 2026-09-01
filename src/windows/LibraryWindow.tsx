@@ -20,6 +20,7 @@ import {
 import { t, fmt } from "../i18n";
 import brandIcon from "../../src-tauri/icons/128x128.png";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
+import { kiriResourceUrl } from "../lib/kiri-resource-url.js";
 import {
   getAvailableShortcutLabel,
   getLibraryBandRect,
@@ -37,7 +38,7 @@ type Section = "library" | "trash";
 type Destination = "captures" | "settings";
 
 function thumbnailUrl(id: string, revision: number): string {
-  return `kiri://thumbnail/${id}?v=${revision}`;
+  return kiriResourceUrl("thumbnail", [id], { v: revision });
 }
 
 /** Groups assets by calendar day, newest group first. */

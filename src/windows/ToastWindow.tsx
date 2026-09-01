@@ -15,6 +15,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { KiriIcon } from "../components/KiriIcons";
 import { t } from "../i18n";
 import { api } from "../lib/ipc";
+import { kiriResourceUrl } from "../lib/kiri-resource-url.js";
 
 interface NoticePayload {
   id: string;
@@ -434,7 +435,11 @@ export function ToastWindow(props: { title?: string; symbol?: string }) {
           >
             {assetId && !isProcessing ? (
               <>
-                <img src={`kiri://thumbnail/${assetId}`} alt="" draggable={false} />
+                <img
+                  src={kiriResourceUrl("thumbnail", [assetId])}
+                  alt=""
+                  draggable={false}
+                />
                 {(visibleCompletion.kind === "video" || visibleCompletion.kind === "gif") && (
                   <span className="kiri-completion-play" aria-hidden="true">
                     <KiriIcon name="play.fill" size={12} />

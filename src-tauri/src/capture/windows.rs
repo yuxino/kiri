@@ -17,7 +17,10 @@ use windows_capture::settings::{
 use crate::core::geometry::Rect;
 use crate::record::{AudioChunkSender, AudioQueueSendError, AudioSampleFormat, AudioSpec};
 
-use super::{logical_monitor_frame, CaptureHealth, CapturedDisplay, PlatformRecorder};
+use super::{
+    logical_monitor_frame, unique_display_identity_index, CaptureHealth, CapturedDisplay,
+    DisplayIdentity, PlatformRecorder,
+};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -50,6 +53,14 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
     let monitor_y = monitor.y()?;
     let width = monitor.width()? as i64;
     let height = monitor.height()? as i64;
+    let display_identity = DisplayIdentity {
+        device_name: monitor.name()?,
+        physical_x: monitor_x,
+        physical_y: monitor_y,
+        physical_width: u32::try_from(width).map_err(|_| anyhow!("Invalid display width."))?,
+        physical_height: u32::try_from(height).map_err(|_| anyhow!("Invalid display height."))?,
+        scale_factor: scale,
+    };
 
     let mut png_bytes = Vec::new();
     image.write_to(
@@ -117,6 +128,7 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         ),
         window_rects,
         display_id: monitor_index(monitor)?,
+        display_identity: Some(display_identity),
         backing_scale: scale,
     })
 }
@@ -130,15 +142,63 @@ fn cursor_position() -> Result<(i32, i32)> {
 }
 
 fn monitor_index(monitor: &xcap::Monitor) -> Result<u32> {
-    // xcap monitors order matches EnumDisplayMonitors ordering; reuse the
-    // enumeration index for the WGC Monitor::from_index lookup.
+    // Both crates follow EnumDisplayMonitors ordering, but xcap exposes the
+    // zero-based Vec position while windows-capture requires a one-based
+    // index. Store the one-based value in CapturedDisplay so recording cannot
+    // accidentally select the preceding monitor (or reject the primary one).
     let monitors = xcap::Monitor::all()?;
     let target_id = monitor.id().map_err(|e| anyhow!("{e}"))?;
     monitors
         .iter()
         .position(|m| m.id().map(|id| id == target_id).unwrap_or(false))
-        .map(|i| i as u32)
+        .map(windows_capture_monitor_index)
+        .transpose()?
         .ok_or_else(|| anyhow!("display unavailable"))
+}
+
+fn windows_capture_monitor_index(xcap_position: usize) -> Result<u32> {
+    let one_based = xcap_position
+        .checked_add(1)
+        .ok_or_else(|| anyhow!("The display index is too large."))?;
+    u32::try_from(one_based).map_err(|_| anyhow!("The display index is too large."))
+}
+
+fn current_display_identities() -> Result<Vec<DisplayIdentity>> {
+    xcap::Monitor::all()?
+        .into_iter()
+        .map(|monitor| {
+            Ok(DisplayIdentity {
+                device_name: monitor.name()?,
+                physical_x: monitor.x()?,
+                physical_y: monitor.y()?,
+                physical_width: monitor.width()?,
+                physical_height: monitor.height()?,
+                scale_factor: monitor.scale_factor()?.max(1.0) as f64,
+            })
+        })
+        .collect()
+}
+
+fn resolve_recording_monitor(expected: &DisplayIdentity) -> Result<Monitor> {
+    let current = current_display_identities()?;
+    unique_display_identity_index(expected, &current).ok_or_else(|| {
+        anyhow!("The selected display changed or is no longer uniquely available. Select it again.")
+    })?;
+
+    let mut matches = Monitor::enumerate()?.into_iter().filter_map(|monitor| {
+        monitor
+            .device_name()
+            .ok()
+            .filter(|name| name == &expected.device_name)
+            .map(|_| monitor)
+    });
+    let selected = matches
+        .next()
+        .ok_or_else(|| anyhow!("The selected display is no longer available. Select it again."))?;
+    if matches.next().is_some() {
+        bail!("The selected display is ambiguous. Select it again.");
+    }
+    Ok(selected)
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +353,7 @@ pub struct WindowsRecorder {
 
 impl WindowsRecorder {
     pub fn start(
-        display_id: u32,
+        display_identity: &DisplayIdentity,
         region: Rect,
         backing_scale: f64,
         options: crate::core::policy::RecordingOptions,
@@ -304,7 +364,7 @@ impl WindowsRecorder {
         if region.width < 2.0 || region.height < 2.0 {
             bail!("The recording region is too small.");
         }
-        let monitor = Monitor::from_index(display_id as usize).map_err(|e| anyhow!("{e}"))?;
+        let monitor = resolve_recording_monitor(display_identity)?;
 
         let region_px = PixelRegion {
             x: (region.x * backing_scale).round().max(0.0) as usize,
@@ -548,6 +608,17 @@ fn audio_config_rank(config: &cpal::SupportedStreamConfig) -> (u8, u8, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_capture_monitor_indices_are_one_based() {
+        assert_eq!(windows_capture_monitor_index(0).unwrap(), 1);
+        assert_eq!(windows_capture_monitor_index(1).unwrap(), 2);
+    }
+
+    #[test]
+    fn windows_capture_monitor_index_rejects_overflow() {
+        assert!(windows_capture_monitor_index(usize::MAX).is_err());
+    }
 
     #[test]
     fn audio_config_rank_prefers_stereo_float_at_48khz() {

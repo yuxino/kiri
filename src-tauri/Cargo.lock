@@ -2801,6 +2801,7 @@ dependencies = [
  "objc2-vision",
  "once_cell",
  "os_pipe",
+ "percent-encoding",
  "reqwest",
  "rustls",
  "secrecy",

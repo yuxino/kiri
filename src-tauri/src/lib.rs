@@ -6,6 +6,7 @@
 mod capture;
 mod commands;
 mod core;
+mod diagnostics;
 mod gif;
 mod ocr;
 mod ocr_commands;
@@ -24,13 +25,23 @@ use crate::state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    env_logger::init();
+    diagnostics::init();
+    log::info!(
+        "[app] process starting version={} pid={} platform={}",
+        env!("CARGO_PKG_VERSION"),
+        std::process::id(),
+        std::env::consts::OS
+    );
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("library") {
-                let _ = window.show();
-                let _ = window.set_focus();
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            log::info!(
+                "[single-instance] reopen requested args={} cwd_present={}",
+                args.len(),
+                !cwd.is_empty()
+            );
+            if let Err(error) = show_library_window(app, "single-instance") {
+                log::error!("[single-instance] library reopen failed: {error}");
             }
         }))
         .plugin(
@@ -59,6 +70,7 @@ pub fn run() {
             }));
         })
         .setup(|app| {
+            log::info!("[app] setup beginning");
             // Force a regular activation policy (macOS Dock icon). A bare
             // binary launched from a terminal may otherwise drop out of the
             // Dock once every window is hidden; the library window handles
@@ -79,10 +91,7 @@ pub fn run() {
             let options = state::load_recording_options(app.handle());
             *state.saved_recording_options.lock().unwrap() = options;
             app.manage(state);
-            if let Some(window) = app.get_webview_window("library") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_library_window(app.handle(), "startup").map_err(anyhow::Error::msg)?;
 
             // A conflicting system-wide shortcut must not prevent Kiri from
             // opening. Settings surfaces the unavailable binding and lets the
@@ -91,6 +100,7 @@ pub fn run() {
                 log::warn!("[shortcut] registration failed: {error}");
             }
             install_tray(app.handle())?;
+            log::info!("[app] setup complete");
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -99,6 +109,7 @@ pub fn run() {
             match event {
                 tauri::WindowEvent::CloseRequested { .. } => {}
                 tauri::WindowEvent::Destroyed => {
+                    log::info!("[window] destroyed label={}", window.label());
                     if let Some(state) = window.app_handle().try_state::<AppState>() {
                         let label = window.label();
                         state.editor_annotations.lock().unwrap().remove(label);
@@ -123,11 +134,16 @@ pub fn run() {
                             }
                         }
                     }
+                    commands::finalize_confirmed_capture_after_overlay_destroyed(
+                        window.app_handle(),
+                        window.label(),
+                    );
                 }
                 _ => {}
             }
             if window.label() == "library" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    log::info!("[window] library close requested; hiding resident window");
                     api.prevent_close();
                     let _ = window.hide();
                 }
@@ -206,17 +222,51 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            if matches!(&event, tauri::RunEvent::Exit) {
+                log::info!("[app] process exiting");
+            }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
                 // Dock icon click (macOS): bring the library back.
-                if let Some(window) = app.get_webview_window("library") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                if let Err(error) = show_library_window(app, "dock-reopen") {
+                    log::error!("[app] Dock reopen failed: {error}");
                 }
             }
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
         });
+}
+
+fn show_library_window(app: &tauri::AppHandle, reason: &str) -> Result<(), String> {
+    let window = match app.get_webview_window("library") {
+        Some(window) => window,
+        None => {
+            log::warn!("[window] library missing; recreating reason={reason}");
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "library",
+                tauri::WebviewUrl::App("index.html?window=library".into()),
+            )
+            .title("kiri")
+            .inner_size(960.0, 640.0)
+            .min_inner_size(820.0, 540.0)
+            .center()
+            .resizable(true)
+            .build()
+            .map_err(|error| format!("library window could not be recreated: {error}"))?
+        }
+    };
+    window
+        .show()
+        .map_err(|error| format!("library window could not be shown: {error}"))?;
+    window
+        .unminimize()
+        .map_err(|error| format!("library window could not be restored: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("library window could not be focused: {error}"))?;
+    log::info!("[window] library visible reason={reason}");
+    Ok(())
 }
 
 #[cfg(all(target_os = "macos", not(debug_assertions)))]
@@ -288,9 +338,6 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
         let bounds = CGDisplayBounds(CGMainDisplayID());
         bounds.origin.y + bounds.size.height
     };
-    #[cfg(windows)]
-    let main_height = 0.0;
-
     let handle = app.clone();
     let callback: std::sync::Arc<dyn Fn(f64, f64) + Send + Sync> =
         std::sync::Arc::new(move |x, y| {
@@ -336,42 +383,70 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
 
 /// Menu-bar (macOS) / tray (Windows) icon with Capture, Open Library, and Quit.
 /// The library window and global shortcut remain the primary entry points.
-fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
+const MAIN_TRAY_ID: &str = "main-tray";
+
+fn tray_menu_entries(language: &str) -> [(&'static str, &'static str); 3] {
+    let (open_label, capture_label, quit_label) = tray_labels(language);
+    [
+        ("open-library", open_label),
+        ("capture", capture_label),
+        ("quit", quit_label),
+    ]
+}
+
+fn build_tray_menu(
+    app: &tauri::AppHandle,
+    language: &str,
+) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, MenuItem};
+
+    let [(open_id, open_label), (capture_id, capture_label), (quit_id, quit_label)] =
+        tray_menu_entries(language);
+    let open_library = MenuItem::with_id(app, open_id, open_label, true, None::<&str>)?;
+    let capture = MenuItem::with_id(app, capture_id, capture_label, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, quit_id, quit_label, true, None::<&str>)?;
+    Menu::with_items(app, &[&open_library, &capture, &quit])
+}
+
+pub(crate) fn refresh_tray_menu(app: &tauri::AppHandle, language: &str) -> Result<(), String> {
+    let tray = app
+        .tray_by_id(MAIN_TRAY_ID)
+        .ok_or_else(|| "The Kiri tray icon is unavailable.".to_string())?;
+    let menu = build_tray_menu(app, language).map_err(|error| error.to_string())?;
+    tray.set_menu(Some(menu)).map_err(|error| error.to_string())
+}
+
+fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::tray::TrayIconBuilder;
 
-    // Simple OS-language lookup for the tray menu (the frontend i18n dict is
-    // the source of truth for the UI; the tray mirrors its strings).
-    let zh = std::env::var("LANG")
-        .or_else(|_| std::env::var("LC_ALL"))
-        .map(|lang| lang.to_lowercase().starts_with("zh"))
-        .unwrap_or(false);
-    let (open_label, capture_label, quit_label) = if zh {
-        ("打开素材库", "截屏", "退出 Kiri")
+    // Follow the same persisted preference and OS-locale fallback as the
+    // frontend. Explorer-launched Windows apps normally have no LANG/LC_ALL,
+    // so environment variables cannot represent the user's display language.
+    let selected_language = state::load_language(app);
+    let language = if selected_language.is_empty() {
+        commands::get_locale()
     } else {
-        ("Open Library", "Capture", "Quit Kiri")
+        selected_language
     };
+    let menu = build_tray_menu(app, &language)?;
 
-    let open_library = MenuItem::with_id(app, "open-library", open_label, true, None::<&str>)?;
-    let capture = MenuItem::with_id(app, "capture", capture_label, true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", quit_label, true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open_library, &capture, &quit])?;
-
-    // Menu-bar icon: the Lucide Zap glyph, rendered as a black template
-    // image so macOS tints it automatically for light/dark menu bars.
+    // macOS tints the monochrome template for either menu-bar appearance.
+    // Windows has no template-image rendering, so use a dedicated light,
+    // colored icon that stays visible on dark and light taskbars.
     let icon = {
+        #[cfg(target_os = "macos")]
         let bytes = include_bytes!("../icons/tray-viewfinder.png");
+        #[cfg(not(target_os = "macos"))]
+        let bytes = include_bytes!("../icons/tray-viewfinder-windows.png");
         tauri::image::Image::from_bytes(bytes).ok()
     };
-    let mut builder = TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::with_id(MAIN_TRAY_ID)
         .menu(&menu)
         .tooltip("Kiri")
-        .icon_as_template(true)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open-library" => {
-                if let Some(window) = app.get_webview_window("library") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
+                if let Err(error) = show_library_window(app, "tray") {
+                    log::error!("[tray] library open failed: {error}");
                 }
             }
             "capture" => {
@@ -386,9 +461,112 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
             }
             _ => {}
         });
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.icon_as_template(true);
+    }
     if let Some(icon) = icon {
         builder = builder.icon(icon);
     }
     builder.build(app)?;
     Ok(())
+}
+
+fn tray_labels(language: &str) -> (&'static str, &'static str, &'static str) {
+    match language {
+        "zh-Hans" => ("打开素材库", "截图 / 录屏", "退出 Kiri"),
+        "ja" => ("ライブラリを開く", "キャプチャ", "Kiri を終了"),
+        _ => ("Open Library", "Capture", "Quit Kiri"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{tray_labels, tray_menu_entries};
+
+    #[test]
+    fn tray_labels_cover_supported_languages_and_default_to_english() {
+        assert_eq!(tray_labels("en"), ("Open Library", "Capture", "Quit Kiri"));
+        assert_eq!(
+            tray_labels("zh-Hans"),
+            ("打开素材库", "截图 / 录屏", "退出 Kiri")
+        );
+        assert_eq!(
+            tray_labels("ja"),
+            ("ライブラリを開く", "キャプチャ", "Kiri を終了")
+        );
+        assert_eq!(
+            tray_labels("unknown"),
+            ("Open Library", "Capture", "Quit Kiri")
+        );
+    }
+
+    #[test]
+    fn tray_language_switch_keeps_action_ids_and_replaces_every_label() {
+        let english = tray_menu_entries("en");
+        let chinese = tray_menu_entries("zh-Hans");
+        let japanese = tray_menu_entries("ja");
+        assert_eq!(english.map(|(id, _)| id), chinese.map(|(id, _)| id));
+        assert_eq!(english.map(|(id, _)| id), japanese.map(|(id, _)| id));
+        for index in 0..english.len() {
+            assert_ne!(english[index].1, chinese[index].1);
+            assert_ne!(english[index].1, japanese[index].1);
+        }
+    }
+
+    fn luminance(rgb: [f64; 3]) -> f64 {
+        let channel = |value: f64| {
+            let value = value / 255.0;
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2])
+    }
+
+    fn contrast_ratio(left: [f64; 3], right: [f64; 3]) -> f64 {
+        let (lighter, darker) = {
+            let left = luminance(left);
+            let right = luminance(right);
+            if left >= right {
+                (left, right)
+            } else {
+                (right, left)
+            }
+        };
+        (lighter + 0.05) / (darker + 0.05)
+    }
+
+    fn contrasting_tray_pixels(background: u8) -> usize {
+        let source =
+            image::load_from_memory(include_bytes!("../icons/tray-viewfinder-windows.png"))
+                .unwrap()
+                .to_rgba8();
+        let icon = image::imageops::resize(&source, 16, 16, image::imageops::FilterType::Lanczos3);
+        icon.pixels()
+            .filter(|pixel| {
+                let alpha = f64::from(pixel[3]) / 255.0;
+                let composite = [
+                    f64::from(pixel[0]) * alpha + f64::from(background) * (1.0 - alpha),
+                    f64::from(pixel[1]) * alpha + f64::from(background) * (1.0 - alpha),
+                    f64::from(pixel[2]) * alpha + f64::from(background) * (1.0 - alpha),
+                ];
+                contrast_ratio(composite, [f64::from(background); 3]) >= 3.0
+            })
+            .count()
+    }
+
+    #[test]
+    fn windows_tray_icon_has_three_to_one_contrast_on_light_and_dark_taskbars() {
+        assert!(
+            contrasting_tray_pixels(245) >= 24,
+            "16px tray icon needs a dark silhouette on a light taskbar"
+        );
+        assert!(
+            contrasting_tray_pixels(20) >= 24,
+            "16px tray icon needs a light core on a dark taskbar"
+        );
+    }
 }

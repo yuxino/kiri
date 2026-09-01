@@ -45,6 +45,7 @@ import AnnotationCanvas, { type AnnotationCanvasHandle } from "../annotation/Ann
 import { AnnotationInteractionLock } from "../annotation/interaction-lock.js";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 import { RemoteOcrConsent } from "../ocr/RemoteOcrConsent";
+import { kiriResourceUrl } from "../lib/kiri-resource-url.js";
 
 type Phase =
   | "mode-select"
@@ -159,7 +160,7 @@ export function OverlayWindow() {
         disposed = true;
       };
     }
-    const frozenCaptureUrl = `kiri://capture/frozen/${captureToken}.png`;
+    const frozenCaptureUrl = kiriResourceUrl("capture", ["frozen", `${captureToken}.png`]);
     (window as unknown as { __kiriOverlay: boolean }).__kiriOverlay = true;
     api.startCapture()
       .then((ctx) => {
@@ -331,6 +332,11 @@ export function OverlayWindow() {
           return;
         }
         await api.confirmCapture(result.png, { selection, document: result.document });
+        // The backend confirmation is synchronous. Close this owner WebView
+        // only after its IPC response has arrived; dispatching a backend
+        // close while WebView2 is still waiting can deadlock the Windows UI
+        // thread and strand both the resident process and the next launch.
+        await getCurrentWindow().close();
       } catch (error) {
         reportFrontend(`confirm_capture rejected: ${String(error)}`);
       } finally {
@@ -355,8 +361,9 @@ export function OverlayWindow() {
       setOcrFailed(false);
       setOcrText(text);
       setPhase("ocr-result");
-    } catch {
+    } catch (error) {
       if (generation !== ocrGenerationRef.current) return;
+      reportFrontend(`recognize_prepared_ocr_local rejected: ${String(error)}`);
       preparedOcrRef.current = null;
       setPreparedOcr(null);
       void api.cancelPreparedOcr(pending.requestId).catch(() => {});
@@ -440,8 +447,9 @@ export function OverlayWindow() {
           return;
         }
         setPhase("ocr-consent");
-      } catch {
+      } catch (error) {
         if (generation !== ocrGenerationRef.current) return;
+        reportFrontend(`prepare_ocr_request rejected: ${String(error)}`);
         setOcrFailed(true);
         setOcrText("");
         setPhase("ocr-result");

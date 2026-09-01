@@ -66,6 +66,33 @@ impl CaptureHealth {
 pub const VIDEO_FRAME_QUEUE_CAPACITY: usize = 2;
 pub type VideoFrameSender = std::sync::mpsc::SyncSender<Vec<u8>>;
 
+/// Windows monitor-layout signature captured together with the frozen selection.
+/// The one-based enumeration index is not stable when monitor topology
+/// changes, so recording revalidates every field immediately before WGC starts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DisplayIdentity {
+    pub device_name: String,
+    pub physical_x: i32,
+    pub physical_y: i32,
+    pub physical_width: u32,
+    pub physical_height: u32,
+    pub scale_factor: f64,
+}
+
+#[cfg(any(windows, test))]
+pub(crate) fn unique_display_identity_index(
+    expected: &DisplayIdentity,
+    candidates: &[DisplayIdentity],
+) -> Option<usize> {
+    let mut matches = candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, candidate)| *candidate == expected)
+        .map(|(index, _)| index);
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
+}
+
 /// A frozen display capture plus the geometry the overlay needs.
 #[derive(Debug, Clone)]
 pub struct CapturedDisplay {
@@ -81,8 +108,13 @@ pub struct CapturedDisplay {
     /// Display-local window rectangles in points, front-to-back,
     /// already converted to top-left orientation.
     pub window_rects: Vec<Rect>,
-    /// Platform display identifier (CGDirectDisplayID on macOS).
+    /// Platform display identifier (CGDirectDisplayID on macOS; one-based
+    /// initial EnumDisplayMonitors position on Windows, retained only for
+    /// diagnostics; Windows recording uses `display_identity` instead).
     pub display_id: u32,
+    /// Current Windows layout signature used to survive enumeration reorder
+    /// while rejecting disconnection, DPI/geometry changes, and ambiguity.
+    pub display_identity: Option<DisplayIdentity>,
     /// Backing scale factor (>= 1).
     pub backing_scale: f64,
 }
@@ -109,7 +141,20 @@ pub trait PlatformRecorder: Send {
 
 #[cfg(test)]
 mod tests {
-    use super::{logical_monitor_frame, CaptureHealth};
+    use super::{
+        logical_monitor_frame, unique_display_identity_index, CaptureHealth, DisplayIdentity,
+    };
+
+    fn identity(name: &str, x: i32, scale: f64) -> DisplayIdentity {
+        DisplayIdentity {
+            device_name: name.into(),
+            physical_x: x,
+            physical_y: 0,
+            physical_width: 1920,
+            physical_height: 1080,
+            scale_factor: scale,
+        }
+    }
 
     #[test]
     fn native_capture_failure_survives_a_later_stop_request() {
@@ -135,6 +180,44 @@ mod tests {
         assert_eq!(
             logical_monitor_frame(-2560, 360, 2560, 1440, 2.0),
             crate::core::geometry::Rect::new(-1280.0, 180.0, 1280.0, 720.0)
+        );
+    }
+
+    #[test]
+    fn display_identity_survives_enumeration_reordering() {
+        let selected = identity(r"\\.\DISPLAY2", 1920, 1.5);
+        let reordered = [selected.clone(), identity(r"\\.\DISPLAY1", 0, 1.0)];
+        assert_eq!(
+            unique_display_identity_index(&selected, &reordered),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn display_identity_fails_closed_on_disconnect_or_topology_change() {
+        let selected = identity(r"\\.\DISPLAY2", 1920, 1.5);
+        assert_eq!(
+            unique_display_identity_index(&selected, &[identity(r"\\.\DISPLAY1", 0, 1.0)]),
+            None
+        );
+        for changed in [
+            identity(r"\\.\DISPLAY2", 0, 1.5),
+            identity(r"\\.\DISPLAY2", 1920, 1.25),
+            DisplayIdentity {
+                physical_width: 2560,
+                ..selected.clone()
+            },
+        ] {
+            assert_eq!(unique_display_identity_index(&selected, &[changed]), None);
+        }
+    }
+
+    #[test]
+    fn display_identity_fails_closed_on_ambiguous_exact_matches() {
+        let selected = identity(r"\\.\DISPLAY2", 1920, 1.5);
+        assert_eq!(
+            unique_display_identity_index(&selected, &[selected.clone(), selected.clone()]),
+            None
         );
     }
 }

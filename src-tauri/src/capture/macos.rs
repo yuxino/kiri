@@ -628,6 +628,7 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         screen_frame: screen.frame,
         window_rects,
         display_id: screen.display_id,
+        display_identity: None,
         backing_scale: screen.backing_scale,
     })
 }

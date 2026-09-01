@@ -13,7 +13,7 @@
     "icons:verify": "node scripts/app-icons.mjs verify",
     "test:dev-signing": "node --test scripts/tauri-cli.test.mjs",
     "package:macos-release": "./scripts/package-macos-release.sh",
-    "test:release-tools": "node --test scripts/tauri-cli.test.mjs scripts/release-version.test.mjs scripts/capture-runtime-boundary.test.mjs scripts/repository-hygiene.test.mjs scripts/interaction-states.test.mjs scripts/text-layout.test.mjs scripts/annotation-project.test.mjs scripts/editor-document.test.mjs scripts/editor-crop.test.mjs scripts/annotation-interaction-lock.test.mjs scripts/viewer-state.test.mjs scripts/library-card-interaction.test.mjs"
+    "test:release-tools": "node --test scripts/tauri-cli.test.mjs scripts/release-version.test.mjs scripts/capture-runtime-boundary.test.mjs scripts/repository-hygiene.test.mjs scripts/interaction-states.test.mjs scripts/text-layout.test.mjs scripts/annotation-project.test.mjs scripts/editor-document.test.mjs scripts/editor-crop.test.mjs scripts/annotation-interaction-lock.test.mjs scripts/viewer-state.test.mjs scripts/library-card-interaction.test.mjs scripts/kiri-resource-url.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

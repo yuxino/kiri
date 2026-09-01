@@ -26,6 +26,10 @@ pub struct AppState {
     pub library: std::sync::Mutex<LibraryContext>,
     pub library_transition: std::sync::Mutex<()>,
     pub capture: std::sync::Mutex<CaptureFlow>,
+    /// Successful capture feedback waits here until the owner overlay has
+    /// actually been destroyed. Creating another WebView from the synchronous
+    /// confirmation IPC can block WebView2 before its response is delivered.
+    pub pending_capture_completion: std::sync::Mutex<Option<PendingCaptureCompletion>>,
     pub recording: std::sync::Mutex<RecordingFlow>,
     pub ffmpeg_path: std::sync::OnceLock<PathBuf>,
     pub saved_annotation_appearance: std::sync::Mutex<AnnotationAppearance>,
@@ -87,6 +91,12 @@ pub struct CaptureSession {
     /// Present only after an overlay with committed marks stages the matching
     /// selection/document pair. Confirmation consumes the whole session.
     pub annotation: Option<StagedCaptureAnnotation>,
+}
+
+pub struct PendingCaptureCompletion {
+    pub session: CaptureSession,
+    pub preview: CompletionPreviewDto,
+    pub monitor: Option<Monitor>,
 }
 
 #[derive(Debug, Clone)]
@@ -240,7 +250,10 @@ impl RecordingFlow {
 
 #[derive(Debug, Clone)]
 pub struct RecordingConfiguration {
+    #[cfg_attr(windows, allow(dead_code))]
     pub display_id: u32,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub display_identity: Option<crate::capture::DisplayIdentity>,
     /// Display-local, top-left orientation, in points.
     pub region: crate::core::geometry::Rect,
     /// Global display frame in points (top-left orientation).
@@ -354,6 +367,7 @@ impl AppState {
             library: std::sync::Mutex::new(library),
             library_transition: std::sync::Mutex::new(()),
             capture: Default::default(),
+            pending_capture_completion: Default::default(),
             recording: Default::default(),
             ffmpeg_path: std::sync::OnceLock::new(),
             saved_annotation_appearance: std::sync::Mutex::new(AnnotationAppearance::default()),
@@ -487,8 +501,12 @@ pub fn show_confirm_dialog(
             .focused(true)
             .inner_size(win_w, win_h)
             .position(0.0, 0.0);
-            let Ok(window) = builder.build() else {
-                return;
+            let window = match builder.build() {
+                Ok(window) => window,
+                Err(error) => {
+                    log::error!("[confirm] window creation failed: {error}");
+                    return;
+                }
             };
             window
         }
@@ -546,8 +564,12 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto, monitor: Option<Mo
             .visible(false)
             .inner_size(360.0, 60.0)
             .position(0.0, 0.0);
-            let Ok(window) = builder.build() else {
-                return;
+            let window = match builder.build() {
+                Ok(window) => window,
+                Err(error) => {
+                    log::error!("[toast] passive window creation failed: {error}");
+                    return;
+                }
             };
             window
         }
@@ -575,6 +597,7 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto, monitor: Option<Mo
         label,
         crate::platform::TransientWindowRole::CompletionFeedback,
     );
+    log::info!("[toast] passive notice presented");
 }
 
 /// Shows an interactive completion card in the same resident global-feedback
@@ -615,8 +638,12 @@ pub fn show_completion_preview(
                     .visible(false)
                     .inner_size(360.0, 124.0)
                     .position(0.0, 0.0);
-            let Ok(window) = builder.build() else {
-                return;
+            let window = match builder.build() {
+                Ok(window) => window,
+                Err(error) => {
+                    log::error!("[toast] completion window creation failed: {error}");
+                    return;
+                }
             };
             window
         }
@@ -641,6 +668,11 @@ pub fn show_completion_preview(
         app,
         label,
         crate::platform::TransientWindowRole::CompletionFeedback,
+    );
+    log::info!(
+        "[toast] completion preview presented phase={} kind={}",
+        preview.phase,
+        preview.kind
     );
 }
 
@@ -981,6 +1013,7 @@ mod tests {
                     screen_frame: Rect::new(0.0, 0.0, 1.0, 1.0),
                     window_rects: Vec::new(),
                     display_id: 1,
+                    display_identity: None,
                     backing_scale: 1.0,
                 },
                 source_application: None,
@@ -1013,6 +1046,7 @@ mod tests {
             active: Some(ActiveRecording::default()),
             configuration: Some(RecordingConfiguration {
                 display_id: 7,
+                display_identity: None,
                 region: Rect::new(10.0, 20.0, 640.0, 360.0),
                 screen_frame: Rect::new(0.0, 0.0, 1440.0, 900.0),
                 backing_scale: 2.0,
@@ -1041,6 +1075,7 @@ mod tests {
             active: Some(ActiveRecording::default()),
             configuration: Some(RecordingConfiguration {
                 display_id: 9,
+                display_identity: None,
                 region: Rect::new(0.0, 0.0, 320.0, 240.0),
                 screen_frame: Rect::new(0.0, 0.0, 320.0, 240.0),
                 backing_scale: 1.0,
@@ -1084,6 +1119,7 @@ mod tests {
     fn cancelled_startup_cannot_attach_to_a_replacement_session() {
         let configuration = RecordingConfiguration {
             display_id: 11,
+            display_identity: None,
             region: Rect::new(0.0, 0.0, 640.0, 480.0),
             screen_frame: Rect::new(0.0, 0.0, 640.0, 480.0),
             backing_scale: 1.0,
@@ -1115,6 +1151,7 @@ mod tests {
             is_starting: true,
             configuration: Some(RecordingConfiguration {
                 display_id: 12,
+                display_identity: None,
                 region: Rect::new(0.0, 0.0, 320.0, 240.0),
                 screen_frame: Rect::new(0.0, 0.0, 320.0, 240.0),
                 backing_scale: 2.0,

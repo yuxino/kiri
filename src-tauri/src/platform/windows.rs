@@ -2,18 +2,22 @@
 //! exclusion via Win32.
 
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use tauri::Manager;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, EnumWindows, GetForegroundWindow, GetMessageW,
-    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
-    SetForegroundWindow, SetWindowDisplayAffinity, SetWindowsHookExW, ShowWindow, TranslateMessage,
-    MSG, MSLLHOOKSTRUCT, SW_RESTORE, SW_SHOWNOACTIVATE, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
-    WH_MOUSE_LL, WM_LBUTTONDOWN, WM_RBUTTONDOWN,
+    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, PeekMessageW,
+    PostThreadMessageW, SetForegroundWindow, SetWindowDisplayAffinity, SetWindowsHookExW,
+    ShowWindow, TranslateMessage, UnhookWindowsHookEx, MSG, MSLLHOOKSTRUCT, PM_NOREMOVE,
+    SW_RESTORE, SW_SHOWNOACTIVATE, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WH_MOUSE_LL, WM_LBUTTONDOWN,
+    WM_QUIT, WM_RBUTTONDOWN,
 };
 
 use super::{ClickMonitorHandle, MicrophoneAccess};
@@ -156,45 +160,192 @@ pub fn set_window_capture_excluded(app: &tauri::AppHandle, label: &str, excluded
 // Global click monitor (WH_MOUSE_LL)
 // ---------------------------------------------------------------------------
 
-static CLICK_CALLBACK: Mutex<Option<Arc<dyn Fn(f64, f64) + Send + Sync>>> = Mutex::new(None);
+type ClickCallback = Arc<dyn Fn(f64, f64) + Send + Sync>;
+
+static CLICK_CALLBACK: Mutex<Option<ClickCallback>> = Mutex::new(None);
+
+struct MessageLoopWorker {
+    thread_id: Option<u32>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl MessageLoopWorker {
+    fn shutdown(&mut self) {
+        let Some(thread) = self.thread.take() else {
+            self.thread_id = None;
+            return;
+        };
+
+        if let Some(thread_id) = self.thread_id.take() {
+            if let Err(error) = post_thread_quit(thread_id) {
+                // A finished message loop has no queue, so a failed post is
+                // harmless when the worker already exited. Joining below
+                // still reaps it and makes shutdown deterministic.
+                if !thread.is_finished() {
+                    log::warn!("Windows click monitor could not request shutdown: {error}");
+                }
+            }
+        }
+
+        // A callback could theoretically own the final handle. Never join the
+        // current thread; WM_QUIT will be consumed after that callback returns.
+        if thread.thread().id() != thread::current().id() && thread.join().is_err() {
+            log::warn!("Windows click monitor thread panicked during shutdown");
+        }
+    }
+}
+
+impl Drop for MessageLoopWorker {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
 
 pub struct ClickMonitor {
-    stop_flag: Arc<std::sync::atomic::AtomicBool>,
-    _thread: thread::JoinHandle<()>,
+    worker: MessageLoopWorker,
+}
+
+impl ClickMonitor {
+    fn shutdown(&mut self) {
+        self.worker.shutdown();
+    }
 }
 
 impl ClickMonitorHandle for ClickMonitor {
-    fn stop(self: Box<Self>) {
-        self.stop_flag
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-        *CLICK_CALLBACK.lock().unwrap() = None;
+    fn stop(mut self: Box<Self>) {
+        self.shutdown();
+    }
+}
+
+impl Drop for ClickMonitor {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
 pub fn start_click_monitor(
     callback: Arc<dyn Fn(f64, f64) + Send + Sync>,
 ) -> Result<Box<dyn ClickMonitorHandle + Send>> {
-    *CLICK_CALLBACK.lock().unwrap() = Some(callback);
-    let stop_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let flag = stop_flag.clone();
-    let thread = thread::spawn(move || unsafe {
-        let hook = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0).ok();
-        if hook.is_none() {
-            *CLICK_CALLBACK.lock().unwrap() = None;
+    {
+        let mut slot = CLICK_CALLBACK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if slot.is_some() {
+            bail!("The Windows click monitor is already running.");
+        }
+        *slot = Some(callback);
+    }
+
+    let (ready_tx, ready_rx) = mpsc::sync_channel::<std::result::Result<u32, String>>(1);
+    let installing_thread_id = Arc::new(AtomicU32::new(0));
+    let thread_id_slot = Arc::clone(&installing_thread_id);
+    let installation_cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_slot = Arc::clone(&installation_cancelled);
+    let thread = match thread::Builder::new()
+        .name("kiri-click-monitor".into())
+        .spawn(move || run_click_monitor_loop(ready_tx, &thread_id_slot, &cancelled_slot))
+    {
+        Ok(thread) => thread,
+        Err(error) => {
+            clear_click_callback();
+            return Err(error.into());
+        }
+    };
+
+    let thread_id = match ready_rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(thread_id)) => thread_id,
+        Ok(Err(error)) => {
+            let _ = thread.join();
+            return Err(anyhow!(error));
+        }
+        Err(error) => {
+            installation_cancelled.store(true, Ordering::Release);
+            let thread_id = installing_thread_id.load(Ordering::Acquire);
+            let mut worker = MessageLoopWorker {
+                thread_id: (thread_id != 0).then_some(thread_id),
+                thread: Some(thread),
+            };
+            worker.shutdown();
+            clear_click_callback();
+            return Err(anyhow!(
+                "Windows click monitor did not become ready: {error}"
+            ));
+        }
+    };
+
+    Ok(Box::new(ClickMonitor {
+        worker: MessageLoopWorker {
+            thread_id: Some(thread_id),
+            thread: Some(thread),
+        },
+    }))
+}
+
+fn run_click_monitor_loop(
+    ready_tx: mpsc::SyncSender<std::result::Result<u32, String>>,
+    installing_thread_id: &AtomicU32,
+    installation_cancelled: &AtomicBool,
+) {
+    unsafe {
+        // Thread messages are delivered only after the receiver owns a message
+        // queue. Create it before publishing the thread id so WM_QUIT cannot
+        // race startup and disappear.
+        let mut message = MSG::default();
+        let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
+        let thread_id = GetCurrentThreadId();
+        installing_thread_id.store(thread_id, Ordering::Release);
+
+        let hook = match SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), None, 0) {
+            Ok(hook) => hook,
+            Err(error) => {
+                let _ = ready_tx.send(Err(format!(
+                    "The Windows click monitor hook could not be installed: {error}"
+                )));
+                clear_click_callback();
+                return;
+            }
+        };
+
+        if installation_cancelled.load(Ordering::Acquire) {
+            let _ = UnhookWindowsHookEx(hook);
+            clear_click_callback();
             return;
         }
-        let mut message = MSG::default();
-        while !flag.load(std::sync::atomic::Ordering::SeqCst)
-            && GetMessageW(&mut message, None, 0, 0).as_bool()
-        {
+
+        if ready_tx.send(Ok(thread_id)).is_err() {
+            let _ = UnhookWindowsHookEx(hook);
+            clear_click_callback();
+            return;
+        }
+
+        loop {
+            let status = GetMessageW(&mut message, None, 0, 0).0;
+            if status == 0 {
+                break;
+            }
+            if status == -1 {
+                log::error!("Windows click monitor message loop failed");
+                break;
+            }
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
-    });
-    Ok(Box::new(ClickMonitor {
-        stop_flag,
-        _thread: thread,
-    }))
+
+        if let Err(error) = UnhookWindowsHookEx(hook) {
+            log::warn!("Windows click monitor hook could not be removed: {error}");
+        }
+        clear_click_callback();
+    }
+}
+
+fn post_thread_quit(thread_id: u32) -> windows::core::Result<()> {
+    unsafe { PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0)) }
+}
+
+fn clear_click_callback() {
+    *CLICK_CALLBACK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 }
 
 unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -202,11 +353,48 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
         let message = wparam.0 as u32;
         if message == WM_LBUTTONDOWN || message == WM_RBUTTONDOWN {
             let data = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
-            let callback = CLICK_CALLBACK.lock().unwrap();
-            if let Some(callback) = callback.as_ref() {
+            let callback = CLICK_CALLBACK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            if let Some(callback) = callback {
                 callback(data.pt.x as f64, data.pt.y as f64);
             }
         }
     }
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_loop_shutdown_wakes_joins_and_is_idempotent() {
+        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let (stopped_tx, stopped_rx) = mpsc::sync_channel(1);
+        let thread = thread::spawn(move || unsafe {
+            let mut message = MSG::default();
+            let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
+            ready_tx.send(GetCurrentThreadId()).unwrap();
+            let stopped_by_quit = GetMessageW(&mut message, None, 0, 0).0 == 0;
+            stopped_tx.send(stopped_by_quit).unwrap();
+        });
+        let thread_id = ready_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("test message loop should become ready");
+        let mut worker = MessageLoopWorker {
+            thread_id: Some(thread_id),
+            thread: Some(thread),
+        };
+
+        worker.shutdown();
+        worker.shutdown();
+
+        assert!(stopped_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("WM_QUIT should wake the test message loop"));
+        assert!(worker.thread_id.is_none());
+        assert!(worker.thread.is_none());
+    }
 }

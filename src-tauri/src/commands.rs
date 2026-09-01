@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, Monitor, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 
 use crate::capture::current as capture_backend;
 use crate::core::annotation::{AnnotationAppearance, AnnotationDocument, AnnotationPixelSize};
@@ -26,8 +28,8 @@ use crate::state::RecoveryAction;
 use crate::state::{
     emit_asset_content_changed, emit_error, emit_library_changed, emit_notice, emit_notice_local,
     emit_notice_on_monitor, emit_recording_state, show_completion_preview, ActiveRecording,
-    AppState, ApprovedEditorSave, CaptureSession, CompletionPreviewDto, RecordingConfiguration,
-    RecordingFlow, StagedCaptureAnnotation, StagedEditorAnnotation,
+    AppState, ApprovedEditorSave, CaptureSession, CompletionPreviewDto, PendingCaptureCompletion,
+    RecordingConfiguration, RecordingFlow, StagedCaptureAnnotation, StagedEditorAnnotation,
 };
 
 // ---------------------------------------------------------------------------
@@ -1225,6 +1227,11 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
         // The overlay frontend calls start_capture again when it loads; return
         // the existing session context instead of failing.
         if let Some(session) = capture.session.as_ref() {
+            log::info!(
+                "start_capture: returning active session capture_id={} overlays={}",
+                session.capture_id,
+                session.overlay_labels.len()
+            );
             let display = &session.display;
             return Ok(CaptureContextDto {
                 display_width: display.screen_frame.width,
@@ -1292,6 +1299,14 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
             return Err(message);
         }
     };
+    log::info!(
+        "start_capture: display frozen logical={}x{} pixels={}x{} scale={}",
+        display.screen_frame.width,
+        display.screen_frame.height,
+        display.pixel_width,
+        display.pixel_height,
+        display.backing_scale
+    );
 
     let context = CaptureContextDto {
         display_width: display.screen_frame.width,
@@ -1461,9 +1476,14 @@ pub fn cancel_capture(window: WebviewWindow, app: AppHandle) -> Result<(), Strin
         }
     };
     let Some(session) = session else {
+        log::info!("cancel_capture: no active session; closing orphan overlay");
         let _ = window.close();
         return Ok(());
     };
+    log::info!(
+        "cancel_capture: capture_id={} requested",
+        session.capture_id
+    );
     teardown_cancelled_capture(&app, session, true);
     Ok(())
 }
@@ -1605,6 +1625,13 @@ pub fn confirm_capture(
     // to the clipboard/library. This also bounds decoder allocation by the
     // dimensions of the frozen display that owns the request.
     let pixel_size = validate_capture_png(png, max_width, max_height)?;
+    log::info!(
+        "confirm_capture: validated capture_id={} bytes={} pixels={}x{}",
+        capture_id,
+        png.len(),
+        pixel_size.0,
+        pixel_size.1
+    );
     let editable_project = if staged.document.has_marks() {
         if (
             i64::from(staged.document.source_pixels.width),
@@ -1633,26 +1660,50 @@ pub fn confirm_capture(
         }
         capture.session.take().unwrap()
     };
+    log::info!(
+        "confirm_capture: session consumed capture_id={}",
+        session.capture_id
+    );
     invalidate_capture_resources(&app, &session);
     // Errors must be visible: show the library window before emitting.
-    let session_failure =
-        match confirm_capture_inner(&app, &state, session, png, pixel_size, editable_project) {
-            Ok(()) => return Ok(()),
-            Err(error) => error,
+    let session_feedback =
+        match confirm_capture_inner(&app, &state, &session, png, pixel_size, editable_project) {
+            Ok(feedback) => feedback,
+            Err(error) => {
+                if let Some(window) = app.get_webview_window("library") {
+                    let _ = window.show();
+                }
+                if capture_failure_requires_global_error(error.copied) {
+                    emit_error(&app, error.message.clone(), None);
+                }
+                return Err(error.message);
+            }
         };
-    if let Some(window) = app.get_webview_window("library") {
-        let _ = window.show();
+    let mut pending = state.pending_capture_completion.lock().unwrap();
+    if pending.is_some() {
+        return Err("The previous capture is still completing.".into());
     }
-    if capture_failure_requires_global_error(session_failure.copied) {
-        emit_error(&app, session_failure.message.clone(), None);
-    }
-    Err(session_failure.message)
+    log::info!(
+        "confirm_capture: completion queued until overlay destruction labels={}",
+        session.overlay_labels.len()
+    );
+    *pending = Some(PendingCaptureCompletion {
+        session,
+        preview: session_feedback.preview,
+        monitor: session_feedback.monitor,
+    });
+    Ok(())
 }
 
 #[derive(Debug)]
 struct CaptureConfirmationFailure {
     message: String,
     copied: bool,
+}
+
+struct CaptureCompletionFeedback {
+    preview: CompletionPreviewDto,
+    monitor: Option<Monitor>,
 }
 
 fn capture_failure_requires_global_error(copied: bool) -> bool {
@@ -1662,25 +1713,22 @@ fn capture_failure_requires_global_error(copied: bool) -> bool {
 fn confirm_capture_inner(
     app: &AppHandle,
     state: &AppState,
-    session: CaptureSession,
+    session: &CaptureSession,
     png: &[u8],
     pixel_size: (i64, i64),
     editable_project: Option<(Vec<u8>, AnnotationDocument)>,
-) -> Result<(), CaptureConfirmationFailure> {
+) -> Result<CaptureCompletionFeedback, CaptureConfirmationFailure> {
     log::info!("confirm_capture: bytes={}", png.len());
 
     let completion_monitor = session.overlay_labels.iter().find_map(|label| {
         app.get_webview_window(label)
             .and_then(|window| window.current_monitor().ok().flatten())
     });
-    for label in &session.overlay_labels {
-        if let Some(window) = app.get_webview_window(label) {
-            let _ = window.close();
-        }
-    }
-
     let copied = match platform::write_image_to_clipboard(png) {
-        Ok(()) => true,
+        Ok(()) => {
+            log::info!("confirm_capture: clipboard write complete");
+            true
+        }
         Err(error) => {
             log::error!("confirm_capture: clipboard write failed: {error}");
             false
@@ -1757,26 +1805,75 @@ fn confirm_capture_inner(
         }
     };
     emit_library_changed(app);
+    log::info!(
+        "confirm_capture: library import complete asset_id={} copied={}",
+        asset.id,
+        copied
+    );
 
     let title = if copied {
         "Copied and Saved"
     } else {
         "Saved — Copy Failed"
     };
-    show_completion_preview(
-        app,
-        &CompletionPreviewDto::ready(
+    Ok(CaptureCompletionFeedback {
+        preview: CompletionPreviewDto::ready(
             uuid::Uuid::new_v4().to_string(),
             &asset,
             title,
             completion_asset_detail(&asset),
             copied,
         ),
-        completion_monitor,
-    );
+        monitor: completion_monitor,
+    })
+}
 
-    restore_focus(app, &session);
-    Ok(())
+/// Finalizes a successful capture only after its owner WebView has gone away.
+/// This callback runs outside the synchronous confirmation IPC, so creating
+/// the completion preview cannot prevent WebView2 from delivering that IPC
+/// response. The first destroyed overlay also closes any peers on other
+/// monitors; the last one presents feedback and restores the capture origin.
+pub(crate) fn finalize_confirmed_capture_after_overlay_destroyed(app: &AppHandle, label: &str) {
+    let state = app.state::<AppState>();
+    let (remaining_labels, completed) = {
+        let mut slot = state.pending_capture_completion.lock().unwrap();
+        let Some(pending) = slot.as_mut() else {
+            return;
+        };
+        if !pending
+            .session
+            .overlay_labels
+            .iter()
+            .any(|owner| owner == label)
+        {
+            return;
+        }
+        pending
+            .session
+            .overlay_labels
+            .retain(|owner| owner != label && app.get_webview_window(owner).is_some());
+        let remaining_labels = pending.session.overlay_labels.clone();
+        let completed = if remaining_labels.is_empty() {
+            slot.take()
+        } else {
+            None
+        };
+        (remaining_labels, completed)
+    };
+
+    for owner in remaining_labels {
+        if let Some(window) = app.get_webview_window(&owner) {
+            if let Err(error) = window.close() {
+                log::error!("confirm_capture: peer overlay close failed label={owner}: {error}");
+            }
+        }
+    }
+
+    if let Some(completed) = completed {
+        show_completion_preview(app, &completed.preview, completed.monitor);
+        restore_focus(app, &completed.session);
+        log::info!("confirm_capture: completion flow returned after overlay destruction");
+    }
 }
 
 fn validate_staged_capture_annotation(
@@ -2522,6 +2619,7 @@ pub async fn start_recording_flow(
             completion_monitor,
             configuration: Some(RecordingConfiguration {
                 display_id: session.display.display_id,
+                display_identity: session.display.display_identity.clone(),
                 region: Rect::new(
                     request.region.x,
                     request.region.y,
@@ -2877,6 +2975,8 @@ fn start_recorder(
     configuration: &RecordingConfiguration,
     senders: RecorderSenders,
 ) -> Result<StartedRecorder, String> {
+    #[cfg(windows)]
+    let _ = app;
     #[cfg(target_os = "macos")]
     let ripple_excepted = platform::window_capture_id(app, "ripple")
         .into_iter()
@@ -2913,8 +3013,11 @@ fn start_recorder(
     }
     #[cfg(windows)]
     {
+        let display_identity = configuration.display_identity.as_ref().ok_or_else(|| {
+            "The selected display identity is unavailable. Select it again.".to_string()
+        })?;
         let recorder = crate::capture::windows::WindowsRecorder::start(
-            configuration.display_id,
+            display_identity,
             configuration.region,
             configuration.backing_scale,
             configuration.options,
@@ -3906,8 +4009,9 @@ pub fn get_language(app: AppHandle) -> String {
 }
 
 #[tauri::command]
-pub fn set_language(app: AppHandle, language: String) {
+pub fn set_language(app: AppHandle, language: String) -> Result<(), String> {
     crate::state::save_language(&app, &language);
+    crate::refresh_tray_menu(&app, &language)
 }
 
 #[tauri::command]
@@ -4189,6 +4293,7 @@ mod command_security_tests {
             screen_frame: Rect::new(0.0, 0.0, 4.0, 3.0),
             window_rects: Vec::new(),
             display_id: 1,
+            display_identity: None,
             backing_scale: 2.0,
         };
         let selection = Rect::new(0.25, 0.5, 2.0, 1.5);

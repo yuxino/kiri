@@ -4,6 +4,13 @@
 
 use anyhow::{anyhow, Result};
 
+#[cfg(windows)]
+fn rgba_to_bgra_in_place(bytes: &mut [u8]) {
+    for pixel in bytes.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn make_macos_text_request() -> objc2::rc::Retained<objc2_vision::VNRecognizeTextRequest> {
     use objc2_vision::{VNRecognizeTextRequest, VNRequestTextRecognitionLevel};
@@ -77,7 +84,12 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
     let image = image::load_from_memory(png).map_err(|error| anyhow!("{error}"))?;
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
-    let raw = rgba.into_raw();
+    let mut raw = rgba.into_raw();
+    // Windows.Media.Ocr expects the same BGRA8 SoftwareBitmap shape used by
+    // Microsoft's OCR samples. `image` decodes to RGBA8, so swap red and blue
+    // before declaring the WinRT buffer as BGRA8. Declaring RGBA8 here causes
+    // RecognizeAsync to reject otherwise valid screenshots on Windows 11.
+    rgba_to_bgra_in_place(&mut raw);
 
     // Write the pixel bytes into an IBuffer via DataWriter (the windows crate
     // no longer exposes Buffer::as_mut for raw writes).
@@ -90,7 +102,7 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
     let bitmap: windows::Graphics::Imaging::SoftwareBitmap =
         windows::Graphics::Imaging::SoftwareBitmap::CreateCopyFromBuffer(
             &buffer,
-            BitmapPixelFormat::Rgba8,
+            BitmapPixelFormat::Bgra8,
             width as i32,
             height as i32,
         )
@@ -113,5 +125,17 @@ pub fn recognize_text(png: &[u8]) -> Result<String> {
         Err(anyhow!("No Text Found"))
     } else {
         Ok(text)
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::rgba_to_bgra_in_place;
+
+    #[test]
+    fn converts_decoded_rgba_pixels_to_windows_bgra_order() {
+        let mut pixels = vec![1, 2, 3, 4, 10, 20, 30, 40];
+        rgba_to_bgra_in_place(&mut pixels);
+        assert_eq!(pixels, [3, 2, 1, 4, 30, 20, 10, 40]);
     }
 }
