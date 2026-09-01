@@ -25,6 +25,7 @@ use crate::record::SegmentEncoder;
 pub struct AppState {
     pub library: std::sync::Mutex<LibraryContext>,
     pub library_transition: std::sync::Mutex<()>,
+    pub(crate) capture_schedule: CaptureScheduleGate,
     pub(crate) capture_start: CaptureStartGate,
     pub capture: std::sync::Mutex<CaptureFlow>,
     /// Successful capture feedback waits here until the owner overlay has
@@ -51,6 +52,39 @@ pub struct AppState {
     /// receives only the opaque token; a save consumes both token and path.
     pub editor_save_destinations: std::sync::Mutex<HashMap<String, ApprovedEditorSave>>,
     remote_ocr: std::sync::OnceLock<Option<crate::remote_ocr::RemoteOcrClient>>,
+}
+
+/// Coalesces native shortcut and tray requests before they enter the main
+/// thread queue. The owned permit can move into the scheduled closure, so the
+/// gate remains closed while that closure is queued, executing, or waiting for
+/// a bounded platform capture to return.
+#[derive(Clone, Default)]
+pub(crate) struct CaptureScheduleGate(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl CaptureScheduleGate {
+    pub(crate) fn try_begin(&self) -> Option<CaptureSchedulePermit> {
+        self.0
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .ok()
+            .map(|_| CaptureSchedulePermit {
+                gate: std::sync::Arc::clone(&self.0),
+            })
+    }
+}
+
+pub(crate) struct CaptureSchedulePermit {
+    gate: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for CaptureSchedulePermit {
+    fn drop(&mut self) {
+        self.gate.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 #[derive(Default)]
@@ -400,6 +434,7 @@ impl AppState {
         Ok(Self {
             library: std::sync::Mutex::new(library),
             library_transition: std::sync::Mutex::new(()),
+            capture_schedule: Default::default(),
             capture_start: Default::default(),
             capture: Default::default(),
             pending_capture_completion: Default::default(),
@@ -979,8 +1014,9 @@ pub fn save_language(app: &AppHandle, language: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        mark_error_seen, toast_position, urlencode, ActiveRecording, CaptureFlow, CaptureSession,
-        CaptureStartGate, RecordingConfiguration, RecordingFlow,
+        mark_error_seen, toast_position, urlencode, ActiveRecording, CaptureFlow,
+        CaptureScheduleGate, CaptureSession, CaptureStartGate, RecordingConfiguration,
+        RecordingFlow,
     };
     use crate::capture::CapturedDisplay;
     use crate::core::geometry::Rect;
@@ -1041,6 +1077,39 @@ mod tests {
         let permit = gate.try_begin().expect("first capture start must enter");
         assert!(gate.try_begin().is_none());
         drop(permit);
+        assert!(gate.try_begin().is_some());
+    }
+
+    #[test]
+    fn capture_schedule_gate_coalesces_a_cross_thread_burst() {
+        let gate = CaptureScheduleGate::default();
+        let start = std::sync::Arc::new(std::sync::Barrier::new(17));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let workers = (0..16)
+            .map(|_| {
+                let gate = gate.clone();
+                let start = std::sync::Arc::clone(&start);
+                let sender = sender.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    if let Some(permit) = gate.try_begin() {
+                        sender.send(permit).unwrap();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        drop(sender);
+        start.wait();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+
+        // The winner's owned permit remains alive in the channel while every
+        // other contender finishes, proving the whole burst was coalesced.
+        let permits = receiver.into_iter().collect::<Vec<_>>();
+        assert_eq!(permits.len(), 1);
+        assert!(gate.try_begin().is_none());
+        drop(permits);
         assert!(gate.try_begin().is_some());
     }
 

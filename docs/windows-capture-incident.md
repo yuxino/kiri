@@ -72,6 +72,8 @@ PNG encoding, or window enumeration. The v1.4.8 follow-up therefore:
 
 - permits only one native display freeze at a time while preserving the
   overlay's re-entry for an already-created capture session;
+- coalesces shortcut and tray requests before main-thread scheduling, retaining
+  one owned permit through queueing, execution, and timeout recovery;
 - runs the Windows freeze in one worker with an eight-second end-to-end wait;
 - refuses to accumulate replacement workers if the original OS call remains
   active after the timeout; and
@@ -94,10 +96,11 @@ has all of the following evidence on Windows:
    queued`, `completion preview presented`, and `completion flow returned`,
    with no `[panic]` entry.
 6. Startup recovery: press the shortcut repeatedly during one capture start.
-   Exactly one native worker may run; Kiri must either present the overlay or
-   restore the originating window with a visible timeout within eight seconds.
-   A later retry must not create another worker while the timed-out OS call is
-   still active.
+   Exactly one main-thread request and one native worker may run; Kiri must
+   either present the overlay or restore the originating window with a visible
+   timeout within eight seconds. Queued key-repeat events must not replay after
+   that result. A later deliberate retry must not create another worker while
+   the timed-out OS call is still active.
 
 For the native test, read the final log lines with:
 
