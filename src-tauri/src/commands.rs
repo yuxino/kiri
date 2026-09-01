@@ -1216,10 +1216,42 @@ fn convert_asset_to_gif(
 // Capture flow commands (main thread)
 // ---------------------------------------------------------------------------
 
+fn capture_context(session: &CaptureSession) -> CaptureContextDto {
+    let display = &session.display;
+    CaptureContextDto {
+        display_width: display.screen_frame.width,
+        display_height: display.screen_frame.height,
+        scale: display.backing_scale,
+        pixel_width: display.pixel_width,
+        pixel_height: display.pixel_height,
+        window_rects: display.window_rects.iter().map(RectDto::from).collect(),
+        source_application: session.source_application.clone(),
+    }
+}
+
 #[tauri::command]
 pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
     log::info!("start_capture: beginning capture flow");
     let state = app.state::<AppState>();
+    let _start_permit = match state.capture_start.try_begin() {
+        Some(permit) => permit,
+        None => {
+            // The overlay can request its already-created context while the
+            // initiating call is still creating/focusing the WebView. Preserve
+            // that re-entry, but never start a second native display freeze.
+            let capture = state.capture.lock().unwrap();
+            if let Some(session) = capture.session.as_ref() {
+                log::info!(
+                    "start_capture: returning active session during startup capture_id={} overlays={}",
+                    session.capture_id,
+                    session.overlay_labels.len()
+                );
+                return Ok(capture_context(session));
+            }
+            log::warn!("start_capture: ignored concurrent native display freeze request");
+            return Err("Screen capture is already starting.".into());
+        }
+    };
     let _transition = state.library_transition.lock().unwrap();
 
     {
@@ -1232,16 +1264,7 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
                 session.capture_id,
                 session.overlay_labels.len()
             );
-            let display = &session.display;
-            return Ok(CaptureContextDto {
-                display_width: display.screen_frame.width,
-                display_height: display.screen_frame.height,
-                scale: display.backing_scale,
-                pixel_width: display.pixel_width,
-                pixel_height: display.pixel_height,
-                window_rects: display.window_rects.iter().map(RectDto::from).collect(),
-                source_application: session.source_application.clone(),
-            });
+            return Ok(capture_context(session));
         }
         let recording = state.recording.lock().unwrap();
         if recording.is_recording

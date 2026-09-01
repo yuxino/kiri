@@ -53,7 +53,9 @@ pub fn run() {
                         let handle = app.clone();
                         let trigger = handle.clone();
                         let _ = trigger.run_on_main_thread(move || {
-                            let _ = commands::start_capture(handle);
+                            if let Err(error) = commands::start_capture(handle) {
+                                log::warn!("[shortcut] capture start returned: {error}");
+                            }
                         });
                     }
                 })
@@ -453,7 +455,9 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 let handle = app.clone();
                 let trigger = handle.clone();
                 let _ = trigger.run_on_main_thread(move || {
-                    let _ = commands::start_capture(handle);
+                    if let Err(error) = commands::start_capture(handle) {
+                        log::warn!("[tray] capture start returned: {error}");
+                    }
                 });
             }
             "quit" => {

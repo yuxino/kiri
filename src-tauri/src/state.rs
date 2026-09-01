@@ -25,6 +25,7 @@ use crate::record::SegmentEncoder;
 pub struct AppState {
     pub library: std::sync::Mutex<LibraryContext>,
     pub library_transition: std::sync::Mutex<()>,
+    pub(crate) capture_start: CaptureStartGate,
     pub capture: std::sync::Mutex<CaptureFlow>,
     /// Successful capture feedback waits here until the owner overlay has
     /// actually been destroyed. Creating another WebView from the synchronous
@@ -50,6 +51,39 @@ pub struct AppState {
     /// receives only the opaque token; a save consumes both token and path.
     pub editor_save_destinations: std::sync::Mutex<HashMap<String, ApprovedEditorSave>>,
     remote_ocr: std::sync::OnceLock<Option<crate::remote_ocr::RemoteOcrClient>>,
+}
+
+#[derive(Default)]
+pub(crate) struct CaptureStartGate(std::sync::atomic::AtomicBool);
+
+impl CaptureStartGate {
+    /// Allows only one native display freeze to be in flight. Windows Graphics
+    /// Capture can pump another shortcut event before its first frame arrives;
+    /// a second `start_capture` must fail fast instead of waiting on a mutex
+    /// already held by the first invocation.
+    pub(crate) fn try_begin(&self) -> Option<CaptureStartPermit<'_>> {
+        self.0
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .ok()
+            .map(|_| CaptureStartPermit { gate: self })
+    }
+}
+
+pub(crate) struct CaptureStartPermit<'a> {
+    gate: &'a CaptureStartGate,
+}
+
+impl Drop for CaptureStartPermit<'_> {
+    fn drop(&mut self) {
+        self.gate
+            .0
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 #[derive(Default)]
@@ -366,6 +400,7 @@ impl AppState {
         Ok(Self {
             library: std::sync::Mutex::new(library),
             library_transition: std::sync::Mutex::new(()),
+            capture_start: Default::default(),
             capture: Default::default(),
             pending_capture_completion: Default::default(),
             recording: Default::default(),
@@ -945,7 +980,7 @@ pub fn save_language(app: &AppHandle, language: &str) {
 mod tests {
     use super::{
         mark_error_seen, toast_position, urlencode, ActiveRecording, CaptureFlow, CaptureSession,
-        RecordingConfiguration, RecordingFlow,
+        CaptureStartGate, RecordingConfiguration, RecordingFlow,
     };
     use crate::capture::CapturedDisplay;
     use crate::core::geometry::Rect;
@@ -998,6 +1033,15 @@ mod tests {
         assert!(!mark_error_seen("Screen Recording is off."));
         assert!(mark_error_seen("A different error."));
         assert!(!mark_error_seen("A different error."));
+    }
+
+    #[test]
+    fn capture_start_gate_rejects_overlap_and_reopens_after_drop() {
+        let gate = CaptureStartGate::default();
+        let permit = gate.try_begin().expect("first capture start must enter");
+        assert!(gate.try_begin().is_none());
+        drop(permit);
+        assert!(gate.try_begin().is_some());
     }
 
     #[test]

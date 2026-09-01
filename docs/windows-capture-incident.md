@@ -1,10 +1,10 @@
 # Windows capture incident
 
-Status: fix candidate; Windows native retest required.
+Status: PR #3 merged; v1.4.8 follow-up candidate; Windows native retest required.
 
-This document tracks the Windows screenshot failure on PR #3 without treating
-CI or a packaged installer as native acceptance. Keep the pull request open;
-do not merge or publish from this incident workflow.
+This document tracks the Windows screenshot failures around PR #3 without
+treating CI or a packaged installer as native acceptance. The pull request is
+merged; do not publish the v1.4.8 follow-up without the native evidence below.
 
 ## Reported behavior
 
@@ -40,7 +40,7 @@ cannot remain owned after a real process death. Therefore a launch that is
 silently forwarded points to a still-running or unresponsive first process,
 not a permanently orphaned single-instance lock.
 
-## Fix candidate
+## PR #3 fix
 
 - Overlay destruction is dispatched from an async worker and reaches the main
   event loop only after the synchronous confirmation callback has returned its
@@ -56,6 +56,28 @@ not a permanently orphaned single-instance lock.
 - A second-instance request now restores and focuses the library window, or
   recreates it when the original window no longer exists. Failures are logged.
 
+## v1.4.8 follow-up: capture startup stall
+
+A later Windows run recorded the shortcut registration and every key press, but
+the first `start_capture: beginning capture flow` was never followed by either
+`display frozen` or a capture error. The user pressed the shortcut again before
+the first native freeze returned, and subsequent requests entered the same
+startup boundary. Relaunch requests continued reaching the resident process,
+confirming that the process was alive rather than blocked by an orphaned
+single-instance mutex.
+
+PR #3 did not guard this startup interval or bound the complete `xcap` call; its
+three-second frame wait does not cover monitor setup, D3D/WinRT calls, cleanup,
+PNG encoding, or window enumeration. The v1.4.8 follow-up therefore:
+
+- permits only one native display freeze at a time while preserving the
+  overlay's re-entry for an already-created capture session;
+- runs the Windows freeze in one worker with an eight-second end-to-end wait;
+- refuses to accumulate replacement workers if the original OS call remains
+  active after the timeout; and
+- logs monitor enumeration, first-frame request/arrival, window enumeration,
+  and worker completion without recording window titles or capture pixels.
+
 ## Native retest evidence required
 
 Do not mark the incident fixed until one exact x64 installer from the PR head
@@ -69,8 +91,13 @@ has all of the following evidence on Windows:
    the resident process is visible or hidden.
 5. Log: the same run contains `display frozen`, `frozen capture served`,
    `validated`, `session consumed`, `library import complete`, `completion
-   preview presented`, `completion flow returned`, and `deferred overlay
-   close`, with no `[panic]` entry.
+   queued`, `completion preview presented`, and `completion flow returned`,
+   with no `[panic]` entry.
+6. Startup recovery: press the shortcut repeatedly during one capture start.
+   Exactly one native worker may run; Kiri must either present the overlay or
+   restore the originating window with a visible timeout within eight seconds.
+   A later retry must not create another worker while the timed-out OS call is
+   still active.
 
 For the native test, read the final log lines with:
 

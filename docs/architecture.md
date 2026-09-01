@@ -55,7 +55,11 @@ unrestricted filesystem path.
    a conflicting binding leaves Kiri running and is surfaced in Settings for
    retry.
 2. macOS freezes the active display with ScreenCaptureKit. Windows uses the
-   Windows Graphics Capture path exposed through `xcap`.
+   Windows Graphics Capture path exposed through `xcap`. Capture startup is
+   single-flight: a repeated shortcut cannot enter a second native freeze.
+   Windows performs the freeze in one bounded worker, reports a visible timeout
+   when the OS does not return, and will not accumulate replacement workers
+   while the original system call is still active.
 3. Rust keeps one reference-counted allocation for the full frozen PNG and
    shares it with the session, OCR preparation, and custom protocol. The
    overlay receives a capture-scoped, unguessable `kiri://` URL. The image is
