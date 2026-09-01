@@ -9,43 +9,33 @@
   </p>
 </div>
 
-Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on Windows, then select a window or region to capture, annotate, recognize text, or record. Screenshots are copied to the clipboard; screenshots, MP4 recordings, and GIFs are saved in the local library.
-
-Kiri is primarily developed and tested on macOS. Windows has not completed real-device acceptance testing, so installation or some features may fail.
-
-> v1.4.8 prevents repeated shortcut presses during Windows native capture startup from wedging the resident process, and adds a bounded failure path with stage-by-stage diagnostics when the operating system does not return a frame.
+Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on Windows, then select a window or region to capture, annotate, recognize text, or record. Screenshots are copied to the clipboard; screenshots, MP4 recordings, and GIFs are saved in the local library.
 
 ## Features
 
-- **Screenshots, crop, and re-editable annotation**: click a window or drag a region, including from a macOS full-screen Space, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Color, widths, text, and mosaic styling remember the last choice. Annotations created by v1.4.5 or later can be reopened from the completion card or library, while marks flattened into older screenshots cannot be reconstructed.
+- **Screenshots and annotation**: click a window or drag a region, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Annotations created by current releases can be reopened from the completion card or library.
 - **OCR**: recognize text locally with macOS Vision or Windows.Media.Ocr by default; optional remote OCR asks before every upload.
 - **Recording and GIF**: record a region with optional system audio, microphone, pointer, and click highlights; save as MP4 or GIF.
 - **Local library**: search, favorite, tag, rename, and move captures to recoverable Trash. Settings can use another local directory or external disk for the library.
 
-> v1.4.5 includes editable screenshot projects, crop, remembered annotation styling, and library location/recovery.
-
-If the library is offline, retry or locate it again. Choose a file to replace a missing asset. Recordings that could not be imported are kept for retry.
-
 ## Download and install
 
-Download the latest version from [GitHub Releases](https://github.com/yuxino/kiri/releases/latest).
+Published builds are listed on [GitHub Releases](https://github.com/yuxino/kiri/releases); stable macOS packages and Windows candidates can have different publication status.
 
-- **macOS 14+**: download the single Universal `.dmg`, which supports both Apple silicon and Intel. Open it and drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording**; **Input Monitoring** is needed only for click highlights. The global capture shortcut needs no additional system permission, and Settings shows whether it is available. Microphone recording requires macOS 15+ and requests **Microphone** permission only when enabled.
-- **Windows 11 (x64)**: run the `.exe` installer. Screen capture needs no extra system permission; microphone access follows Windows privacy settings. The installer is not Authenticode-signed, so SmartScreen may warn, and Windows has not completed real-device testing.
+- **macOS 14+**: download the Universal `.dmg` for Apple silicon and Intel, then drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording**; **Input Monitoring** is needed only for click highlights. Microphone recording requires macOS 15+.
+- **Windows 11 (x64)**: supported in current source. The v1.4.8 installer remains a draft candidate while native capture acceptance is completed, so it is not yet publicly released. Run the `.exe` installer; screen capture needs no extra system permission, and microphone access follows Windows privacy settings. The installer is not Authenticode-signed, so SmartScreen may warn.
 
-> The v1.4.5 and later macOS releases use the project's maintained local self-signed identity, not ad-hoc, Developer ID signing, or Apple notarization. First launch may require Control-clicking `Kiri.app` and choosing **Open**, or selecting **Open Anyway** in System Settings → Privacy & Security. Gatekeeper does not need to be disabled.
->
-> A maintainer packages the Universal macOS DMG on a trusted Mac and attaches it to the Release; GitHub Actions produces the Windows draft. If the signing identity changes later, macOS may request the related permissions again.
+macOS releases use the project's maintained local self-signed identity, not Developer ID signing or Apple notarization. If the first launch is blocked, Control-click `Kiri.app` and choose **Open**, or select **Open Anyway** in System Settings → Privacy & Security.
 
-Remote OCR is optional. API keys stay in macOS Keychain or Windows Credential Manager; creating or selecting a profile sends nothing, and every request requires an explicit **Send** or **Retry** action.
+## Privacy
 
-Starting with v1.4.5, Kiri stores the flattened screenshot, clean source, and annotation document locally. The source may still contain pixels hidden by mosaic or shapes; saving a crop also removes out-of-frame pixels from that source. Editing never uploads this content.
+Captures, local OCR, and encoding stay on your computer by default. Remote OCR is optional; API keys stay in macOS Keychain or Windows Credential Manager, and every request requires an explicit **Send** or **Retry** action.
 
-Recording and GIF conversion use FFmpeg. If no usable copy is available, Kiri downloads and caches it when you first record or manually convert a GIF; browsing the library never triggers this download, and encoding stays local.
+Re-editable screenshots keep an unannotated source locally, which may still contain pixels hidden by mosaic or shapes. Saving a crop also removes out-of-frame pixels. Recording and GIF export use FFmpeg; if it is unavailable, Kiri downloads and caches it on first use while encoding remains local.
 
 ## Run from source
 
-Requires Rust 1.88+, Node.js 20.19+ (or 22.12+), and pnpm. macOS packaging also requires Xcode Command Line Tools.
+Requires Rust 1.88+, Node.js 20.19+ (or 22.12+), and pnpm. macOS requires Xcode Command Line Tools; Windows requires the MSVC C++ build tools.
 
 ```bash
 git clone https://github.com/yuxino/kiri.git
@@ -55,7 +45,7 @@ pnpm tauri dev
 pnpm tauri build --no-bundle
 ```
 
-macOS development builds require a stable signing identity, and `pnpm tauri dev` fails clearly when none is available. Do not run the executable produced by a plain `cargo build`; it does not contain the frontend assets.
+macOS development builds also require a stable signing identity. Run and build through the Tauri commands; a plain `cargo build` executable does not contain the frontend assets.
 
 ## Shortcuts
 

@@ -9,43 +9,33 @@
   </p>
 </div>
 
-按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Windows），选择窗口或区域，即可截图、标注、识别文字或录屏。截图会复制到剪贴板；截图、MP4 和 GIF 保存在本地素材库。
-
-Kiri 主要在 macOS 上开发和测试。Windows 尚未完成真机验收，安装或部分功能可能有问题。
-
-> v1.4.8 修复了 Windows 原生截屏启动期间重复按快捷键可能让驻留进程卡住的问题，并为未返回的系统捕获增加了有界失败恢复与分阶段诊断日志。
+Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Windows），选择窗口或区域，即可截图、标注、识别文字或录屏。截图会复制到剪贴板；截图、MP4 和 GIF 保存在本地素材库。
 
 ## 功能
 
-- **截图、裁剪与可重编辑标注**：点击窗口或拖选区域，支持从 macOS 全屏空间唤起。使用裁剪、画笔、图形、箭头、文字、马赛克、撤销和重做；颜色、线宽、文字和马赛克样式会沿用上次选择。v1.4.5 及更高版本创建的标注可从完成卡或素材库继续编辑，旧截图中已压平的标注无法还原。
+- **截图与标注**：点击窗口或拖选区域，使用裁剪、画笔、图形、箭头、文字、马赛克、撤销和重做。新版创建的标注可从完成卡或素材库继续编辑。
 - **OCR**：默认使用 macOS Vision 或 Windows.Media.Ocr 在本机识别；可选远程 OCR 每次发送前都会确认。
 - **录屏与 GIF**：录制指定区域，可选系统声音、麦克风、指针和点击高亮，输出 MP4 或 GIF。
 - **本地素材库**：支持搜索、收藏、标签、重命名和可恢复的回收站。可在设置中使用其他本机目录或外接盘。
 
-> v1.4.5 已包含可重编辑截图工程、裁剪、标注样式记忆与素材库位置管理/恢复。
-
-素材库离线时可重试或重新定位；缺失文件可选择文件补回。未导入的录屏会保留并可重试。
-
 ## 下载与安装
 
-从 [GitHub Releases](https://github.com/yuxino/kiri/releases/latest) 下载最新版本。
+公开版本见 [GitHub Releases](https://github.com/yuxino/kiri/releases)；macOS 稳定包与 Windows 候选包的发布状态可能不同。
 
-- **macOS 14+**：下载一个 Universal `.dmg`，同时支持 Apple 芯片和 Intel。打开后把 `Kiri.app` 拖入“应用程序”。截图与录屏需要“屏幕与系统音频录制”权限；点击高亮才需要“输入监控”。全局截图快捷键不需要额外系统权限，其可用状态会显示在设置中。麦克风录制需要 macOS 15+，并只在启用时请求“麦克风”权限。
-- **Windows 11（x64）**：运行 `.exe` 安装程序即可；屏幕捕获不需要额外系统授权，麦克风权限由 Windows 隐私设置控制。安装程序未经过 Authenticode 签名，SmartScreen 可能警告；Windows 也尚未完成真机测试。
+- **macOS 14+**：下载 Universal `.dmg`（Apple 芯片与 Intel），把 `Kiri.app` 拖入“应用程序”。截图与录屏需要“屏幕与系统音频录制”权限；点击高亮才需要“输入监控”。麦克风录制需要 macOS 15+。
+- **Windows 11（x64）**：当前源码已支持。v1.4.8 安装包仍是草稿候选，正在完成截图流程的真机验收，尚未正式发布。运行 `.exe` 安装程序；屏幕捕获不需要额外系统授权，麦克风权限由 Windows 隐私设置控制。安装程序未经过 Authenticode 签名，SmartScreen 可能提示警告。
 
-> v1.4.5 及更高版本的 macOS 发布包使用项目维护的本地自签名身份，不是 ad-hoc、Developer ID 签名或 Apple 公证。首次启动可能需要按住 Control 点按 `Kiri.app` 并选择“打开”，或在“系统设置 → 隐私与安全性”中选择“仍要打开”；不需要关闭 Gatekeeper。
->
-> Universal macOS DMG 由维护者在可信 Mac 上打包并附加到 Release，GitHub Actions 生成 Windows draft。若未来更换签名身份，macOS 可能要求重新授予相关权限。
+macOS 发布包使用项目维护的本地自签名身份，未使用 Developer ID 签名或 Apple 公证。首次启动若被拦截，请按住 Control 点按 `Kiri.app` 并选择“打开”，或在“系统设置 → 隐私与安全性”中选择“仍要打开”。
 
-远程 OCR 完全可选。API Key 保存在 macOS 钥匙串或 Windows 凭据管理器中；新建或选择配置不会发送图片，每次请求都需要明确点击“发送”或“重试”。
+## 隐私
 
-从 v1.4.5 起，Kiri 会在本地保存压平截图、未加标注的源图和标注文档。源图仍可能包含被马赛克或图形遮住的像素；保存裁剪后，框外像素也会从源图移除。编辑功能不会上传这些内容。
+素材、OCR 和编码默认都在本机处理。远程 OCR 完全可选，API Key 保存在 macOS 钥匙串或 Windows 凭据管理器中，每次请求都需要明确点击“发送”或“重试”。
 
-录屏和 GIF 转换使用 FFmpeg。本机没有可用版本时，Kiri 会在第一次录屏或手动转换 GIF 时下载并缓存一次；浏览素材库不会触发下载，编码仍在本机完成。
+可重编辑截图会在本地保存未加标注的源图；其中可能仍有被马赛克或图形遮住的像素。保存裁剪会同时移除框外像素。录屏和 GIF 使用 FFmpeg；本机没有可用版本时，Kiri 会在首次需要时下载并缓存，编码仍在本机完成。
 
 ## 从源码运行
 
-需要 Rust 1.88+、Node.js 20.19+（或 22.12+）和 pnpm。macOS 打包还需要 Xcode Command Line Tools。
+需要 Rust 1.88+、Node.js 20.19+（或 22.12+）和 pnpm。macOS 需要 Xcode Command Line Tools；Windows 需要 MSVC C++ 构建工具。
 
 ```bash
 git clone https://github.com/yuxino/kiri.git
@@ -55,7 +45,7 @@ pnpm tauri dev
 pnpm tauri build --no-bundle
 ```
 
-macOS 开发版需要稳定的签名身份，找不到可用身份时 `pnpm tauri dev` 会直接报错。不要直接运行 `cargo build` 生成的二进制；它不包含前端资源。
+macOS 开发版还需要稳定的签名身份。请通过 Tauri 命令运行或构建；普通 `cargo build` 生成的二进制不包含前端资源。
 
 ## 快捷键
 
