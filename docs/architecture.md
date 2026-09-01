@@ -53,9 +53,15 @@ unrestricted filesystem path.
 1. The native global shortcut asks Rust to start a capture session and records
    the previously focused application. Registration needs no TCC permission;
    a conflicting binding leaves Kiri running and is surfaced in Settings for
-   retry.
+   retry. Shortcut and tray requests acquire an owned scheduling permit before
+   entering the main-thread queue, so key repeat cannot leave a burst of stale
+   capture starts behind a slow or timed-out native freeze.
 2. macOS freezes the active display with ScreenCaptureKit. Windows uses the
-   Windows Graphics Capture path exposed through `xcap`.
+   Windows Graphics Capture path exposed through `xcap`. Capture startup is
+   single-flight: a repeated shortcut cannot enter a second native freeze.
+   Windows performs the freeze in one bounded worker, reports a visible timeout
+   when the OS does not return, and will not accumulate replacement workers
+   while the original system call is still active.
 3. Rust keeps one reference-counted allocation for the full frozen PNG and
    shares it with the session, OCR preparation, and custom protocol. The
    overlay receives a capture-scoped, unguessable `kiri://` URL. The image is

@@ -13,6 +13,8 @@ Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on Windows, then select a window or r
 
 Kiri is primarily developed and tested on macOS. Windows has not completed real-device acceptance testing, so installation or some features may fail.
 
+> v1.4.8 prevents repeated shortcut presses during Windows native capture startup from wedging the resident process, and adds a bounded failure path with stage-by-stage diagnostics when the operating system does not return a frame.
+
 ## Features
 
 - **Screenshots, crop, and re-editable annotation**: click a window or drag a region, including from a macOS full-screen Space, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Color, widths, text, and mosaic styling remember the last choice. Annotations created by v1.4.5 or later can be reopened from the completion card or library, while marks flattened into older screenshots cannot be reconstructed.

@@ -2,7 +2,11 @@
 //! WASAPI via cpal for system audio (loopback) + microphone.
 
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
 use windows_capture::capture::{CaptureControl, Context, GraphicsCaptureApiHandler};
@@ -28,9 +32,70 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 // Frozen display capture (xcap / WGC)
 // ---------------------------------------------------------------------------
 
+const FROZEN_CAPTURE_TIMEOUT: Duration = Duration::from_secs(8);
+static FROZEN_CAPTURE_WORKER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+struct FrozenCaptureWorkerPermit;
+
+impl Drop for FrozenCaptureWorkerPermit {
+    fn drop(&mut self) {
+        FROZEN_CAPTURE_WORKER_ACTIVE.store(false, Ordering::Release);
+    }
+}
+
 pub fn capture_active_display() -> Result<CapturedDisplay> {
+    if FROZEN_CAPTURE_WORKER_ACTIVE
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        bail!(
+            "A previous Windows screen capture is still waiting for the operating system. Restart Kiri if capture remains unavailable."
+        );
+    }
+
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let worker = std::thread::Builder::new()
+        .name("kiri-frozen-capture".into())
+        .spawn(move || {
+            let result = {
+                let _permit = FrozenCaptureWorkerPermit;
+                capture_active_display_inner()
+            };
+            if sender.send(result).is_err() {
+                log::warn!("Windows frozen capture finished after its caller stopped waiting");
+            }
+        });
+    if let Err(error) = worker {
+        FROZEN_CAPTURE_WORKER_ACTIVE.store(false, Ordering::Release);
+        return Err(anyhow!(
+            "Could not start the Windows capture worker: {error}"
+        ));
+    }
+
+    receive_frozen_capture(receiver, FROZEN_CAPTURE_TIMEOUT)
+}
+
+fn receive_frozen_capture<T>(receiver: mpsc::Receiver<Result<T>>, timeout: Duration) -> Result<T> {
+    match receiver.recv_timeout(timeout) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => bail!(
+            "Windows screen capture did not finish within {} seconds. Restart Kiri if capture remains unavailable.",
+            timeout.as_secs()
+        ),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            bail!("The Windows screen capture worker stopped unexpectedly.")
+        }
+    }
+}
+
+fn capture_active_display_inner() -> Result<CapturedDisplay> {
+    log::info!("Windows frozen capture: worker started");
     let (cursor_x, cursor_y) = cursor_position()?;
     let monitors = xcap::Monitor::all()?;
+    log::info!(
+        "Windows frozen capture: enumerated {} monitor(s)",
+        monitors.len()
+    );
     let monitor = monitors
         .iter()
         .find(|monitor| {
@@ -47,7 +112,9 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         .or_else(|| monitors.first())
         .ok_or_else(|| anyhow!("The active display could not be captured."))?;
 
+    log::info!("Windows frozen capture: requesting first WGC frame");
     let image = monitor.capture_image()?;
+    log::info!("Windows frozen capture: first WGC frame received");
     let scale = monitor.scale_factor().unwrap_or(1.0).max(1.0) as f64;
     let monitor_x = monitor.x()?;
     let monitor_y = monitor.y()?;
@@ -72,7 +139,12 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
     // in display-local top-left points (front-to-back order).
     let own_pid = std::process::id();
     let mut window_rects = Vec::new();
-    for window in xcap::Window::all()? {
+    let windows = xcap::Window::all()?;
+    log::info!(
+        "Windows frozen capture: enumerated {} window candidate(s)",
+        windows.len()
+    );
+    for window in windows {
         let (Ok(pid), Ok(x), Ok(y), Ok(w), Ok(h)) = (
             window.pid(),
             window.x(),
@@ -115,7 +187,7 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         ));
     }
 
-    Ok(CapturedDisplay {
+    let captured = CapturedDisplay {
         png_data: png_bytes.into(),
         pixel_width: width,
         pixel_height: height,
@@ -130,7 +202,9 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         display_id: monitor_index(monitor)?,
         display_identity: Some(display_identity),
         backing_scale: scale,
-    })
+    };
+    log::info!("Windows frozen capture: worker completed");
+    Ok(captured)
 }
 
 fn cursor_position() -> Result<(i32, i32)> {
@@ -618,6 +692,23 @@ mod tests {
     #[test]
     fn windows_capture_monitor_index_rejects_overflow() {
         assert!(windows_capture_monitor_index(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn frozen_capture_wait_propagates_success() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        sender.send(Ok(42_u8)).unwrap();
+        assert_eq!(
+            receive_frozen_capture(receiver, Duration::from_millis(10)).unwrap(),
+            42
+        );
+    }
+
+    #[test]
+    fn frozen_capture_wait_has_an_end_to_end_timeout() {
+        let (_sender, receiver) = mpsc::sync_channel::<Result<u8>>(1);
+        let error = receive_frozen_capture(receiver, Duration::from_millis(1)).unwrap_err();
+        assert!(error.to_string().contains("did not finish"));
     }
 
     #[test]

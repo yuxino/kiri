@@ -50,11 +50,7 @@ pub fn run() {
                     use tauri_plugin_global_shortcut::ShortcutState;
                     if event.state() == ShortcutState::Pressed {
                         log::info!("[shortcut] pressed: {:?}", shortcut);
-                        let handle = app.clone();
-                        let trigger = handle.clone();
-                        let _ = trigger.run_on_main_thread(move || {
-                            let _ = commands::start_capture(handle);
-                        });
+                        schedule_capture_start(app, "shortcut");
                     }
                 })
                 .build(),
@@ -450,11 +446,7 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 }
             }
             "capture" => {
-                let handle = app.clone();
-                let trigger = handle.clone();
-                let _ = trigger.run_on_main_thread(move || {
-                    let _ = commands::start_capture(handle);
-                });
+                schedule_capture_start(app, "tray");
             }
             "quit" => {
                 app.exit(0);
@@ -470,6 +462,32 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     }
     builder.build(app)?;
     Ok(())
+}
+
+fn schedule_capture_start(app: &tauri::AppHandle, source: &'static str) {
+    let Some(state) = app.try_state::<AppState>() else {
+        log::warn!("[{source}] capture start ignored before app state was ready");
+        return;
+    };
+    let Some(permit) = state.capture_schedule.try_begin() else {
+        log::debug!("[{source}] capture start coalesced with pending request");
+        return;
+    };
+
+    let handle = app.clone();
+    let trigger = handle.clone();
+    if let Err(error) = trigger.run_on_main_thread(move || {
+        // Keep the owned permit for the entire queued invocation, including a
+        // Windows worker timeout. Drop reopens scheduling on every exit path.
+        let _permit = permit;
+        if let Err(error) = commands::start_capture(handle) {
+            log::warn!("[{source}] capture start returned: {error}");
+        }
+    }) {
+        // If scheduling fails, Tauri drops the closure and its permit before
+        // returning, so a future request is not permanently suppressed.
+        log::warn!("[{source}] could not schedule capture start: {error}");
+    }
 }
 
 fn tray_labels(language: &str) -> (&'static str, &'static str, &'static str) {
