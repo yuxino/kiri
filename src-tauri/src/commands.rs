@@ -433,17 +433,38 @@ pub fn open_asset(app: AppHandle, id: String) -> Result<(), String> {
     };
     let win_h = 640.0f64;
     let win_w = (win_h * aspect).clamp(360.0, 1200.0);
-    let builder = WebviewWindowBuilder::new(
-        &app,
-        label,
-        WebviewUrl::App(format!("index.html?window=viewer&id={}", asset.id).into()),
-    )
-    .title("kiri")
-    .inner_size(win_w, win_h)
-    .resizable(true)
-    .shadow(true)
-    .decorations(true);
-    let _ = builder.build();
+    let asset_id = asset.id;
+    std::thread::Builder::new()
+        .name("kiri-open-viewer".into())
+        .spawn(move || {
+            // Windows WebView2 window creation dispatches through the main
+            // event loop. Building it inside this synchronous IPC command
+            // leaves the new native window white while the command owns that
+            // same loop. Create it from a worker after the IPC can return.
+            if let Some(window) = app.get_webview_window(&label) {
+                let _ = window.show();
+                let _ = window.set_focus();
+                return;
+            }
+            match WebviewWindowBuilder::new(
+                &app,
+                label,
+                WebviewUrl::App(format!("index.html?window=viewer&id={asset_id}").into()),
+            )
+            .title("kiri")
+            .inner_size(win_w, win_h)
+            .resizable(true)
+            .shadow(true)
+            .decorations(true)
+            .build()
+            {
+                Ok(_) => log::info!("[viewer] window opened asset_id={asset_id}"),
+                Err(error) => {
+                    log::error!("[viewer] window creation failed asset_id={asset_id}: {error}")
+                }
+            }
+        })
+        .map_err(|error| format!("The preview could not be opened: {error}"))?;
     Ok(())
 }
 
@@ -470,19 +491,37 @@ pub fn open_editor(app: AppHandle, id: String) -> Result<(), String> {
         let _ = window.set_focus();
         return Ok(());
     }
-    WebviewWindowBuilder::new(
-        &app,
-        label,
-        WebviewUrl::App(format!("index.html?window=editor&id={}", asset.id).into()),
-    )
-    .title("kiri")
-    .inner_size(880.0, 620.0)
-    .min_inner_size(520.0, 420.0)
-    .resizable(true)
-    .shadow(true)
-    .decorations(true)
-    .build()
-    .map_err(|error| format!("The screenshot editor could not be opened: {error}"))?;
+    let asset_id = asset.id;
+    std::thread::Builder::new()
+        .name("kiri-open-editor".into())
+        .spawn(move || {
+            // See open_asset: secondary WebViews must not be constructed from
+            // the synchronous IPC handler on Windows.
+            if let Some(window) = app.get_webview_window(&label) {
+                let _ = window.show();
+                let _ = window.set_focus();
+                return;
+            }
+            match WebviewWindowBuilder::new(
+                &app,
+                label,
+                WebviewUrl::App(format!("index.html?window=editor&id={asset_id}").into()),
+            )
+            .title("kiri")
+            .inner_size(880.0, 620.0)
+            .min_inner_size(520.0, 420.0)
+            .resizable(true)
+            .shadow(true)
+            .decorations(true)
+            .build()
+            {
+                Ok(_) => log::info!("[editor] window opened asset_id={asset_id}"),
+                Err(error) => {
+                    log::error!("[editor] window creation failed asset_id={asset_id}: {error}")
+                }
+            }
+        })
+        .map_err(|error| format!("The screenshot editor could not be opened: {error}"))?;
     Ok(())
 }
 
