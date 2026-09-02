@@ -12,6 +12,7 @@ use crate::state::AppState;
 
 const MAX_PREPARED_PNG_BYTES: usize = 20 * 1024 * 1024;
 
+#[cfg(any(windows, test))]
 fn run_with_one_retry<T, E>(
     mut operation: impl FnMut() -> Result<T, E>,
 ) -> (Result<T, E>, Option<E>) {

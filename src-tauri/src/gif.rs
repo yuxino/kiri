@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
+#[cfg(any(windows, test))]
 pub fn scaled_dimensions(width: u32, height: u32, max_long_edge: u32) -> (u32, u32) {
     if width == 0 || height == 0 || max_long_edge == 0 {
         return (width, height);

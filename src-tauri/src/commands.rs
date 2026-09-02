@@ -999,7 +999,7 @@ fn retry_pending_recordings_inner(app: &AppHandle) -> Result<usize, String> {
     let mut completed_count = 0;
     let mut first_error = None;
     #[cfg(not(windows))]
-    let mut ffmpeg = None;
+    let mut ffmpeg: Option<PathBuf> = None;
     for mut pending in pending_items {
         let result = (|| -> Result<bool, String> {
             let video_path = state
@@ -3272,11 +3272,11 @@ enum PreparedEncoder {
 
 async fn prepare_encoder(
     app: AppHandle,
-    output_format: RecordingOutputFormat,
+    _output_format: RecordingOutputFormat,
 ) -> Result<PreparedEncoder, String> {
     #[cfg(windows)]
     {
-        let _ = (app, output_format);
+        let _ = (app, _output_format);
         return Ok(PreparedEncoder::WindowsNative);
     }
     #[cfg(not(windows))]
