@@ -137,6 +137,16 @@ fn logical_monitor_frame(x: i32, y: i32, width: u32, height: u32, scale: f64) ->
 /// Platform recording session (SCK stream on macOS, WGC + WASAPI on Windows).
 pub trait PlatformRecorder: Send {
     fn stop(&mut self) -> anyhow::Result<()>;
+
+    /// Windows keeps one Media Foundation encoder open while capture is
+    /// paused so resuming never requires segment concatenation.
+    fn pause(&mut self) -> anyhow::Result<()> {
+        anyhow::bail!("This capture backend does not support in-place pause.")
+    }
+
+    fn resume(&mut self) -> anyhow::Result<()> {
+        anyhow::bail!("This capture backend does not support in-place resume.")
+    }
 }
 
 #[cfg(test)]

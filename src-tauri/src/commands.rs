@@ -858,6 +858,31 @@ fn validate_replacement_metadata(asset: &CaptureAsset, path: &Path) -> Result<()
                 None,
             )
         }
+        #[cfg(windows)]
+        CaptureKind::Video => {
+            let (width, height) = crate::gif::video_dimensions(path)
+                .map_err(|_| "The selected video file is invalid.".to_string())?;
+            (i64::from(width), i64::from(height), asset.duration)
+        }
+        #[cfg(windows)]
+        CaptureKind::Gif => {
+            let reader = image::ImageReader::open(path)
+                .map_err(|_| "The selected GIF could not be read.".to_string())?
+                .with_guessed_format()
+                .map_err(|_| "The selected GIF could not be read.".to_string())?;
+            if reader.format() != Some(image::ImageFormat::Gif) {
+                return Err("The selected file is not a GIF image.".into());
+            }
+            let decoded = reader
+                .decode()
+                .map_err(|_| "The selected GIF is invalid.".to_string())?;
+            (
+                i64::from(decoded.width()),
+                i64::from(decoded.height()),
+                asset.duration,
+            )
+        }
+        #[cfg(not(windows))]
         CaptureKind::Video | CaptureKind::Gif => {
             let ffmpeg = crate::record::existing_ffmpeg()
                 .ok_or_else(|| "A local FFmpeg is required to validate this file.".to_string())?;
@@ -934,6 +959,7 @@ fn retry_pending_recordings_inner(app: &AppHandle) -> Result<usize, String> {
     let mut imported_count = 0;
     let mut completed_count = 0;
     let mut first_error = None;
+    #[cfg(not(windows))]
     let mut ffmpeg = None;
     for mut pending in pending_items {
         let result = (|| -> Result<bool, String> {
@@ -967,13 +993,21 @@ fn retry_pending_recordings_inner(app: &AppHandle) -> Result<usize, String> {
                 .unwrap()
                 .prepare_import(&mut pending, CaptureKind::Video, &video_path)
                 .map_err(|error| error.to_string())?;
-            let ffmpeg_path = match &ffmpeg {
-                Some(path) => path,
-                None => ffmpeg.insert(state.ffmpeg().map_err(|error| error.to_string())?),
+            #[cfg(windows)]
+            let (pixel_width, pixel_height, duration) = {
+                let (width, height) =
+                    crate::gif::video_dimensions(&video_path).map_err(|error| error.to_string())?;
+                (i64::from(width), i64::from(height), pending.duration)
             };
-            let (pixel_width, pixel_height, duration) =
-                crate::record::probe_video(ffmpeg_path, &video_path)
-                    .ok_or_else(|| "The pending recording is not a valid MP4.".to_string())?;
+            #[cfg(not(windows))]
+            let (pixel_width, pixel_height, duration) = crate::record::probe_video(
+                match &ffmpeg {
+                    Some(path) => path,
+                    None => ffmpeg.insert(state.ffmpeg().map_err(|error| error.to_string())?),
+                },
+                &video_path,
+            )
+            .ok_or_else(|| "The pending recording is not a valid MP4.".to_string())?;
             import_recovery_output(
                 &state,
                 &video_path,
@@ -1175,18 +1209,13 @@ fn convert_asset_to_gif(
     source_path: &std::path::Path,
 ) -> Result<CaptureAsset, String> {
     let state = app.state::<AppState>();
-    // GIF export is an explicit user action, so it may perform the same
-    // pinned, verified first-use installation as recording.
-    let ffmpeg = state.ffmpeg().map_err(|error| error.to_string())?;
-    let gif_path = crate::gif::export_gif(
+    let (gif_path, gif_width, gif_height, gif_duration) = export_gif_file(
+        app,
         source_path,
-        crate::core::policy::RecordingPolicy::MAXIMUM_GIF_LONG_EDGE,
-        crate::core::policy::RecordingPolicy::GIF_FRAMES_PER_SECOND,
-        &ffmpeg,
-    )
-    .map_err(|e| e.to_string())?;
-    let (gif_width, gif_height, gif_duration) = crate::record::probe_video(&ffmpeg, &gif_path)
-        .unwrap_or((asset.pixel_width, asset.pixel_height, asset.duration));
+        asset.pixel_width,
+        asset.pixel_height,
+        asset.duration,
+    )?;
     let import_result = {
         let mut context = state.library.lock().unwrap();
         context
@@ -1212,8 +1241,52 @@ fn convert_asset_to_gif(
     Ok(gif_asset)
 }
 
+fn export_gif_file(
+    app: &AppHandle,
+    source_path: &std::path::Path,
+    source_width: i64,
+    source_height: i64,
+    source_duration: Option<f64>,
+) -> Result<(PathBuf, i64, i64, Option<f64>), String> {
+    let max_long_edge = crate::core::policy::RecordingPolicy::MAXIMUM_GIF_LONG_EDGE;
+    let fps = crate::core::policy::RecordingPolicy::GIF_FRAMES_PER_SECOND;
+
+    #[cfg(windows)]
+    {
+        let _ = app;
+        let gif_path = crate::gif::export_gif(source_path, max_long_edge, fps)
+            .map_err(|error| error.to_string())?;
+        let (width, height) = if source_width > 0 && source_height > 0 {
+            (source_width as u32, source_height as u32)
+        } else {
+            crate::gif::video_dimensions(source_path).map_err(|error| error.to_string())?
+        };
+        let (width, height) = crate::gif::scaled_dimensions(width, height, max_long_edge);
+        Ok((
+            gif_path,
+            i64::from(width),
+            i64::from(height),
+            source_duration,
+        ))
+    }
+
+    #[cfg(not(windows))]
+    {
+        let state = app.state::<AppState>();
+        let ffmpeg = state.ffmpeg().map_err(|error| error.to_string())?;
+        let gif_path = crate::gif::export_gif(source_path, max_long_edge, fps, &ffmpeg)
+            .map_err(|error| error.to_string())?;
+        let metadata = crate::record::probe_video(&ffmpeg, &gif_path).unwrap_or((
+            source_width,
+            source_height,
+            source_duration,
+        ));
+        Ok((gif_path, metadata.0, metadata.1, metadata.2))
+    }
+}
+
 // ---------------------------------------------------------------------------
-// Capture flow commands (main thread)
+// Capture flow commands (Windows startup is dispatched from a worker thread)
 // ---------------------------------------------------------------------------
 
 fn capture_context(session: &CaptureSession) -> CaptureContextDto {
@@ -1344,12 +1417,15 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
     let capture_id = uuid::Uuid::new_v4();
     let overlay_frame = display.screen_frame;
     let overlay_scale = display.backing_scale;
+    log::info!("start_capture: publishing frozen image capture_id={capture_id}");
     let capture_token = {
         let store = app.state::<crate::protocol::ProtocolStore>();
         crate::protocol::set_frozen_png(&store, capture_id, display.png_data.clone())
     };
+    log::info!("start_capture: frozen image published capture_id={capture_id}");
 
     let overlay_label = "overlay".to_string();
+    log::info!("start_capture: publishing capture session capture_id={capture_id}");
     {
         let state = app.state::<AppState>();
         let mut capture = state.capture.lock().unwrap();
@@ -1364,7 +1440,9 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
             annotation: None,
         });
     }
+    log::info!("start_capture: capture session published capture_id={capture_id}");
 
+    log::info!("start_capture: creating overlay window capture_id={capture_id}");
     if let Err(error) = create_overlay_window(&app, overlay_frame, overlay_scale, &capture_token) {
         let failed_session = {
             let state = app.state::<AppState>();
@@ -1462,16 +1540,24 @@ fn create_overlay_window(
     .shadow(false);
     // Build visible: creating a hidden webview and showing it immediately can
     // race WKWebView initialization and leave the page blank on macOS.
+    log::info!("create_overlay_window: building webview label={label}");
     let window = builder.build()?;
+    log::info!("create_overlay_window: webview built label={label}");
+    log::info!("create_overlay_window: placing window label={label}");
     if let Err(error) = platform::place_transient_window(&window, screen_frame, backing_scale) {
         let _ = window.close();
         return Err(error.into());
     }
+    log::info!("create_overlay_window: window placed label={label}");
+    log::info!("create_overlay_window: configuring window label={label}");
     platform::configure_transient_window(&window, platform::TransientWindowRole::CaptureOverlay);
+    log::info!("create_overlay_window: window configured label={label}");
+    log::info!("create_overlay_window: focusing window label={label}");
     if let Err(error) = window.set_focus() {
         let _ = window.close();
         return Err(error.into());
     }
+    log::info!("create_overlay_window: window focused label={label}");
     Ok(label)
 }
 
@@ -2816,9 +2902,15 @@ fn recover_completed_recording(
     if completed_segments.is_empty() {
         return Ok(false);
     }
-    finalize_recording(app, completed_segments, RecordingOutputFormat::Mp4)
-        .map(|_| true)
-        .map_err(|error| error.to_string())
+    finalize_recording(
+        app,
+        completed_segments,
+        RecordingOutputFormat::Mp4,
+        false,
+        None,
+    )
+    .map(|_| true)
+    .map_err(|error| error.to_string())
 }
 
 /// Resets only the startup task that still owns this session. A late download
@@ -3060,8 +3152,7 @@ fn start_recorder(
 }
 
 fn start_encoder(
-    ffmpeg: &std::path::Path,
-    video_encoder: String,
+    prepared: &PreparedEncoder,
     configuration: &RecordingConfiguration,
     out_path: PathBuf,
     receivers: EncoderReceivers,
@@ -3075,41 +3166,81 @@ fn start_encoder(
         configuration.region.height,
         configuration.backing_scale,
     );
-    let encoder_config = crate::record::EncoderConfig {
+    let mut encoder_config = crate::record::EncoderConfig {
         width,
         height,
         fps: crate::core::policy::RecordingPolicy::FRAMES_PER_SECOND,
         bitrate: crate::record::bitrate_for(width, height),
         audio: recorder.system_audio_spec,
         mic: recorder.microphone_spec,
-        video_encoder,
+        video_encoder: String::new(),
     };
-    log::info!(
-        "start_encoder: ffmpeg={} video {}x{}@{}, audio={}, mic={}",
-        ffmpeg.display(),
-        encoder_config.width,
-        encoder_config.height,
-        encoder_config.fps,
-        encoder_config.audio.is_some(),
-        encoder_config.mic.is_some(),
-    );
-    crate::record::SegmentEncoder::start(
-        &encoder_config,
-        out_path,
-        ffmpeg,
-        receivers.video,
-        receivers.system_audio,
-        receivers.microphone,
-    )
-    .map_err(|e| e.to_string())
+    match prepared {
+        PreparedEncoder::Ffmpeg {
+            ffmpeg,
+            video_encoder,
+        } => {
+            encoder_config.video_encoder.clone_from(video_encoder);
+            log::info!(
+                "start_encoder: ffmpeg={} video {}x{}@{}, audio={}, mic={}",
+                ffmpeg.display(),
+                encoder_config.width,
+                encoder_config.height,
+                encoder_config.fps,
+                encoder_config.audio.is_some(),
+                encoder_config.mic.is_some(),
+            );
+            crate::record::SegmentEncoder::start(
+                &encoder_config,
+                out_path,
+                ffmpeg,
+                receivers.video,
+                receivers.system_audio,
+                receivers.microphone,
+            )
+            .map_err(|e| e.to_string())
+        }
+        #[cfg(windows)]
+        PreparedEncoder::WindowsNative => {
+            log::info!(
+                "start_encoder: Windows Media Foundation H.264 {}x{}@{}, audio={}, mic={}",
+                encoder_config.width,
+                encoder_config.height,
+                encoder_config.fps,
+                encoder_config.audio.is_some(),
+                encoder_config.mic.is_some(),
+            );
+            crate::record::SegmentEncoder::start_windows_native(
+                &encoder_config,
+                out_path,
+                receivers.video,
+                receivers.system_audio,
+                receivers.microphone,
+            )
+            .map_err(|e| e.to_string())
+        }
+    }
 }
 
-struct PreparedEncoder {
-    ffmpeg: PathBuf,
-    video_encoder: String,
+enum PreparedEncoder {
+    Ffmpeg {
+        ffmpeg: PathBuf,
+        video_encoder: String,
+    },
+    #[cfg(windows)]
+    WindowsNative,
 }
 
-async fn prepare_encoder(app: AppHandle) -> Result<PreparedEncoder, String> {
+async fn prepare_encoder(
+    app: AppHandle,
+    output_format: RecordingOutputFormat,
+) -> Result<PreparedEncoder, String> {
+    #[cfg(windows)]
+    {
+        let _ = (app, output_format);
+        return Ok(PreparedEncoder::WindowsNative);
+    }
+    #[cfg(not(windows))]
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         let ffmpeg = state.ffmpeg().map_err(|error| error.to_string())?;
@@ -3118,7 +3249,7 @@ async fn prepare_encoder(app: AppHandle) -> Result<PreparedEncoder, String> {
         // its bounded queue while no pipe writer exists yet.
         let video_encoder =
             crate::record::pick_video_encoder(&ffmpeg).map_err(|error| error.to_string())?;
-        Ok(PreparedEncoder {
+        Ok(PreparedEncoder::Ffmpeg {
             ffmpeg,
             video_encoder,
         })
@@ -3210,15 +3341,13 @@ pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
         }
     }
 
-    // Resolve and, on first use, download + verify ffmpeg and probe the video
-    // encoder before channels or native capture exist. Retina BGRA frames can
-    // arrive at hundreds of MB/s; preparing first prevents bounded queues from
-    // filling before their consumers exist. spawn_blocking keeps that work off
-    // Tauri's event loop.
-    let prepared = match prepare_encoder(app.clone()).await {
+    // Windows MP4 and GIF sessions both start with the native Media Foundation
+    // MP4 fallback, so encoder preparation is immediate and offline. Other
+    // platforms still resolve their FFmpeg encoder before native capture begins.
+    let prepared = match prepare_encoder(app.clone(), configuration.options.output_format).await {
         Ok(prepared) => prepared,
         Err(error) => {
-            log::error!("recording: ffmpeg preparation failed: {error}");
+            log::error!("recording: encoder preparation failed: {error}");
             if reset_startup_if_current(&app, startup_token) {
                 emit_error(
                     &app,
@@ -3259,8 +3388,7 @@ pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let encoder = match start_encoder(
-        &prepared.ffmpeg,
-        prepared.video_encoder,
+        &prepared,
         &configuration,
         out_path.clone(),
         receivers,
@@ -3338,6 +3466,31 @@ pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
         return Err(error);
     };
 
+    if active
+        .encoder
+        .as_ref()
+        .is_some_and(crate::record::SegmentEncoder::is_windows_native)
+    {
+        let pause_result = active
+            .recorder
+            .as_mut()
+            .ok_or_else(|| "The native recorder is unavailable.".to_string())
+            .and_then(|recorder| recorder.pause().map_err(|error| error.to_string()));
+        if let Err(error) = pause_result {
+            discard_active_recording(active);
+            reset_recording_session(&app);
+            return Err(error);
+        }
+        let state = app.state::<AppState>();
+        let mut recording = state.recording.lock().unwrap();
+        recording.active = Some(active);
+        recording.is_paused = true;
+        recording.is_transitioning = false;
+        emit_recording_state(&app, &recording);
+        emit_notice(&app, "Recording Paused".into(), "pause.circle.fill".into());
+        return Ok(());
+    }
+
     let mut segment_path = None;
     let mut failure = None;
     match active.recorder.take() {
@@ -3401,6 +3554,41 @@ pub async fn pause_recording(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn resume_recording(app: AppHandle) -> Result<(), String> {
     log::info!("resume_recording: called");
+    let resumed_native = {
+        let state = app.state::<AppState>();
+        let mut recording = state.recording.lock().unwrap();
+        let is_native = recording
+            .active
+            .as_ref()
+            .and_then(|active| active.encoder.as_ref())
+            .is_some_and(crate::record::SegmentEncoder::is_windows_native);
+        if !recording.is_paused || recording.is_transitioning || !is_native {
+            false
+        } else {
+            let active = recording
+                .active
+                .as_mut()
+                .ok_or_else(|| "The active recording session is unavailable.".to_string())?;
+            let recorder = active
+                .recorder
+                .as_mut()
+                .ok_or_else(|| "The native recorder is unavailable.".to_string())?;
+            recorder.resume().map_err(|error| error.to_string())?;
+            recording.is_paused = false;
+            recording.is_recording = true;
+            recording.started_at = Some(std::time::Instant::now());
+            emit_recording_state(&app, &recording);
+            true
+        }
+    };
+    if resumed_native {
+        if let Some(window) = app.get_webview_window("control-panel") {
+            let _ = window.set_focus();
+        }
+        emit_notice(&app, "Recording Resumed".into(), "play.circle.fill".into());
+        return Ok(());
+    }
+
     let configuration = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
@@ -3418,10 +3606,10 @@ pub async fn resume_recording(app: AppHandle) -> Result<(), String> {
     // Resolve the encoder before recreating bounded capture channels. A
     // normal resume hits AppState's initialized path immediately; the async
     // boundary also makes inconsistent/direct IPC fail safely.
-    let prepared = match prepare_encoder(app.clone()).await {
+    let prepared = match prepare_encoder(app.clone(), configuration.options.output_format).await {
         Ok(prepared) => prepared,
         Err(error) => {
-            log::error!("recording: resume ffmpeg preparation failed: {error}");
+            log::error!("recording: resume encoder preparation failed: {error}");
             emit_error(&app, "Could not prepare the video encoder.".into(), None);
             recover_failed_resume(&app);
             return Err(error);
@@ -3444,8 +3632,7 @@ pub async fn resume_recording(app: AppHandle) -> Result<(), String> {
         }
     };
     let encoder = match start_encoder(
-        &prepared.ffmpeg,
-        prepared.video_encoder,
+        &prepared,
         &configuration,
         out_path.clone(),
         receivers,
@@ -3509,6 +3696,8 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
         was_kiri_frontmost,
         output_format,
         completion_monitor,
+        windows_native,
+        finalize_metadata,
     ) = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
@@ -3516,6 +3705,27 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
             return Ok(());
         }
         let needs_active_segment = recording.is_recording;
+        let elapsed = crate::state::recording_state(&recording).elapsed;
+        let windows_native = recording
+            .active
+            .as_ref()
+            .and_then(|active| active.encoder.as_ref())
+            .is_some_and(crate::record::SegmentEncoder::is_windows_native);
+        let finalize_metadata =
+            recording
+                .configuration
+                .as_ref()
+                .map(|configuration| RecordingFinalizeMetadata {
+                    pixel_width: crate::core::policy::RecordingPolicy::pixel_dimension(
+                        configuration.region.width,
+                        configuration.backing_scale,
+                    ),
+                    pixel_height: crate::core::policy::RecordingPolicy::pixel_dimension(
+                        configuration.region.height,
+                        configuration.backing_scale,
+                    ),
+                    duration: (elapsed > 0.0).then_some(elapsed),
+                });
         recording.is_recording = false;
         recording.is_paused = false;
         recording.is_finalizing = true;
@@ -3533,6 +3743,8 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
                 .map(|configuration| configuration.options.output_format)
                 .unwrap_or_default(),
             recording.completion_monitor.take(),
+            windows_native,
+            finalize_metadata,
         )
     };
 
@@ -3619,7 +3831,13 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
                 ),
                 completion_monitor.clone(),
             );
-            let result = finalize_recording(&handle, final_segments, output_format);
+            let result = finalize_recording(
+                &handle,
+                final_segments,
+                output_format,
+                windows_native,
+                finalize_metadata,
+            );
             match result {
                 Ok(outcome) => show_completion_preview(
                     &handle,
@@ -3666,6 +3884,13 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
 struct RecordingFinalizeOutcome {
     asset: CaptureAsset,
     gif_fallback: bool,
+}
+
+#[derive(Clone, Copy)]
+struct RecordingFinalizeMetadata {
+    pixel_width: i64,
+    pixel_height: i64,
+    duration: Option<f64>,
 }
 
 enum RecordingFinalizeError {
@@ -3745,14 +3970,11 @@ fn finalize_recording(
     app: &AppHandle,
     segments: Vec<PathBuf>,
     output_format: RecordingOutputFormat,
+    windows_native: bool,
+    metadata: Option<RecordingFinalizeMetadata>,
 ) -> Result<RecordingFinalizeOutcome, RecordingFinalizeError> {
     let state = app.state::<AppState>();
     let _recovery_transition = state.recording_recovery_transition.lock().unwrap();
-    let ffmpeg = state
-        .ffmpeg_path
-        .get()
-        .cloned()
-        .ok_or_else(|| RecordingFinalizeError::Failed("ffmpeg unavailable".into()))?;
     let merged_path = std::env::temp_dir().join(format!(
         "kiri-recording-merged-{}.mp4",
         uuid::Uuid::new_v4().to_string().to_lowercase()
@@ -3760,11 +3982,46 @@ fn finalize_recording(
     let mut merge_completed = false;
     let mut pending = None;
     let result: Result<RecordingFinalizeOutcome, String> = (|| {
-        crate::record::merge_segments(&segments, &merged_path, &ffmpeg)
+        #[cfg(windows)]
+        let ffmpeg: Option<PathBuf> = None;
+        #[cfg(not(windows))]
+        let ffmpeg = if windows_native {
+            None
+        } else {
+            Some(state.ffmpeg().map_err(|error| error.to_string())?)
+        };
+        if windows_native {
+            if segments.len() != 1 {
+                return Err("The Windows recording did not produce exactly one segment.".into());
+            }
+            std::fs::copy(&segments[0], &merged_path)
+                .map_err(|error| format!("could not stage the Windows MP4: {error}"))?;
+        } else {
+            crate::record::merge_segments(
+                &segments,
+                &merged_path,
+                ffmpeg.as_deref().expect("ffmpeg path was prepared"),
+            )
             .map_err(|e| e.to_string())?;
+        }
         merge_completed = true;
-        let (pixel_width, pixel_height, duration) =
-            crate::record::probe_video(&ffmpeg, &merged_path).unwrap_or((0, 0, None));
+        let (pixel_width, pixel_height, duration) = if windows_native {
+            metadata
+                .map(|metadata| {
+                    (
+                        metadata.pixel_width,
+                        metadata.pixel_height,
+                        metadata.duration,
+                    )
+                })
+                .unwrap_or((0, 0, None))
+        } else {
+            crate::record::probe_video(
+                ffmpeg.as_deref().expect("ffmpeg path was prepared"),
+                &merged_path,
+            )
+            .unwrap_or((0, 0, None))
+        };
         match state.recording_recovery.lock().unwrap().persist(
             &merged_path,
             pixel_width,
@@ -3803,17 +4060,8 @@ fn finalize_recording(
         }
 
         let gif_result = (|| {
-            let gif_path = crate::gif::export_gif(
-                &merged_path,
-                crate::core::policy::RecordingPolicy::MAXIMUM_GIF_LONG_EDGE,
-                crate::core::policy::RecordingPolicy::GIF_FRAMES_PER_SECOND,
-                &ffmpeg,
-            )
-            .map_err(|error| error.to_string())?;
-            let (gif_width, gif_height, gif_duration) = crate::record::probe_video(
-                &ffmpeg, &gif_path,
-            )
-            .unwrap_or((pixel_width, pixel_height, duration));
+            let (gif_path, gif_width, gif_height, gif_duration) =
+                export_gif_file(app, &merged_path, pixel_width, pixel_height, duration)?;
             if let Some(pending) = pending.as_mut() {
                 state
                     .recording_recovery

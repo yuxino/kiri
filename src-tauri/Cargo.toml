@@ -31,7 +31,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 arboard = "3"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
 sys-locale = "0.3"
 dirs = "6"
 log = "0.4"
@@ -139,13 +139,14 @@ objc2-vision = { version = "0.3", features = [
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
 
 [target.'cfg(windows)'.dependencies]
-xcap = { version = "0.9", features = ["image", "wgc"] }
+xcap = { version = "0.9", default-features = false, features = ["image"] }
 cpal = "0.18"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Imaging",
     "Win32_Graphics_Dwm",
+    "Win32_Media_MediaFoundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_Threading",

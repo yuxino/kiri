@@ -6,9 +6,10 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
+use image::ImageEncoder;
 use windows_capture::capture::{CaptureControl, Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::{GraphicsCaptureApi, InternalCaptureControl};
@@ -29,11 +30,17 @@ use super::{
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 // ---------------------------------------------------------------------------
-// Frozen display capture (xcap / WGC)
+// Frozen display capture (xcap / GDI)
 // ---------------------------------------------------------------------------
 
-const FROZEN_CAPTURE_TIMEOUT: Duration = Duration::from_secs(8);
+const FROZEN_NATIVE_FRAME_TIMEOUT: Duration = Duration::from_secs(8);
+const FROZEN_POSTPROCESS_SLOW_WARNING: Duration = Duration::from_secs(30);
 static FROZEN_CAPTURE_WORKER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+enum FrozenCaptureMessage<T> {
+    NativeFrameReady,
+    Finished(Result<T>),
+}
 
 struct FrozenCaptureWorkerPermit;
 
@@ -53,15 +60,15 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         );
     }
 
-    let (sender, receiver) = mpsc::sync_channel(1);
+    let (sender, receiver) = mpsc::channel();
     let worker = std::thread::Builder::new()
         .name("kiri-frozen-capture".into())
         .spawn(move || {
             let result = {
                 let _permit = FrozenCaptureWorkerPermit;
-                capture_active_display_inner()
+                capture_active_display_inner(&sender)
             };
-            if sender.send(result).is_err() {
+            if sender.send(FrozenCaptureMessage::Finished(result)).is_err() {
                 log::warn!("Windows frozen capture finished after its caller stopped waiting");
             }
         });
@@ -72,29 +79,66 @@ pub fn capture_active_display() -> Result<CapturedDisplay> {
         ));
     }
 
-    receive_frozen_capture(receiver, FROZEN_CAPTURE_TIMEOUT)
+    receive_frozen_capture(
+        receiver,
+        FROZEN_NATIVE_FRAME_TIMEOUT,
+        FROZEN_POSTPROCESS_SLOW_WARNING,
+    )
 }
 
-fn receive_frozen_capture<T>(receiver: mpsc::Receiver<Result<T>>, timeout: Duration) -> Result<T> {
-    match receiver.recv_timeout(timeout) {
-        Ok(result) => result,
+fn receive_frozen_capture<T>(
+    receiver: mpsc::Receiver<FrozenCaptureMessage<T>>,
+    native_frame_timeout: Duration,
+    postprocess_slow_warning: Duration,
+) -> Result<T> {
+    match receiver.recv_timeout(native_frame_timeout) {
+        Ok(FrozenCaptureMessage::Finished(result)) => return result,
+        Ok(FrozenCaptureMessage::NativeFrameReady) => {}
         Err(mpsc::RecvTimeoutError::Timeout) => bail!(
-            "Windows screen capture did not finish within {} seconds. Restart Kiri if capture remains unavailable.",
-            timeout.as_secs()
+            "Windows screen capture did not return a frame within {} seconds. Restart Kiri if capture remains unavailable.",
+            native_frame_timeout.as_secs()
         ),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            bail!("The Windows screen capture worker stopped unexpectedly.")
+        }
+    }
+
+    match receiver.recv_timeout(postprocess_slow_warning) {
+        Ok(FrozenCaptureMessage::Finished(result)) => result,
+        Ok(FrozenCaptureMessage::NativeFrameReady) => {
+            bail!("The Windows screen capture worker reported its first frame more than once.")
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            log::warn!(
+                "Windows frozen capture: post-processing is still running after {} seconds; waiting for completion",
+                postprocess_slow_warning.as_secs()
+            );
+            match receiver.recv() {
+                Ok(FrozenCaptureMessage::Finished(result)) => result,
+                Ok(FrozenCaptureMessage::NativeFrameReady) => bail!(
+                    "The Windows screen capture worker reported its first frame more than once."
+                ),
+                Err(_) => bail!("The Windows screen capture worker stopped unexpectedly."),
+            }
+        }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             bail!("The Windows screen capture worker stopped unexpectedly.")
         }
     }
 }
 
-fn capture_active_display_inner() -> Result<CapturedDisplay> {
+fn capture_active_display_inner(
+    progress: &mpsc::Sender<FrozenCaptureMessage<CapturedDisplay>>,
+) -> Result<CapturedDisplay> {
+    let worker_started = Instant::now();
     log::info!("Windows frozen capture: worker started");
     let (cursor_x, cursor_y) = cursor_position()?;
+    let monitor_enumeration_started = Instant::now();
     let monitors = xcap::Monitor::all()?;
     log::info!(
-        "Windows frozen capture: enumerated {} monitor(s)",
-        monitors.len()
+        "Windows frozen capture: enumerated {} monitor(s) in {} ms",
+        monitors.len(),
+        monitor_enumeration_started.elapsed().as_millis()
     );
     let monitor = monitors
         .iter()
@@ -112,9 +156,19 @@ fn capture_active_display_inner() -> Result<CapturedDisplay> {
         .or_else(|| monitors.first())
         .ok_or_else(|| anyhow!("The active display could not be captured."))?;
 
-    log::info!("Windows frozen capture: requesting first WGC frame");
+    log::info!("Windows frozen capture: requesting desktop frame through GDI");
+    let frame_started = Instant::now();
     let image = monitor.capture_image()?;
-    log::info!("Windows frozen capture: first WGC frame received");
+    log::info!(
+        "Windows frozen capture: GDI desktop frame received in {} ms ({} ms total)",
+        frame_started.elapsed().as_millis(),
+        worker_started.elapsed().as_millis()
+    );
+    progress
+        .send(FrozenCaptureMessage::NativeFrameReady)
+        .map_err(|_| anyhow!("The Windows screen capture caller stopped waiting."))?;
+
+    let metadata_started = Instant::now();
     let scale = monitor.scale_factor().unwrap_or(1.0).max(1.0) as f64;
     let monitor_x = monitor.x()?;
     let monitor_y = monitor.y()?;
@@ -128,65 +182,37 @@ fn capture_active_display_inner() -> Result<CapturedDisplay> {
         physical_height: u32::try_from(height).map_err(|_| anyhow!("Invalid display height."))?,
         scale_factor: scale,
     };
+    log::info!(
+        "Windows frozen capture: display metadata resolved in {} ms",
+        metadata_started.elapsed().as_millis()
+    );
 
-    let mut png_bytes = Vec::new();
-    image.write_to(
-        &mut std::io::Cursor::new(&mut png_bytes),
-        image::ImageFormat::Png,
-    )?;
+    let png_started = Instant::now();
+    let png_bytes = encode_frozen_capture_png(&image)?;
+    log::info!(
+        "Windows frozen capture: PNG encoded in {} ms ({} bytes)",
+        png_started.elapsed().as_millis(),
+        png_bytes.len()
+    );
 
     // Enumerate visible windows of other processes, clipped to the monitor,
-    // in display-local top-left points (front-to-back order).
-    let own_pid = std::process::id();
-    let mut window_rects = Vec::new();
-    let windows = xcap::Window::all()?;
+    // in display-local top-left points. EnumWindows already returns them in
+    // front-to-back order, which is also the overlay's hit-test order.
+    let window_enumeration_started = Instant::now();
+    let window_rects =
+        collect_frozen_window_rects(monitor_x, monitor_y, width as u32, height as u32, scale);
     log::info!(
-        "Windows frozen capture: enumerated {} window candidate(s)",
-        windows.len()
+        "Windows frozen capture: collected {} window candidate(s) in {} ms",
+        window_rects.len(),
+        window_enumeration_started.elapsed().as_millis()
     );
-    for window in windows {
-        let (Ok(pid), Ok(x), Ok(y), Ok(w), Ok(h)) = (
-            window.pid(),
-            window.x(),
-            window.y(),
-            window.width(),
-            window.height(),
-        ) else {
-            continue;
-        };
-        if pid == own_pid || window.is_minimized().unwrap_or(false) {
-            continue;
-        }
-        let x = x as f64;
-        let y = y as f64;
-        let w = w as f64;
-        let h = h as f64;
-        let (Ok(mx), Ok(my), Ok(mw), Ok(mh)) =
-            (monitor.x(), monitor.y(), monitor.width(), monitor.height())
-        else {
-            continue;
-        };
-        let mx = mx as f64;
-        let my = my as f64;
-        let mw = mw as f64;
-        let mh = mh as f64;
-        let min_x = x.max(mx);
-        let min_y = y.max(my);
-        let max_x = (x + w).min(mx + mw);
-        let max_y = (y + h).min(my + mh);
-        let cw = (max_x - min_x) / scale;
-        let ch = (max_y - min_y) / scale;
-        if cw < 8.0 || ch < 8.0 {
-            continue;
-        }
-        window_rects.push(Rect::new(
-            (min_x - mx) / scale,
-            (min_y - my) / scale,
-            cw,
-            ch,
-        ));
-    }
 
+    let display_index_started = Instant::now();
+    let display_id = monitor_index(monitor)?;
+    log::info!(
+        "Windows frozen capture: display index resolved in {} ms",
+        display_index_started.elapsed().as_millis()
+    );
     let captured = CapturedDisplay {
         png_data: png_bytes.into(),
         pixel_width: width,
@@ -199,11 +225,14 @@ fn capture_active_display_inner() -> Result<CapturedDisplay> {
             scale,
         ),
         window_rects,
-        display_id: monitor_index(monitor)?,
+        display_id,
         display_identity: Some(display_identity),
         backing_scale: scale,
     };
-    log::info!("Windows frozen capture: worker completed");
+    log::info!(
+        "Windows frozen capture: worker completed in {} ms",
+        worker_started.elapsed().as_millis()
+    );
     Ok(captured)
 }
 
@@ -213,6 +242,168 @@ fn cursor_position() -> Result<(i32, i32)> {
     let mut point = POINT { x: 0, y: 0 };
     unsafe { GetCursorPos(&mut point) }.map_err(|e| anyhow!("GetCursorPos failed: {e}"))?;
     Ok((point.x, point.y))
+}
+
+fn encode_frozen_capture_png(image: &image::RgbaImage) -> Result<Vec<u8>> {
+    let mut png_bytes = Vec::new();
+    image::codecs::png::PngEncoder::new_with_quality(
+        &mut png_bytes,
+        image::codecs::png::CompressionType::Fast,
+        image::codecs::png::FilterType::Sub,
+    )
+    .write_image(
+        image.as_raw(),
+        image.width(),
+        image.height(),
+        image::ExtendedColorType::Rgba8,
+    )?;
+    Ok(png_bytes)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PhysicalWindowBounds {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+fn clipped_logical_window_rect(
+    window: PhysicalWindowBounds,
+    monitor_x: i32,
+    monitor_y: i32,
+    monitor_width: u32,
+    monitor_height: u32,
+    scale: f64,
+) -> Option<Rect> {
+    let scale = scale.max(1.0);
+    let monitor_left = f64::from(monitor_x);
+    let monitor_top = f64::from(monitor_y);
+    let monitor_right = monitor_left + f64::from(monitor_width);
+    let monitor_bottom = monitor_top + f64::from(monitor_height);
+    let clipped_left = f64::from(window.left).max(monitor_left);
+    let clipped_top = f64::from(window.top).max(monitor_top);
+    let clipped_right = f64::from(window.right).min(monitor_right);
+    let clipped_bottom = f64::from(window.bottom).min(monitor_bottom);
+    let logical_width = (clipped_right - clipped_left) / scale;
+    let logical_height = (clipped_bottom - clipped_top) / scale;
+    if logical_width < 8.0 || logical_height < 8.0 {
+        return None;
+    }
+    Some(Rect::new(
+        (clipped_left - monitor_left) / scale,
+        (clipped_top - monitor_top) / scale,
+        logical_width,
+        logical_height,
+    ))
+}
+
+fn collect_frozen_window_rects(
+    monitor_x: i32,
+    monitor_y: i32,
+    monitor_width: u32,
+    monitor_height: u32,
+    scale: f64,
+) -> Vec<Rect> {
+    use std::ffi::c_void;
+    use windows::core::BOOL;
+    use windows::Win32::Foundation::{HWND, LPARAM, RECT};
+    use windows::Win32::Graphics::Dwm::{
+        DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetShellWindow, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+    };
+
+    struct EnumerationContext {
+        own_pid: u32,
+        shell_window: HWND,
+        monitor_x: i32,
+        monitor_y: i32,
+        monitor_width: u32,
+        monitor_height: u32,
+        scale: f64,
+        rects: Vec<Rect>,
+    }
+
+    extern "system" fn collect_window(hwnd: HWND, state: LPARAM) -> BOOL {
+        let context = unsafe { &mut *(state.0 as *mut EnumerationContext) };
+        let mut pid = 0_u32;
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+        if pid == 0 || pid == context.own_pid || hwnd == context.shell_window {
+            return BOOL(1);
+        }
+        if !unsafe { IsWindowVisible(hwnd) }.as_bool() || unsafe { IsIconic(hwnd) }.as_bool() {
+            return BOOL(1);
+        }
+
+        let mut cloaked = 0_u32;
+        let cloak_query = unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                &mut cloaked as *mut u32 as *mut c_void,
+                std::mem::size_of::<u32>() as u32,
+            )
+        };
+        if cloak_query.is_ok() && cloaked != 0 {
+            return BOOL(1);
+        }
+
+        let mut bounds = RECT::default();
+        if unsafe {
+            DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                &mut bounds as *mut RECT as *mut c_void,
+                std::mem::size_of::<RECT>() as u32,
+            )
+        }
+        .is_err()
+        {
+            return BOOL(1);
+        }
+
+        if let Some(rect) = clipped_logical_window_rect(
+            PhysicalWindowBounds {
+                left: bounds.left,
+                top: bounds.top,
+                right: bounds.right,
+                bottom: bounds.bottom,
+            },
+            context.monitor_x,
+            context.monitor_y,
+            context.monitor_width,
+            context.monitor_height,
+            context.scale,
+        ) {
+            context.rects.push(rect);
+        }
+        BOOL(1)
+    }
+
+    let mut context = EnumerationContext {
+        own_pid: std::process::id(),
+        shell_window: unsafe { GetShellWindow() },
+        monitor_x,
+        monitor_y,
+        monitor_width,
+        monitor_height,
+        scale,
+        rects: Vec::new(),
+    };
+    let result = unsafe {
+        EnumWindows(
+            Some(collect_window),
+            LPARAM(&mut context as *mut EnumerationContext as isize),
+        )
+    };
+    if let Err(error) = result {
+        // Window snapping is best-effort; never discard a valid frozen frame
+        // because the desktop changed while its windows were enumerated.
+        log::warn!("Windows frozen capture: window enumeration failed: {error}");
+    }
+    context.rects
 }
 
 fn monitor_index(monitor: &xcap::Monitor) -> Result<u32> {
@@ -284,6 +475,7 @@ struct WinHandlerState {
     region_px: PixelRegion,
     dropped_frames: u64,
     capture_health: Arc<CaptureHealth>,
+    paused: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Clone, Copy)]
@@ -312,6 +504,9 @@ impl GraphicsCaptureApiHandler for WinCaptureHandler {
         _capture_control: InternalCaptureControl,
     ) -> std::result::Result<(), Self::Error> {
         let mut state = self.slot.lock().unwrap();
+        if state.paused.load(std::sync::atomic::Ordering::Acquire) {
+            return Ok(());
+        }
         let Some(tx) = state.video_tx.as_ref() else {
             return Ok(());
         };
@@ -423,6 +618,7 @@ pub struct WindowsRecorder {
     system_audio_spec: Option<AudioSpec>,
     microphone_spec: Option<AudioSpec>,
     capture_health: Arc<CaptureHealth>,
+    paused: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl WindowsRecorder {
@@ -453,8 +649,10 @@ impl WindowsRecorder {
             ) as usize,
         };
 
+        let paused = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
         // Start audio capture (system loopback + microphone) when requested.
-        let audio = start_audio(options, audio_tx, mic_tx)?;
+        let audio = start_audio(options, audio_tx, mic_tx, Arc::clone(&paused))?;
 
         let cursor = if options.shows_cursor {
             CursorCaptureSettings::Default
@@ -468,6 +666,7 @@ impl WindowsRecorder {
             region_px,
             dropped_frames: 0,
             capture_health: Arc::clone(&capture_health),
+            paused: Arc::clone(&paused),
         }));
 
         let settings = Settings::new(
@@ -490,6 +689,7 @@ impl WindowsRecorder {
             system_audio_spec: audio.system_audio_spec,
             microphone_spec: audio.microphone_spec,
             capture_health,
+            paused,
         })
     }
 
@@ -515,12 +715,25 @@ impl PlatformRecorder for WindowsRecorder {
         }
         Ok(())
     }
+
+    fn pause(&mut self) -> Result<()> {
+        self.paused
+            .store(true, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    fn resume(&mut self) -> Result<()> {
+        self.paused
+            .store(false, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
 }
 
 fn start_audio(
     options: crate::core::policy::RecordingOptions,
     audio_tx: Option<AudioChunkSender>,
     mic_tx: Option<AudioChunkSender>,
+    paused: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<StartedAudio> {
     let mut streams = Vec::new();
     let mut system_audio_spec = None;
@@ -532,7 +745,8 @@ fn start_audio(
         let device = host
             .default_output_device()
             .ok_or_else(|| anyhow!("No system-audio output device is available."))?;
-        let (stream, spec) = build_audio_stream(&device, AudioDeviceKind::Loopback, tx)?;
+        let (stream, spec) =
+            build_audio_stream(&device, AudioDeviceKind::Loopback, tx, Arc::clone(&paused))?;
         streams.push(stream);
         system_audio_spec = Some(spec);
     }
@@ -542,7 +756,12 @@ fn start_audio(
         let device = host
             .default_input_device()
             .ok_or_else(|| anyhow!("No microphone input device is available."))?;
-        let (stream, spec) = build_audio_stream(&device, AudioDeviceKind::Microphone, tx)?;
+        let (stream, spec) = build_audio_stream(
+            &device,
+            AudioDeviceKind::Microphone,
+            tx,
+            Arc::clone(&paused),
+        )?;
         streams.push(stream);
         microphone_spec = Some(spec);
     }
@@ -570,6 +789,7 @@ fn build_audio_stream(
     device: &cpal::Device,
     kind: AudioDeviceKind,
     tx: AudioChunkSender,
+    paused: Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(cpal::Stream, AudioSpec)> {
     let config = preferred_audio_config(device, kind)?;
     let format = match config.sample_format() {
@@ -590,17 +810,23 @@ fn build_audio_stream(
         .build_input_stream_raw(
             config.config(),
             config.sample_format(),
-            move |data, _| match tx.try_send(data.bytes().to_vec()) {
-                Ok(()) | Err(AudioQueueSendError::Closed) => {}
-                Err(
-                    error @ (AudioQueueSendError::Unconfigured | AudioQueueSendError::Overloaded),
-                ) => {
-                    let dropped =
-                        dropped_chunks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    if dropped == 1 || dropped.is_multiple_of(100) {
-                        log::warn!(
+            move |data, _| {
+                if paused.load(std::sync::atomic::Ordering::Acquire) {
+                    return;
+                }
+                match tx.try_send(data.bytes().to_vec()) {
+                    Ok(()) | Err(AudioQueueSendError::Closed) => {}
+                    Err(
+                        error @ (AudioQueueSendError::Unconfigured
+                        | AudioQueueSendError::Overloaded),
+                    ) => {
+                        let dropped =
+                            dropped_chunks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        if dropped == 1 || dropped.is_multiple_of(100) {
+                            log::warn!(
                             "WindowsRecorder: audio queue rejected {dropped} chunks ({error:?})"
                         );
+                        }
                     }
                 }
             },
@@ -695,20 +921,194 @@ mod tests {
     }
 
     #[test]
+    fn frozen_capture_fast_png_round_trips_rgba_pixels() {
+        let pixels = vec![
+            1, 2, 3, 4, 5, 6, 7, 8, // row 0
+            9, 10, 11, 12, 13, 14, 15, 16, // row 1
+        ];
+        let image = image::RgbaImage::from_raw(2, 2, pixels.clone()).unwrap();
+
+        let encoded = encode_frozen_capture_png(&image).unwrap();
+        let decoded = image::load_from_memory_with_format(&encoded, image::ImageFormat::Png)
+            .unwrap()
+            .into_rgba8();
+
+        assert_eq!(decoded.as_raw(), &pixels);
+    }
+
+    #[test]
+    fn frozen_window_rect_is_clipped_and_scaled_into_monitor_coordinates() {
+        let rect = clipped_logical_window_rect(
+            PhysicalWindowBounds {
+                left: -2_000,
+                top: 40,
+                right: -800,
+                bottom: 800,
+            },
+            -1_920,
+            100,
+            1_920,
+            1_080,
+            2.0,
+        )
+        .unwrap();
+
+        assert_eq!(rect, Rect::new(0.0, 0.0, 560.0, 350.0));
+    }
+
+    #[test]
+    fn frozen_window_rect_rejects_offscreen_and_tiny_candidates() {
+        assert!(clipped_logical_window_rect(
+            PhysicalWindowBounds {
+                left: -400,
+                top: 10,
+                right: -100,
+                bottom: 200,
+            },
+            0,
+            0,
+            1_920,
+            1_080,
+            1.0,
+        )
+        .is_none());
+        assert!(clipped_logical_window_rect(
+            PhysicalWindowBounds {
+                left: 100,
+                top: 100,
+                right: 110,
+                bottom: 110,
+            },
+            0,
+            0,
+            1_920,
+            1_080,
+            2.0,
+        )
+        .is_none());
+    }
+
+    #[test]
     fn frozen_capture_wait_propagates_success() {
-        let (sender, receiver) = mpsc::sync_channel(1);
-        sender.send(Ok(42_u8)).unwrap();
+        let (sender, receiver) = mpsc::channel::<FrozenCaptureMessage<u8>>();
+        sender.send(FrozenCaptureMessage::NativeFrameReady).unwrap();
+        sender
+            .send(FrozenCaptureMessage::Finished(Ok(42_u8)))
+            .unwrap();
         assert_eq!(
-            receive_frozen_capture(receiver, Duration::from_millis(10)).unwrap(),
+            receive_frozen_capture(
+                receiver,
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+            )
+            .unwrap(),
             42
         );
     }
 
     #[test]
-    fn frozen_capture_wait_has_an_end_to_end_timeout() {
-        let (_sender, receiver) = mpsc::sync_channel::<Result<u8>>(1);
-        let error = receive_frozen_capture(receiver, Duration::from_millis(1)).unwrap_err();
-        assert!(error.to_string().contains("did not finish"));
+    fn frozen_capture_wait_allows_slow_postprocessing_after_first_frame() {
+        let (sender, receiver) = mpsc::channel::<FrozenCaptureMessage<u8>>();
+        sender.send(FrozenCaptureMessage::NativeFrameReady).unwrap();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            sender
+                .send(FrozenCaptureMessage::Finished(Ok(42_u8)))
+                .unwrap();
+        });
+
+        let value = receive_frozen_capture(
+            receiver,
+            Duration::from_millis(1),
+            Duration::from_millis(500),
+        )
+        .unwrap();
+        worker.join().unwrap();
+        assert_eq!(value, 42);
+    }
+
+    #[test]
+    fn frozen_capture_wait_times_out_before_first_frame() {
+        let (_sender, receiver) = mpsc::channel::<FrozenCaptureMessage<u8>>();
+        let error = receive_frozen_capture(
+            receiver,
+            Duration::from_millis(1),
+            Duration::from_millis(10),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("did not return a frame"));
+    }
+
+    #[test]
+    fn frozen_capture_wait_continues_after_a_slow_postprocessing_warning() {
+        let (sender, receiver) = mpsc::channel();
+        sender.send(FrozenCaptureMessage::NativeFrameReady).unwrap();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            sender
+                .send(FrozenCaptureMessage::Finished(Ok(42_u8)))
+                .unwrap();
+        });
+
+        let value = receive_frozen_capture(
+            receiver,
+            Duration::from_millis(10),
+            Duration::from_millis(1),
+        )
+        .unwrap();
+        worker.join().unwrap();
+        assert_eq!(value, 42);
+    }
+
+    #[test]
+    fn frozen_capture_wait_propagates_errors_before_and_after_first_frame() {
+        let (sender, receiver) = mpsc::channel::<FrozenCaptureMessage<u8>>();
+        sender
+            .send(FrozenCaptureMessage::Finished(Err(anyhow!(
+                "native failed"
+            ))))
+            .unwrap();
+        assert_eq!(
+            receive_frozen_capture(
+                receiver,
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+            )
+            .unwrap_err()
+            .to_string(),
+            "native failed"
+        );
+
+        let (sender, receiver) = mpsc::channel::<FrozenCaptureMessage<u8>>();
+        sender.send(FrozenCaptureMessage::NativeFrameReady).unwrap();
+        sender
+            .send(FrozenCaptureMessage::Finished(Err(anyhow!(
+                "post-processing failed"
+            ))))
+            .unwrap();
+        assert_eq!(
+            receive_frozen_capture(
+                receiver,
+                Duration::from_millis(10),
+                Duration::from_millis(10),
+            )
+            .unwrap_err()
+            .to_string(),
+            "post-processing failed"
+        );
+    }
+
+    #[test]
+    fn frozen_capture_wait_reports_a_disconnected_worker() {
+        let (sender, receiver) = mpsc::channel::<FrozenCaptureMessage<u8>>();
+        drop(sender);
+        let error = receive_frozen_capture(
+            receiver,
+            Duration::from_millis(10),
+            Duration::from_millis(10),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("stopped unexpectedly"));
     }
 
     #[test]

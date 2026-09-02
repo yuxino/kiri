@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import {
   api,
+  mediaUrl,
   onAssetContentChanged,
   onError,
   onGifConversionState,
@@ -1520,13 +1521,17 @@ function AssetCard(props: {
           />
         ) : asset.kind === "video" ? (
           <div style={{ position: "relative", width: "100%", height: "100%" }}>
-            <img
+            <video
               key={`${asset.id}:${thumbnailRevision}:${previewRetry}`}
-              src={thumbnailUrl(asset.id, thumbnailRevision)}
-              alt=""
-              draggable={false}
-              loading="lazy"
-              decoding="async"
+              src={mediaUrl(asset.id)}
+              muted
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={(event) => {
+                // Seeking a fraction past zero asks WebView2 to decode the
+                // first frame without playing or downloading FFmpeg.
+                event.currentTarget.currentTime = 0.001;
+              }}
               onError={() => void checkAvailability(true)}
               style={previewImageStyle}
             />

@@ -54,10 +54,10 @@ pub struct AppState {
     remote_ocr: std::sync::OnceLock<Option<crate::remote_ocr::RemoteOcrClient>>,
 }
 
-/// Coalesces native shortcut and tray requests before they enter the main
-/// thread queue. The owned permit can move into the scheduled closure, so the
-/// gate remains closed while that closure is queued, executing, or waiting for
-/// a bounded platform capture to return.
+/// Coalesces native shortcut and tray requests before dispatch. The owned
+/// permit can move into either the scheduled main-thread closure or the
+/// Windows startup thread, so the gate remains closed while that invocation is
+/// queued, executing, or waiting for a bounded platform capture to return.
 #[derive(Clone, Default)]
 pub(crate) struct CaptureScheduleGate(std::sync::Arc<std::sync::atomic::AtomicBool>);
 

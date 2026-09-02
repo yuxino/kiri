@@ -313,15 +313,19 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             if let Some(bytes) = store.thumbnails.lock().unwrap().get(&cache_key) {
                 return respond(bytes, "image/png");
             }
-            let thumbnail = if kind == CaptureKind::Image {
-                crate::thumbnail::image_thumbnail(&file_path)
-            } else {
-                let ffmpeg = state.ffmpeg_path.get().cloned().or_else(|| {
-                    let path = crate::record::existing_ffmpeg()?;
-                    let _ = state.ffmpeg_path.set(path.clone());
-                    Some(path)
-                });
-                ffmpeg.and_then(|ffmpeg| crate::thumbnail::video_first_frame(&ffmpeg, &file_path))
+            let thumbnail = match kind {
+                CaptureKind::Image | CaptureKind::Gif => {
+                    crate::thumbnail::image_thumbnail(&file_path)
+                }
+                CaptureKind::Video => {
+                    let ffmpeg = state.ffmpeg_path.get().cloned().or_else(|| {
+                        let path = crate::record::existing_ffmpeg()?;
+                        let _ = state.ffmpeg_path.set(path.clone());
+                        Some(path)
+                    });
+                    ffmpeg
+                        .and_then(|ffmpeg| crate::thumbnail::video_first_frame(&ffmpeg, &file_path))
+                }
             };
             if let Some(thumbnail) = thumbnail {
                 store
@@ -384,6 +388,17 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             let cache_key = id.to_string();
             if let Some(bytes) = store.thumbnails.lock().unwrap().get(&cache_key) {
                 return respond(bytes, "image/png");
+            }
+            if kind == CaptureKind::Gif {
+                if let Some(thumbnail) = crate::thumbnail::image_thumbnail(&file_path) {
+                    store
+                        .thumbnails
+                        .lock()
+                        .unwrap()
+                        .insert(cache_key, thumbnail.clone());
+                    return respond(thumbnail, "image/png");
+                }
+                return not_found();
             }
             // Browsing the local library must never trigger a network
             // download. Reuse an initialized encoder, or discover only a

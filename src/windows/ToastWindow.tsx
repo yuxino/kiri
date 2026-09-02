@@ -14,7 +14,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { KiriIcon } from "../components/KiriIcons";
 import { t } from "../i18n";
-import { api } from "../lib/ipc";
+import { api, mediaUrl } from "../lib/ipc";
 import { kiriResourceUrl } from "../lib/kiri-resource-url.js";
 
 interface NoticePayload {
@@ -435,11 +435,23 @@ export function ToastWindow(props: { title?: string; symbol?: string }) {
           >
             {assetId && !isProcessing ? (
               <>
-                <img
-                  src={kiriResourceUrl("thumbnail", [assetId])}
-                  alt=""
-                  draggable={false}
-                />
+                {visibleCompletion.kind === "video" ? (
+                  <video
+                    src={mediaUrl(assetId)}
+                    muted
+                    playsInline
+                    preload="metadata"
+                    onLoadedMetadata={(event) => {
+                      event.currentTarget.currentTime = 0.001;
+                    }}
+                  />
+                ) : (
+                  <img
+                    src={kiriResourceUrl("thumbnail", [assetId])}
+                    alt=""
+                    draggable={false}
+                  />
+                )}
                 {(visibleCompletion.kind === "video" || visibleCompletion.kind === "gif") && (
                   <span className="kiri-completion-play" aria-hidden="true">
                     <KiriIcon name="play.fill" size={12} />
@@ -620,7 +632,8 @@ function ToastStyles() {
         opacity: 0.72;
       }
 
-      .kiri-completion-preview img {
+      .kiri-completion-preview img,
+      .kiri-completion-preview video {
         width: 100%;
         height: 100%;
         display: block;

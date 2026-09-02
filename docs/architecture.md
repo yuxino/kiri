@@ -54,14 +54,21 @@ unrestricted filesystem path.
    the previously focused application. Registration needs no TCC permission;
    a conflicting binding leaves Kiri running and is surfaced in Settings for
    retry. Shortcut and tray requests acquire an owned scheduling permit before
-   entering the main-thread queue, so key repeat cannot leave a burst of stale
-   capture starts behind a slow or timed-out native freeze.
-2. macOS freezes the active display with ScreenCaptureKit. Windows uses the
-   Windows Graphics Capture path exposed through `xcap`. Capture startup is
-   single-flight: a repeated shortcut cannot enter a second native freeze.
-   Windows performs the freeze in one bounded worker, reports a visible timeout
-   when the OS does not return, and will not accumulate replacement workers
-   while the original system call is still active.
+   dispatch, so key repeat cannot leave a burst of stale capture starts behind
+   a slow or timed-out native freeze. Windows runs the complete startup on a
+   dedicated thread: desktop capture and creation of a second WebView2
+   controller never occupy or re-enter Tauri's main event-loop callback.
+2. macOS freezes the active display with ScreenCaptureKit. Windows frozen
+   stills use the GDI path exposed through `xcap`; Windows Graphics Capture
+   remains the recording backend. Capture startup is single-flight, so a
+   repeated shortcut cannot enter a second native freeze. Windows gives the
+   desktop frame eight seconds to arrive, then uses fast lossless PNG encoding
+   and a direct `EnumWindows`/DWM collector for window hit-test bounds. The
+   collector excludes Kiri's own process before querying window metadata.
+   Post-processing logs a warning after thirty seconds without abandoning an
+   already captured frame. Stage-specific failures remain visible, and Kiri
+   will not accumulate replacement workers while the original worker is still
+   active.
 3. Rust keeps one reference-counted allocation for the full frozen PNG and
    shares it with the session, OCR preparation, and custom protocol. The
    overlay receives a capture-scoped, unguessable `kiri://` URL. The image is
@@ -181,8 +188,9 @@ never remain hidden behind the OCR result surface.
 
 Platform capture produces BGRA video frames and optional PCM audio. macOS uses
 ScreenCaptureKit. Windows uses Windows Graphics Capture plus WASAPI through
-`cpal`. Rust feeds the actual pixel and audio formats to FFmpeg and first
-produces a 30 fps H.264 MP4 with AAC audio. Hardware encoding is probed first
+`cpal`. Windows sends those buffers to Media Foundation and first produces a
+30 fps H.264 MP4 with optional AAC audio; it does not resolve or download
+FFmpeg. macOS feeds the native buffers to FFmpeg, probes hardware encoding,
 and falls back to `libx264`.
 
 The recording panel explicitly chooses the final MP4 or GIF output before
@@ -190,21 +198,24 @@ capture starts; existing saved options without this field default to MP4. GIF
 output disables audio for that recording session without erasing the user's
 saved MP4 audio preferences. After the MP4 staging file is finalized, Kiri
 converts it locally to a looping, silent GIF at 12 fps with a 720-pixel long
-edge. There is no duration cutoff for a recording with a positive known
-duration. If GIF encoding or import fails, Kiri imports the valid MP4 staging
-file instead of losing the recording. The native recording session returns to
-idle and restores the source application's focus before long merge/GIF work,
-so background finalization does not block the next capture. FFmpeg jobs must
-keep growing their output; a stalled child process is terminated and reaped.
+edge. Windows decodes the staging MP4 with Media Foundation and encodes the GIF
+inside the application; macOS uses FFmpeg. There is no duration cutoff for a
+recording with a positive known duration. If GIF encoding or import fails,
+Kiri imports the valid MP4 staging file instead of losing the recording. The
+native recording session returns to idle and restores the source application's
+focus before long merge/GIF work, so background finalization does not block the
+next capture. FFmpeg jobs on macOS must keep growing their output; a stalled
+child process is terminated and reaped.
 
 The native-to-encoder video handoff has a hard two-frame capacity. On macOS,
 ScreenCaptureKit's native IOSurface queue is independently limited to three
 frames. On Windows, WGC delivery is throttled to the 30 fps recording policy
 when the OS supports it, and the selected region is copied directly from the
 mapped row-stride buffer without first duplicating the full display. Capture
-callbacks never grow an unbounded queue of raw Retina/DPI frames: when FFmpeg
-cannot keep up, a frame is dropped and the event is sampled in the log. FFmpeg
-resolution and hardware-encoder probing finish before native capture starts.
+callbacks never grow an unbounded queue of raw Retina/DPI frames: when the
+encoder cannot keep up, a frame is dropped and the event is sampled in the log.
+On macOS, FFmpeg resolution and hardware-encoder probing finish before native
+capture starts; Windows native encoder preparation is immediate and offline.
 
 Each audio input has an independent byte-bounded queue sized to roughly 250 ms
 of its native PCM format, plus a 128-chunk ceiling. Encoder attachment discards
@@ -212,14 +223,15 @@ the short startup pre-roll atomically. A dropped chunk, native device fault,
 audio-pipe failure, or post-attachment handoff longer than 150 ms invalidates
 and removes the segment instead of saving a recording with silent A/V drift.
 
-Pause closes the current segment; resume starts a compatible segment; stop
-merges the segments into one library asset. If a live segment loses integrity,
-previously completed segments are moved out of cleanup ownership and imported
-as a partial recording. FFmpeg probes and segment finalization have hard
-deadlines; long merges use an output-progress watchdog so legitimate long
-re-encodes are not constrained by a short total timeout. Kiri control windows
-are excluded from exported frames, while an enabled click-ripple window is
-intentionally included.
+Windows pause/resume keeps one Media Foundation session open while capture
+callbacks are gated. macOS pause closes the current segment and resume starts a
+compatible segment; stop merges those segments into one library asset. If a
+live segment loses integrity, previously completed segments are moved out of
+cleanup ownership and imported as a partial recording. FFmpeg probes and
+segment finalization on macOS have hard deadlines; long merges use an
+output-progress watchdog so legitimate long re-encodes are not constrained by
+a short total timeout. Kiri control windows are excluded from exported frames,
+while an enabled click-ripple window is intentionally included.
 
 If a valid finalized MP4 cannot be imported because the active library is
 unavailable or rejects the write, Kiri moves it into a local recovery area
@@ -232,10 +244,12 @@ centered without dimming the selected region, supports Escape cancellation and
 reduced-motion preferences, and stays visually independent of the selected
 output format.
 
-Kiri does not bundle FFmpeg. A recording or explicit GIF conversion resolves a
-validated local copy first, otherwise downloads a version-pinned archive,
-checks its SHA-256, validates the executable, and caches it. Library browsing
-and thumbnail generation never trigger that download.
+Windows does not use or download FFmpeg: MP4 recording, recovery validation,
+direct GIF output, and explicit MP4-to-GIF conversion use native media APIs and
+the bundled GIF encoder. macOS recording or GIF conversion resolves a validated
+local FFmpeg first, otherwise downloads a version-pinned archive, checks its
+SHA-256, validates the executable, and caches it. Library browsing and
+thumbnail generation never trigger that download.
 
 ## Update check flow
 

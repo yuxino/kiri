@@ -31,7 +31,7 @@ macOS releases use the project's maintained local self-signed identity, not Deve
 
 Captures, local OCR, and encoding stay on your computer by default. Remote OCR is optional; API keys stay in macOS Keychain or Windows Credential Manager, and every request requires an explicit **Send** or **Retry** action.
 
-Re-editable screenshots keep an unannotated source locally, which may still contain pixels hidden by mosaic or shapes. Saving a crop also removes out-of-frame pixels. Recording and GIF export use FFmpeg; if it is unavailable, Kiri downloads and caches it on first use while encoding remains local.
+Re-editable screenshots keep an unannotated source locally, which may still contain pixels hidden by mosaic or shapes. Saving a crop also removes out-of-frame pixels. Windows MP4 recording and GIF creation use system media components and the bundled encoder without downloading FFmpeg. macOS recording and GIF conversion still use FFmpeg; Kiri downloads and caches it only when those features need it and no usable copy is available. Encoding remains local.
 
 ## Run from source
 

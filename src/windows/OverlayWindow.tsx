@@ -953,7 +953,9 @@ export function OverlayWindow() {
       {/* Annotation canvas — mounted (hidden) as soon as a region is chosen
           (spec §7.1: the canvas exists but is hidden until a tool is picked),
           so Done/Return export works without picking a tool. */}
-      {selection && (annotating || phase === "selecting") && (
+      {selection &&
+        isValidSelection(selection, 3) &&
+        (annotating || phase === "selecting") && (
         <div
           style={{
             position: "absolute",

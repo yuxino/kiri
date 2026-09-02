@@ -475,19 +475,51 @@ fn schedule_capture_start(app: &tauri::AppHandle, source: &'static str) {
     };
 
     let handle = app.clone();
-    let trigger = handle.clone();
-    if let Err(error) = trigger.run_on_main_thread(move || {
-        // Keep the owned permit for the entire queued invocation, including a
-        // Windows worker timeout. Drop reopens scheduling on every exit path.
-        let _permit = permit;
-        if let Err(error) = commands::start_capture(handle) {
-            log::warn!("[{source}] capture start returned: {error}");
+
+    #[cfg(target_os = "windows")]
+    {
+        // Desktop capture and WebView2 controller creation must not occupy the
+        // Tauri event-loop thread. A slow frame otherwise looks like an app
+        // hang, and a second controller can wait for a COM callback that needs
+        // the main STA to keep pumping messages.
+        if let Err(error) = spawn_windows_capture_start(move || {
+            // Keep the owned permit for the entire invocation. Drop
+            // reopens scheduling on every success and failure path.
+            let _permit = permit;
+            if let Err(error) = commands::start_capture(handle) {
+                log::warn!("[{source}] capture start returned: {error}");
+            }
+        }) {
+            log::warn!("[{source}] could not spawn capture start: {error}");
         }
-    }) {
-        // If scheduling fails, Tauri drops the closure and its permit before
-        // returning, so a future request is not permanently suppressed.
-        log::warn!("[{source}] could not schedule capture start: {error}");
     }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let trigger = handle.clone();
+        if let Err(error) = trigger.run_on_main_thread(move || {
+            // Keep the owned permit for the entire queued invocation. Drop
+            // reopens scheduling on every exit path.
+            let _permit = permit;
+            if let Err(error) = commands::start_capture(handle) {
+                log::warn!("[{source}] capture start returned: {error}");
+            }
+        }) {
+            // If scheduling fails, Tauri drops the closure and its permit
+            // before returning, so a future request remains eligible.
+            log::warn!("[{source}] could not schedule capture start: {error}");
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_windows_capture_start<F>(task: F) -> std::io::Result<std::thread::JoinHandle<()>>
+where
+    F: FnOnce() + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name("kiri-capture-start".into())
+        .spawn(task)
 }
 
 fn tray_labels(language: &str) -> (&'static str, &'static str, &'static str) {
@@ -501,6 +533,27 @@ fn tray_labels(language: &str) -> (&'static str, &'static str, &'static str) {
 #[cfg(test)]
 mod tests {
     use super::{tray_labels, tray_menu_entries};
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_capture_start_uses_its_named_background_thread() {
+        let caller = std::thread::current().id();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = super::spawn_windows_capture_start(move || {
+            sender
+                .send((
+                    std::thread::current().id(),
+                    std::thread::current().name().map(str::to_owned),
+                ))
+                .unwrap();
+        })
+        .unwrap();
+
+        let (worker_id, worker_name) = receiver.recv().unwrap();
+        worker.join().unwrap();
+        assert_ne!(worker_id, caller);
+        assert_eq!(worker_name.as_deref(), Some("kiri-capture-start"));
+    }
 
     #[test]
     fn tray_labels_cover_supported_languages_and_default_to_english() {
