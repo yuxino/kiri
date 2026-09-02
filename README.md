@@ -22,6 +22,8 @@ Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Win
 
 公开版本见 [GitHub Releases](https://github.com/yuxino/kiri/releases)；macOS 稳定包与 Windows 候选包的发布状态可能不同。
 
+从 v1.4.9 起，设置页支持手动检查、下载并安装经过签名验证的更新；每一步都需要你明确点击，Kiri 不会后台检查或静默安装。v1.4.8 及更早版本需要先从 Releases 手动安装一次 v1.4.9，之后才能使用应用内更新。
+
 - **macOS 14+**：下载 Universal `.dmg`（Apple 芯片与 Intel），把 `Kiri.app` 拖入“应用程序”。截图与录屏需要“屏幕与系统音频录制”权限；点击高亮才需要“输入监控”。麦克风录制需要 macOS 15+。
 - **Windows 11（x64）**：当前源码已支持。v1.4.8 安装包仍是草稿候选，正在完成截图流程的真机验收，尚未正式发布。运行 `.exe` 安装程序；屏幕捕获不需要额外系统授权，麦克风权限由 Windows 隐私设置控制。安装程序未经过 Authenticode 签名，SmartScreen 可能提示警告。
 
@@ -31,7 +33,7 @@ macOS 发布包使用项目维护的本地自签名身份，未使用 Developer 
 
 素材、OCR 和编码默认都在本机处理。远程 OCR 完全可选，API Key 保存在 macOS 钥匙串或 Windows 凭据管理器中，每次请求都需要明确点击“发送”或“重试”。
 
-可重编辑截图会在本地保存未加标注的源图；其中可能仍有被马赛克或图形遮住的像素。保存裁剪会同时移除框外像素。Windows 的 MP4 录屏与 GIF 生成使用系统媒体组件和内置编码器，不下载 FFmpeg。macOS 录屏与 GIF 转换仍使用 FFmpeg；仅在这些功能需要且本机没有可用版本时下载并缓存，编码始终在本机完成。
+可重编辑截图会在本地保存未加标注的源图；其中可能仍有被马赛克或图形遮住的像素。保存裁剪会同时移除框外像素。macOS 的 MP4 录屏、合并、缩略图和 GIF 生成使用 AVFoundation 与 ImageIO；Windows 使用 Media Foundation 与系统图像组件。两个平台都不下载 FFmpeg，媒体处理始终在本机完成。
 
 ## 从源码运行
 

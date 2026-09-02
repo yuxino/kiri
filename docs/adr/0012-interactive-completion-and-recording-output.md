@@ -1,5 +1,9 @@
 # ADR 0012: Interactive completion and recording output
 
+> Media implementation note: the FFmpeg-specific details below describe the
+> implementation accepted at this ADR's date. ADR 0024 supersedes that part
+> with platform-native media pipelines.
+
 - Status: Accepted
 - Date: 2026-08-26
 - Supersedes: The screenshot and recording completion-toast portion of ADR

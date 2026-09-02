@@ -6,7 +6,6 @@ use std::path::Path;
 use std::io::Cursor;
 
 const MAX_THUMBNAIL_EDGE: u32 = 640;
-const VIDEO_THUMBNAIL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 #[cfg(target_os = "macos")]
 pub fn image_thumbnail(image_path: &Path) -> Option<Vec<u8>> {
@@ -219,42 +218,14 @@ fn thumbnail_dimensions(width: u32, height: u32, max_edge: u32) -> Option<(u32, 
     Some((scaled_width, scaled_height))
 }
 
-pub fn video_first_frame(ffmpeg: &Path, video: &Path) -> Option<Vec<u8>> {
-    let mut command = std::process::Command::new(ffmpeg);
-    command
-        .arg("-hide_banner")
-        .arg("-loglevel")
-        .arg("error")
-        .arg("-y")
-        .arg("-i")
-        .arg(video)
-        .arg("-frames:v")
-        .arg("1")
-        .arg("-vf")
-        .arg(video_thumbnail_filter())
-        .arg("-f")
-        .arg("image2pipe")
-        .arg("-c:v")
-        .arg("png")
-        .arg("pipe:1")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
-    let output =
-        crate::record::run_command_with_timeout(&mut command, VIDEO_THUMBNAIL_TIMEOUT).ok()?;
-    if !output.status.success() || output.stdout.is_empty() {
-        return None;
-    }
-    Some(output.stdout)
+#[cfg(target_os = "macos")]
+pub fn video_first_frame(video: &Path) -> Option<Vec<u8>> {
+    crate::macos_media::video_first_frame_png(video, MAX_THUMBNAIL_EDGE).ok()
 }
 
-fn video_thumbnail_filter() -> String {
-    // Bound both axes before preserving aspect ratio. This caps the long edge
-    // for portrait and landscape media and never enlarges a smaller source.
-    format!(
-        "scale='min({0},iw)':'min({0},ih)':force_original_aspect_ratio=decrease",
-        MAX_THUMBNAIL_EDGE
-    )
+#[cfg(windows)]
+pub fn video_first_frame(video: &Path) -> Option<Vec<u8>> {
+    crate::gif::video_first_frame(video, MAX_THUMBNAIL_EDGE).ok()
 }
 
 #[cfg(test)]
@@ -283,13 +254,5 @@ mod tests {
         assert_eq!(thumbnail_dimensions(320, 1_280, 640), Some((160, 640)));
         assert_eq!(thumbnail_dimensions(1, u32::MAX, 640), Some((1, 640)));
         assert_eq!(thumbnail_dimensions(0, 100, 640), None);
-    }
-
-    #[test]
-    fn video_thumbnail_filter_bounds_both_axes_without_upscaling() {
-        assert_eq!(
-            video_thumbnail_filter(),
-            "scale='min(640,iw)':'min(640,ih)':force_original_aspect_ratio=decrease"
-        );
     }
 }

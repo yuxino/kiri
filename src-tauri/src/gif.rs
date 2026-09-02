@@ -1,12 +1,12 @@
 //! GIF export.
 //!
-//! Windows uses Media Foundation for H.264 decoding and the bundled Rust GIF
-//! encoder, so recording and explicit MP4-to-GIF conversion never need an
-//! external executable. Other platforms keep the existing FFmpeg path until
-//! their native decoders are wired in.
+//! Windows uses Media Foundation plus the Rust GIF encoder. macOS uses
+//! AVFoundation plus ImageIO through the native media bridge.
 
+#[cfg(windows)]
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
 use anyhow::{bail, Context, Result};
 
 #[cfg(any(windows, test))]
@@ -25,6 +25,7 @@ pub fn scaled_dimensions(width: u32, height: u32, max_long_edge: u32) -> (u32, u
     (scaled_width, scaled_height)
 }
 
+#[cfg(windows)]
 fn temporary_gif_path() -> PathBuf {
     std::env::temp_dir().join(format!(
         "kiri-gif-{}.gif",
@@ -234,6 +235,25 @@ pub fn video_dimensions(video: &Path) -> Result<(u32, u32)> {
     WindowsVideoReader::open(video).map(|reader| reader.dimensions())
 }
 
+#[cfg(windows)]
+pub fn video_first_frame(video: &Path, max_long_edge: u32) -> Result<Vec<u8>> {
+    use image::imageops::FilterType;
+
+    let reader = WindowsVideoReader::open(video)?;
+    let (_, mut frame) = reader
+        .read_frame()?
+        .context("the video did not contain a decodable frame")?;
+    let (width, height) = scaled_dimensions(frame.width(), frame.height(), max_long_edge);
+    if frame.width() != width || frame.height() != height {
+        frame = image::imageops::resize(&frame, width, height, FilterType::Lanczos3);
+    }
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(frame)
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .context("could not encode the video thumbnail")?;
+    Ok(cursor.into_inner())
+}
+
 /// Exports a Windows MP4 to a looping GIF without FFmpeg.
 #[cfg(windows)]
 pub fn export_gif(video: &Path, max_long_edge: u32, fps: u32) -> Result<PathBuf> {
@@ -293,76 +313,6 @@ pub fn export_gif(video: &Path, max_long_edge: u32, fps: u32) -> Result<PathBuf>
     Ok(out_path)
 }
 
-#[cfg(not(windows))]
-use std::process::{Command, Stdio};
-#[cfg(not(windows))]
-use std::time::Duration;
-
-#[cfg(not(windows))]
-use crate::record::{run_command_with_output_progress, FFMPEG_OUTPUT_STALL_TIMEOUT};
-
-#[cfg(not(windows))]
-fn gif_filter(max_long_edge: u32, fps: u32) -> String {
-    let scale = format!("min(1,{max_long_edge}/max(iw,ih))");
-    format!(
-        "fps={fps},scale=w='iw*{scale}':h='ih*{scale}':flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse"
-    )
-}
-
-#[cfg(not(windows))]
-pub fn export_gif(video: &Path, max_long_edge: u32, fps: u32, ffmpeg: &Path) -> Result<PathBuf> {
-    export_gif_with_stall_timeout(
-        video,
-        max_long_edge,
-        fps,
-        ffmpeg,
-        FFMPEG_OUTPUT_STALL_TIMEOUT,
-    )
-}
-
-#[cfg(not(windows))]
-fn export_gif_with_stall_timeout(
-    video: &Path,
-    max_long_edge: u32,
-    fps: u32,
-    ffmpeg: &Path,
-    stall_timeout: Duration,
-) -> Result<PathBuf> {
-    let out_path = temporary_gif_path();
-    let filter = gif_filter(max_long_edge, fps);
-    let status = run_command_with_output_progress(
-        Command::new(ffmpeg)
-            .arg("-hide_banner")
-            .arg("-loglevel")
-            .arg("error")
-            .arg("-y")
-            .arg("-i")
-            .arg(video)
-            .arg("-filter_complex")
-            .arg(filter)
-            .arg("-loop")
-            .arg("0")
-            .arg(&out_path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null()),
-        &out_path,
-        stall_timeout,
-    );
-    let status = match status {
-        Ok(status) => status,
-        Err(error) => {
-            let _ = std::fs::remove_file(&out_path);
-            return Err(error).context("Kiri could not create the GIF file.");
-        }
-    };
-    if !status.success() {
-        let _ = std::fs::remove_file(&out_path);
-        bail!("The GIF could not be finalized.")
-    }
-    Ok(out_path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,39 +333,5 @@ mod tests {
         let bytes = std::fs::read(&gif).unwrap();
         assert!(bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"));
         println!("native GIF fixture: {}", gif.display());
-    }
-
-    #[cfg(not(windows))]
-    #[test]
-    fn gif_filter_caps_the_long_edge_for_landscape_and_portrait_video() {
-        let filter = gif_filter(720, 12);
-        assert!(filter.contains("w='iw*min(1,720/max(iw,ih))'"));
-        assert!(filter.contains("h='ih*min(1,720/max(iw,ih))'"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn gif_export_uses_the_output_progress_watchdog() {
-        use std::os::unix::fs::PermissionsExt;
-        use std::time::{Duration, Instant};
-
-        let directory = tempfile::tempdir().unwrap();
-        let fake_ffmpeg = directory.path().join("ffmpeg");
-        std::fs::write(&fake_ffmpeg, b"#!/bin/sh\nexec /bin/sleep 10\n").unwrap();
-        let mut permissions = std::fs::metadata(&fake_ffmpeg).unwrap().permissions();
-        permissions.set_mode(0o700);
-        std::fs::set_permissions(&fake_ffmpeg, permissions).unwrap();
-
-        let started = Instant::now();
-        let error = export_gif_with_stall_timeout(
-            Path::new("ignored.mp4"),
-            720,
-            12,
-            &fake_ffmpeg,
-            Duration::from_millis(30),
-        )
-        .unwrap_err();
-        assert!(started.elapsed() < Duration::from_secs(1));
-        assert!(format!("{error:#}").contains("produced no output progress"));
     }
 }

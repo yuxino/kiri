@@ -74,13 +74,21 @@ test("macOS releases use one verified Universal DMG", () => {
     "utf8",
   );
 
-  assert.match(source, /--target universal-apple-darwin --bundles dmg/);
+  assert.match(source, /--target universal-apple-darwin --bundles app,dmg/);
   assert.match(source, /aarch64-apple-darwin/);
   assert.match(source, /x86_64-apple-darwin/);
   assert.match(source, /hdiutil verify/);
   assert.match(source, /lipo -archs/);
   assert.match(source, /codesign --verify --deep --strict/);
   assert.doesNotMatch(source, /--no-sign|KIRI_ALLOW_ADHOC_SIGNING/);
+});
+
+test("macOS exact-artifact acceptance can install a verified prebuilt app", () => {
+  const source = readFileSync(join(repositoryRoot, "scripts", "install-app.sh"), "utf8");
+  assert.match(source, /KIRI_BUILD_APP/);
+  assert.match(source, /using prebuilt package for exact-artifact acceptance/);
+  assert.match(source, /verify_kiri_app "\$BUILD_APP"/);
+  assert.doesNotMatch(source, /KIRI_ALLOW_ADHOC_SIGNING|--no-sign/);
 });
 
 test("release CI does not create an intentional red light or ad-hoc macOS package", () => {
@@ -161,7 +169,7 @@ test("translation dictionaries stay aligned and contain no orphaned keys", () =>
 
   const sourceFiles = [
     ...filesUnder(join(repositoryRoot, "src"), [".ts", ".tsx"]),
-    ...filesUnder(join(repositoryRoot, "src-tauri", "src"), [".rs"]),
+    ...filesUnder(join(repositoryRoot, "src-tauri", "src"), [".rs", ".m"]),
   ];
   const source = sourceFiles.map((path) => readFileSync(path, "utf8")).join("\n");
   const orphaned = englishKeys.filter((key) => !source.includes(key));

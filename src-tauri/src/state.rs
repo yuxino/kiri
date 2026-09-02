@@ -33,7 +33,6 @@ pub struct AppState {
     /// confirmation IPC can block WebView2 before its response is delivered.
     pub pending_capture_completion: std::sync::Mutex<Option<PendingCaptureCompletion>>,
     pub recording: std::sync::Mutex<RecordingFlow>,
-    pub ffmpeg_path: std::sync::OnceLock<PathBuf>,
     pub saved_annotation_appearance: std::sync::Mutex<AnnotationAppearance>,
     pub saved_recording_options: std::sync::Mutex<RecordingOptions>,
     pub recording_recovery: std::sync::Mutex<RecordingRecoveryStore>,
@@ -439,7 +438,6 @@ impl AppState {
             capture: Default::default(),
             pending_capture_completion: Default::default(),
             recording: Default::default(),
-            ffmpeg_path: std::sync::OnceLock::new(),
             saved_annotation_appearance: std::sync::Mutex::new(AnnotationAppearance::default()),
             saved_recording_options: std::sync::Mutex::new(RecordingOptions::default()),
             recording_recovery: std::sync::Mutex::new(recording_recovery),
@@ -452,15 +450,6 @@ impl AppState {
             editor_save_destinations: Default::default(),
             remote_ocr: std::sync::OnceLock::new(),
         })
-    }
-
-    pub fn ffmpeg(&self) -> anyhow::Result<PathBuf> {
-        if let Some(path) = self.ffmpeg_path.get() {
-            return Ok(path.clone());
-        }
-        let path = crate::record::ensure_ffmpeg()?;
-        let _ = self.ffmpeg_path.set(path.clone());
-        Ok(path)
     }
 
     /// Remote OCR is opt-in, so avoid constructing TLS/proxy connection pools

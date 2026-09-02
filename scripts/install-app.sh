@@ -6,7 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-BUILD_APP="$PROJECT_DIR/src-tauri/target/release/bundle/macos/kiri.app"
+BUILD_APP="${KIRI_BUILD_APP:-$PROJECT_DIR/src-tauri/target/release/bundle/macos/kiri.app}"
 INSTALL_APP="${KIRI_INSTALL_PATH:-/Applications/Kiri.app}"
 EXPECTED_IDENTIFIER="io.yuxino.kiri"
 
@@ -49,7 +49,19 @@ verify_kiri_app() {
 }
 
 cd "$PROJECT_DIR"
-"$SCRIPT_DIR/package-app.sh" --bundles app
+if [[ -z "${KIRI_BUILD_APP:-}" ]]; then
+  "$SCRIPT_DIR/package-app.sh" --bundles app
+else
+  case "$BUILD_APP" in
+    /*/*.app) ;;
+    *) echo "install-app: KIRI_BUILD_APP must be an absolute .app path" >&2; exit 2 ;;
+  esac
+  [[ ! -L "$BUILD_APP" ]] || {
+    echo "install-app: KIRI_BUILD_APP cannot be a symbolic link" >&2
+    exit 1
+  }
+  echo "install-app: using prebuilt package for exact-artifact acceptance"
+fi
 verify_kiri_app "$BUILD_APP" || {
   echo "install-app: packaged Kiri is unsigned, ad-hoc, or otherwise invalid" >&2
   exit 1

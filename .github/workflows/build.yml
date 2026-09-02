@@ -70,14 +70,23 @@ jobs:
       - run: pnpm test:release-tools
       - name: Run Windows regression tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Compile Windows app for pull requests
+        if: github.event_name == 'pull_request'
+        run: pnpm tauri build --no-bundle
       - uses: tauri-apps/tauri-action@v0
+        if: github.event_name == 'push'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --bundles nsis
       - name: Upload Windows bundle
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
         with:
           name: kiri-windows
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.sig
           if-no-files-found: error

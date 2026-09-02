@@ -11,5 +11,26 @@ fn main() {
         println!("cargo:rerun-if-changed={icon}");
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        println!("cargo:rerun-if-changed=src/macos_media.m");
+        cc::Build::new()
+            .file("src/macos_media.m")
+            .flag("-fobjc-arc")
+            .flag("-fmodules")
+            .compile("kiri_macos_media");
+        for framework in [
+            "AVFoundation",
+            "CoreGraphics",
+            "CoreMedia",
+            "CoreVideo",
+            "Foundation",
+            "ImageIO",
+            "UniformTypeIdentifiers",
+        ] {
+            println!("cargo:rustc-link-lib=framework={framework}");
+        }
+    }
+
     tauri_build::build()
 }

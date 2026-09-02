@@ -167,12 +167,6 @@ export interface PreparedOcrRequestDto {
   profile?: PreparedOcrProfileDto | null;
 }
 
-export interface UpdateCheckDto {
-  currentVersion: string;
-  latestVersion: string;
-  updateAvailable: boolean;
-}
-
 export interface AnnotationProjectDto {
   revisionSha256: string;
   state: "none" | "valid" | "invalid";
@@ -301,7 +295,6 @@ export const api = {
   micSupported: () => invoke<boolean>("mic_supported"),
   getShortcutStatus: () => invoke<ShortcutStatusDto>("get_shortcut_status"),
   retryShortcut: () => invoke<ShortcutStatusDto>("retry_shortcut"),
-  checkForUpdates: () => invoke<UpdateCheckDto>("check_for_updates"),
   openReleasePage: () => invoke<void>("open_release_page"),
   openSettings: (action: string) => invoke<void>("open_settings", { action }),
   quitApp: () => invoke<void>("quit_app"),

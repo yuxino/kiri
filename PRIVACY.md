@@ -28,27 +28,31 @@ They are removed when that screenshot is permanently deleted. Older flattened
 screenshots do not contain reconstructable annotation data; starting a new edit
 uses the current flattened image as its source.
 
-## Recording dependency
+## Local media processing
 
-Kiri uses FFmpeg for local recording and GIF encoding. If no usable copy is
-already installed or cached, Kiri downloads the executable once when the user
-first starts a recording or explicitly converts a video to GIF, then stores it
-in the operating-system cache. Browsing the library never starts this
-download. The dependency request contains no screenshots, recordings, filenames, library
-metadata, credentials, or account identifier. Media encoding remains local.
-Automatic downloads come from `ffmpeg.martin-riedl.de` on macOS and the
-`GyanD/codexffmpeg` release repository on `github.com` on Windows.
+Kiri records, merges paused segments, generates video thumbnails, and converts
+MP4 files to GIF with operating-system media frameworks. macOS uses
+AVFoundation and ImageIO; Windows uses Media Foundation and Windows imaging
+components. Kiri does not download or execute FFmpeg or another third-party
+media binary. Screenshots, recordings, filenames, library metadata,
+credentials, and media bytes remain on the device during these operations.
 
 ## Manual update checks
 
 Kiri does not check for application updates in the background. When the user
-clicks **Check for Updates** in Settings, Kiri sends one request to the public
-`api.github.com/repos/yuxino/kiri/releases/latest` endpoint. The request uses a
-standard `kiri/<current-version>` user agent and contains no captures,
-recordings, filenames, library metadata, OCR data, credentials, or account
-identifier. Kiri does not automatically retry the request, download an update,
-or install it. If a newer release exists, the user may explicitly open the
-fixed Kiri Releases page in their browser.
+clicks **Check for Updates** in Settings, Kiri requests the fixed public
+`github.com/yuxino/kiri/releases/latest/download/latest.json` manifest over
+HTTPS. If a newer release exists, Kiri displays its version and release notes.
+It does not download anything until the user clicks **Download Update**, and it
+does not install anything until the user clicks **Install Update**. The official
+Tauri updater verifies the downloaded archive against Kiri's embedded public
+key before the interface enables installation. macOS restarts only after a
+further explicit click; on Windows, the installer closes Kiri and completes the
+update. A fixed Releases-page link is shown only as recovery after a failure.
+
+Update requests contain the installed platform and version but no captures,
+recordings, filenames, library metadata, OCR data, credentials, telemetry, or
+account identifier.
 
 ## Local OCR
 

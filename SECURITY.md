@@ -18,16 +18,17 @@ hashes, and refuses stale editor saves instead of pairing a document with a
 different image revision. Native Save panels issue a one-time destination
 authorization; unrestricted filesystem paths are not exposed to the WebView.
 
-Recording or explicit GIF conversion may download the FFmpeg executable once
-when no usable local copy is available. This dependency request contains no
-capture contents, filenames, library metadata, credentials, or account
-identifier. The executable is cached locally and all media encoding remains on
-the device. Automatic downloads use
-platform-specific, version-pinned archives; Kiri verifies the archive SHA-256
-before extraction and validates the executable before use.
+Recording, paused-segment merging, video thumbnails, and explicit GIF
+conversion use operating-system media frameworks. macOS uses AVFoundation and
+ImageIO; Windows uses Media Foundation and Windows imaging components. These
+operations do not download or execute a third-party media binary, and media
+bytes remain on the device.
 
-- macOS: FFmpeg 9.0 from `ffmpeg.martin-riedl.de`
-- Windows x64: FFmpeg 9.0.1 from the `GyanD/codexffmpeg` release repository on `github.com`
+Application updates use Tauri's signed updater with a fixed HTTPS manifest and
+an embedded public key. Checks, downloads, and installation are separate
+user-initiated actions. A downloaded archive must pass signature verification
+before installation; Kiri never accepts an updater endpoint, executable path,
+or public key from remote release notes.
 
 Optional remote OCR follows that rule per image. The app prepares only the
 selected region locally, discloses the configured provider origin, model, and

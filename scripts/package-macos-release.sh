@@ -23,7 +23,33 @@ for target in aarch64-apple-darwin x86_64-apple-darwin; do
 done
 
 cd "$PROJECT_DIR"
-"$SCRIPT_DIR/package-app.sh" --target universal-apple-darwin --bundles dmg
+release_user="$(id -un)"
+release_user_home="$(
+  /usr/bin/dscl . -read "/Users/$release_user" NFSHomeDirectory |
+    awk '$1 == "NFSHomeDirectory:" { print $2; exit }'
+)"
+[[ -n "$release_user_home" ]] || {
+  echo "package-macos-release: could not resolve the current user home directory" >&2
+  exit 1
+}
+updater_key_path="${KIRI_UPDATER_KEY_PATH:-$release_user_home/Library/Application Support/Kiri Release Signing/updater.key}"
+[[ -f "$updater_key_path" ]] || {
+  echo "package-macos-release: updater signing key is missing" >&2
+  exit 1
+}
+updater_key_password="$(security find-generic-password \
+  -s io.yuxino.kiri.updater-signing \
+  -a "$release_user" \
+  -w)"
+[[ -n "$updater_key_password" ]] || {
+  echo "package-macos-release: updater signing password is missing from Keychain" >&2
+  exit 1
+}
+
+TAURI_SIGNING_PRIVATE_KEY="$updater_key_path" \
+TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$updater_key_password" \
+  "$SCRIPT_DIR/package-app.sh" --target universal-apple-darwin --bundles app,dmg
+unset updater_key_password
 
 config_value() {
   node -e '
@@ -38,9 +64,15 @@ version="$(config_value version)"
 expected_identifier="$(config_value identifier)"
 expected_macos="$(config_value bundle.macOS.minimumSystemVersion)"
 dmg="$PROJECT_DIR/src-tauri/target/universal-apple-darwin/release/bundle/dmg/kiri_${version}_universal.dmg"
+updater_archive="$PROJECT_DIR/src-tauri/target/universal-apple-darwin/release/bundle/macos/kiri.app.tar.gz"
+updater_signature="$updater_archive.sig"
 
 [[ -f "$dmg" ]] || {
   echo "package-macos-release: expected DMG not found: $dmg" >&2
+  exit 1
+}
+[[ -s "$updater_archive" && -s "$updater_signature" ]] || {
+  echo "package-macos-release: signed updater archive or signature is missing" >&2
   exit 1
 }
 
@@ -113,4 +145,5 @@ requirement="$(
 }
 
 echo "verified Universal macOS release: $dmg"
+echo "verified signed updater assets: $updater_archive and $updater_signature"
 echo "architectures: $architectures; minimum macOS: $expected_macos"

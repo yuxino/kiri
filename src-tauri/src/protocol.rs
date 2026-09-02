@@ -317,15 +317,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
                 CaptureKind::Image | CaptureKind::Gif => {
                     crate::thumbnail::image_thumbnail(&file_path)
                 }
-                CaptureKind::Video => {
-                    let ffmpeg = state.ffmpeg_path.get().cloned().or_else(|| {
-                        let path = crate::record::existing_ffmpeg()?;
-                        let _ = state.ffmpeg_path.set(path.clone());
-                        Some(path)
-                    });
-                    ffmpeg
-                        .and_then(|ffmpeg| crate::thumbnail::video_first_frame(&ffmpeg, &file_path))
-                }
+                CaptureKind::Video => crate::thumbnail::video_first_frame(&file_path),
             };
             if let Some(thumbnail) = thumbnail {
                 store
@@ -365,7 +357,7 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
         let rest = &path;
         if let Ok(id) = uuid::Uuid::parse_str(rest) {
             // Resolve the file path while holding the lock, then drop it
-            // before running ffmpeg (thumbnail generation can take ~100ms).
+            // before native thumbnail generation (decoding can take ~100ms).
             let (kind, file_path) = {
                 let mut context = state.library.lock().unwrap();
                 let Ok(library) = context.library() else {
@@ -400,23 +392,13 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
                 }
                 return not_found();
             }
-            // Browsing the local library must never trigger a network
-            // download. Reuse an initialized encoder, or discover only a
-            // validated environment/cache/PATH installation.
-            let ffmpeg = state.ffmpeg_path.get().cloned().or_else(|| {
-                let path = crate::record::existing_ffmpeg()?;
-                let _ = state.ffmpeg_path.set(path.clone());
-                Some(path)
-            });
-            if let Some(ffmpeg) = ffmpeg {
-                if let Some(thumbnail) = crate::thumbnail::video_first_frame(&ffmpeg, &file_path) {
-                    store
-                        .thumbnails
-                        .lock()
-                        .unwrap()
-                        .insert(cache_key, thumbnail.clone());
-                    return respond(thumbnail, "image/png");
-                }
+            if let Some(thumbnail) = crate::thumbnail::video_first_frame(&file_path) {
+                store
+                    .thumbnails
+                    .lock()
+                    .unwrap()
+                    .insert(cache_key, thumbnail.clone());
+                return respond(thumbnail, "image/png");
             }
         }
         return not_found();

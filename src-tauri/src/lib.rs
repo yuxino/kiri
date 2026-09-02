@@ -8,6 +8,8 @@ mod commands;
 mod core;
 mod diagnostics;
 mod gif;
+#[cfg(target_os = "macos")]
+mod macos_media;
 mod ocr;
 mod ocr_commands;
 mod ocr_controller;
@@ -34,6 +36,8 @@ pub fn run() {
     );
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             log::info!(
                 "[single-instance] reopen requested args={} cwd_present={}",
@@ -212,7 +216,6 @@ pub fn run() {
             commands::set_recording_options,
             commands::get_annotation_appearance,
             commands::set_annotation_appearance,
-            updates::check_for_updates,
             updates::open_release_page,
         ])
         .build(tauri::generate_context!())

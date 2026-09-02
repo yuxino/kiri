@@ -187,11 +187,10 @@ never remain hidden behind the OCR result surface.
 ## Recording and GIF flow
 
 Platform capture produces BGRA video frames and optional PCM audio. macOS uses
-ScreenCaptureKit. Windows uses Windows Graphics Capture plus WASAPI through
-`cpal`. Windows sends those buffers to Media Foundation and first produces a
-30 fps H.264 MP4 with optional AAC audio; it does not resolve or download
-FFmpeg. macOS feeds the native buffers to FFmpeg, probes hardware encoding,
-and falls back to `libx264`.
+ScreenCaptureKit and sends those buffers to AVAssetWriter for a 30 fps H.264
+MP4 with optional AAC audio. Windows uses Windows Graphics Capture plus WASAPI
+through `cpal`, then sends the buffers to Media Foundation. Neither platform
+resolves, downloads, or launches an external media encoder.
 
 The recording panel explicitly chooses the final MP4 or GIF output before
 capture starts; existing saved options without this field default to MP4. GIF
@@ -199,13 +198,13 @@ output disables audio for that recording session without erasing the user's
 saved MP4 audio preferences. After the MP4 staging file is finalized, Kiri
 converts it locally to a looping, silent GIF at 12 fps with a 720-pixel long
 edge. Windows decodes the staging MP4 with Media Foundation and encodes the GIF
-inside the application; macOS uses FFmpeg. There is no duration cutoff for a
+inside the application; macOS uses AVAssetImageGenerator and ImageIO. There is no duration cutoff for a
 recording with a positive known duration. If GIF encoding or import fails,
 Kiri imports the valid MP4 staging file instead of losing the recording. The
 native recording session returns to idle and restores the source application's
 focus before long merge/GIF work, so background finalization does not block the
-next capture. FFmpeg jobs on macOS must keep growing their output; a stalled
-child process is terminated and reaped.
+next capture. Native finalization errors fail closed and preserve a recoverable
+MP4 whenever GIF conversion cannot complete.
 
 The native-to-encoder video handoff has a hard two-frame capacity. On macOS,
 ScreenCaptureKit's native IOSurface queue is independently limited to three
@@ -214,8 +213,8 @@ when the OS supports it, and the selected region is copied directly from the
 mapped row-stride buffer without first duplicating the full display. Capture
 callbacks never grow an unbounded queue of raw Retina/DPI frames: when the
 encoder cannot keep up, a frame is dropped and the event is sampled in the log.
-On macOS, FFmpeg resolution and hardware-encoder probing finish before native
-capture starts; Windows native encoder preparation is immediate and offline.
+Both native encoders are prepared locally before capture starts without a
+network request or helper-process probe.
 
 Each audio input has an independent byte-bounded queue sized to roughly 250 ms
 of its native PCM format, plus a 128-chunk ceiling. Encoder attachment discards
@@ -227,10 +226,8 @@ Windows pause/resume keeps one Media Foundation session open while capture
 callbacks are gated. macOS pause closes the current segment and resume starts a
 compatible segment; stop merges those segments into one library asset. If a
 live segment loses integrity, previously completed segments are moved out of
-cleanup ownership and imported as a partial recording. FFmpeg probes and
-segment finalization on macOS have hard deadlines; long merges use an
-output-progress watchdog so legitimate long re-encodes are not constrained by
-a short total timeout. Kiri control windows are excluded from exported frames,
+cleanup ownership and imported as a partial recording. AVFoundation validates
+and losslessly exports macOS segments as one MP4. Kiri control windows are excluded from exported frames,
 while an enabled click-ripple window is intentionally included.
 
 If a valid finalized MP4 cannot be imported because the active library is
@@ -244,23 +241,35 @@ centered without dimming the selected region, supports Escape cancellation and
 reduced-motion preferences, and stays visually independent of the selected
 output format.
 
-Windows does not use or download FFmpeg: MP4 recording, recovery validation,
-direct GIF output, and explicit MP4-to-GIF conversion use native media APIs and
-the bundled GIF encoder. macOS recording or GIF conversion resolves a validated
-local FFmpeg first, otherwise downloads a version-pinned archive, checks its
-SHA-256, validates the executable, and caches it. Library browsing and
-thumbnail generation never trigger that download.
+Windows uses Media Foundation plus the bundled Rust GIF encoder for MP4
+recording, recovery validation, thumbnails, and MP4-to-GIF conversion. macOS
+uses AVFoundation and ImageIO for the same boundary, including pause-segment
+merging. Neither platform downloads or executes FFmpeg; library browsing and
+thumbnail generation are local and offline.
 
-## Update check flow
+## Signed update flow
 
-Settings reads the installed version from Tauri's application metadata. Kiri
+Settings reads the installed version from Tauri's application metadata and
 does not run a background updater. A visible **Check for Updates** action asks
-Rust to make one bounded request to the fixed public GitHub latest-release API,
-with redirects and retries disabled, then compares the returned tag as a
-semantic version. The response never supplies an executable path or an
-arbitrary navigation target. When a newer version exists, a separate user
-action opens Kiri's fixed Releases page in the system browser. Kiri does not
-download or install application updates.
+Tauri's official updater plugin to read a fixed HTTPS `latest.json` manifest.
+The configured endpoint and updater public key are compiled into Kiri; release
+notes can supply display text but never an executable path, alternate endpoint,
+or public key.
+
+Check, download, and install are separate visible actions. Download progress
+uses the plugin's actual byte events and stays indeterminate when the server
+does not provide a length. The downloaded platform archive must pass minisign
+verification before the UI reaches its install-ready state. On macOS,
+installation returns to Settings and a further explicit action relaunches the
+app. On Windows, installation launches the passive NSIS updater and exits Kiri;
+the interface does not promise an in-app restart step. The fixed GitHub
+Releases page is exposed only as recovery after an updater failure.
+
+Release packaging creates a signed Universal macOS updater archive and a
+signed Windows NSIS installer. `latest.json` maps both macOS architectures to
+the Universal archive and selects NSIS on Windows. Builds older than the first
+signed-updater release require one manual GitHub Releases installation before
+this in-app path is available.
 
 ## Completion feedback
 

@@ -1,5 +1,8 @@
 # ADR 0023: One Universal macOS release
 
+> Media acceptance note: ADR 0024 replaced the FFmpeg path referenced below
+> with AVFoundation and ImageIO; current release acceptance follows ADR 0024.
+
 - Status: Accepted
 - Date: 2026-08-29
 - Supersedes: ADR 0017's separate `arm64` and `x64` DMG format

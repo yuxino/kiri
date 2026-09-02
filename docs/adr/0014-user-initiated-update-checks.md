@@ -1,6 +1,6 @@
 # ADR 0014: User-initiated update checks
 
-- Status: Accepted
+- Status: Superseded by ADR 0025
 - Date: 2026-08-26
 
 ## Context

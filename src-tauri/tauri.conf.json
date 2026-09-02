@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "kiri",
-  "version": "1.4.8",
+  "version": "1.4.9",
   "identifier": "io.yuxino.kiri",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -31,6 +31,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "category": "Utility",
     "shortDescription": "A fast, local-first capture workspace",
@@ -49,6 +50,17 @@
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMxQTIxQzZBODYwQzExRkYKUldUL0VReUdhaHlpTVhQWjNza1N4ajd3eXZTakNWUDdKSjBiUVhUU01aRitockpTMC9EZms4cjQK",
+      "endpoints": [
+        "https://github.com/yuxino/kiri/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

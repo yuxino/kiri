@@ -44,9 +44,11 @@ decisions:
   the OS preferred language.
 - Captures stay local. Never add uploads, analytics, accounts, or network
   behavior without an explicit product decision and privacy documentation.
-  (The one exception: FFmpeg is downloaded once when the user first records or
-  converts a GIF and no usable local copy is available, then cached for offline
-  encoding. Browsing the library never triggers this download.)
+  Recording, merging, thumbnails, and GIF conversion use platform media APIs
+  and must not download or launch a third-party media executable.
+- Application updates are manual and signed. Check, download, install, and the
+  macOS relaunch are separate user actions; Windows exits into its passive NSIS
+  installer. GitHub Releases is an error-recovery link, not the normal updater.
 
 ## Repository map
 
@@ -59,8 +61,8 @@ decisions:
   ScreenCaptureKit via objc2; Windows: xcap WGC + windows-capture + cpal).
 - `src-tauri/src/platform/` — per-platform helpers: global shortcut, focus
   restoration, file reveal, click monitoring, capture exclusion.
-- `src-tauri/src/record.rs` — ffmpeg encoding pipeline (H.264 + AAC → MP4,
-  segment merge).
+- `src-tauri/src/record.rs` — platform-native encoding coordination (H.264 +
+  AAC → MP4); macOS bridging lives in `src-tauri/src/macos_media.{rs,m}`.
 - `src-tauri/src/commands.rs` — the AppModel-equivalent command surface.
 - `src-tauri/src/{ocr,gif,thumbnail,protocol,state}.rs` — OCR, GIF export,
   thumbnails, `kiri://` protocol, shared state.
@@ -79,8 +81,8 @@ decisions:
   through channels. `SCShareableContent` is main-thread-only — resolve it on
   the main thread.
 - The recording pipeline is: platform capture (BGRA frames + PCM audio) →
-  pipe → ffmpeg (hardware H.264 preferred, AAC) → MP4. Pause/resume produces
-  segments merged losslessly with the concat demuxer.
+  AVFoundation on macOS or Media Foundation on Windows → H.264/AAC MP4.
+  macOS pause/resume segments are merged with AVFoundation.
 - `AssetLibrary` is the persistence boundary. It shares the Swift version's
   storage layout (`~/Library/Application Support/kiri` on macOS,
   `%APPDATA%\kiri` on Windows) so existing libraries keep working. Preserve

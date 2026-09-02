@@ -20,7 +20,7 @@ history.
 - [x] Direct-open library cards with rubber-band-only batch selection
 - [x] Clipboard-first screenshot completion with focus restoration
 - [x] Local OCR (macOS Vision, Windows.Media.Ocr)
-- [x] Region recording (SCK / WGC) with ffmpeg H.264 + AAC pipeline
+- [x] Region recording (SCK / WGC) with native H.264 + AAC pipelines
 - [x] Optional system audio, pointer, and click highlights
 - [x] Neutral, non-dimming 3-2-1 countdown and multi-segment recording pipeline
 - [x] GIF export for any positive known duration (12 fps, 720 px long edge)
@@ -41,7 +41,8 @@ history.
 - [x] Release jobs verify release tools and app icons before packaging
 - [x] Release CI verifies tags and produces Windows drafts without an intentional macOS policy failure
 - [x] One maintainer-signed Universal macOS DMG supports both Apple silicon and Intel
-- [x] FFmpeg is downloaded on the first recording or explicit GIF conversion when absent, then cached locally
+- [x] Native macOS and Windows media pipelines require no downloaded encoder
+- [x] Signed, user-initiated in-app updates with real progress and no background checks
 - [x] Interactive screenshot and recording completion preview with open, copy, recoverable Trash, and Undo actions
 - [x] Re-editable local screenshot annotations with completion-card and library editor entry points
 - [x] Shared last-used annotation styling across capture and editor windows

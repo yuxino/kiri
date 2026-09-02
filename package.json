@@ -1,7 +1,7 @@
 {
   "name": "kiri",
   "private": true,
-  "version": "1.4.8",
+  "version": "1.4.9",
   "packageManager": "pnpm@10.33.2",
   "type": "module",
   "scripts": {
@@ -13,10 +13,12 @@
     "icons:verify": "node scripts/app-icons.mjs verify",
     "test:dev-signing": "node --test scripts/tauri-cli.test.mjs",
     "package:macos-release": "./scripts/package-macos-release.sh",
-    "test:release-tools": "node --test scripts/tauri-cli.test.mjs scripts/release-version.test.mjs scripts/capture-runtime-boundary.test.mjs scripts/repository-hygiene.test.mjs scripts/interaction-states.test.mjs scripts/text-layout.test.mjs scripts/annotation-project.test.mjs scripts/editor-document.test.mjs scripts/editor-crop.test.mjs scripts/annotation-interaction-lock.test.mjs scripts/viewer-state.test.mjs scripts/library-card-interaction.test.mjs scripts/kiri-resource-url.test.mjs"
+    "test:release-tools": "node --test scripts/tauri-cli.test.mjs scripts/release-version.test.mjs scripts/updater-manifest.test.mjs scripts/updater-flow.test.mjs scripts/capture-runtime-boundary.test.mjs scripts/repository-hygiene.test.mjs scripts/interaction-states.test.mjs scripts/text-layout.test.mjs scripts/annotation-project.test.mjs scripts/editor-document.test.mjs scripts/editor-crop.test.mjs scripts/annotation-interaction-lock.test.mjs scripts/viewer-state.test.mjs scripts/library-card-interaction.test.mjs scripts/kiri-resource-url.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.11.0",
     "lucide-react": "^1.31.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

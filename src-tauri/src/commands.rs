@@ -903,7 +903,7 @@ fn validate_replacement_metadata(asset: &CaptureAsset, path: &Path) -> Result<()
                 .map_err(|_| "The selected video file is invalid.".to_string())?;
             (i64::from(width), i64::from(height), asset.duration)
         }
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         CaptureKind::Gif => {
             let reader = image::ImageReader::open(path)
                 .map_err(|_| "The selected GIF could not be read.".to_string())?
@@ -921,13 +921,9 @@ fn validate_replacement_metadata(asset: &CaptureAsset, path: &Path) -> Result<()
                 asset.duration,
             )
         }
-        #[cfg(not(windows))]
-        CaptureKind::Video | CaptureKind::Gif => {
-            let ffmpeg = crate::record::existing_ffmpeg()
-                .ok_or_else(|| "A local FFmpeg is required to validate this file.".to_string())?;
-            crate::record::probe_video(&ffmpeg, path)
-                .ok_or_else(|| "The selected media file is invalid.".to_string())?
-        }
+        #[cfg(target_os = "macos")]
+        CaptureKind::Video => crate::record::probe_video_native(path)
+            .ok_or_else(|| "The selected media file is invalid.".to_string())?,
     };
     if (asset.pixel_width > 0 && pixel_width != asset.pixel_width)
         || (asset.pixel_height > 0 && pixel_height != asset.pixel_height)
@@ -998,8 +994,6 @@ fn retry_pending_recordings_inner(app: &AppHandle) -> Result<usize, String> {
     let mut imported_count = 0;
     let mut completed_count = 0;
     let mut first_error = None;
-    #[cfg(not(windows))]
-    let mut ffmpeg: Option<PathBuf> = None;
     for mut pending in pending_items {
         let result = (|| -> Result<bool, String> {
             let video_path = state
@@ -1038,15 +1032,10 @@ fn retry_pending_recordings_inner(app: &AppHandle) -> Result<usize, String> {
                     crate::gif::video_dimensions(&video_path).map_err(|error| error.to_string())?;
                 (i64::from(width), i64::from(height), pending.duration)
             };
-            #[cfg(not(windows))]
-            let (pixel_width, pixel_height, duration) = crate::record::probe_video(
-                match &ffmpeg {
-                    Some(path) => path,
-                    None => ffmpeg.insert(state.ffmpeg().map_err(|error| error.to_string())?),
-                },
-                &video_path,
-            )
-            .ok_or_else(|| "The pending recording is not a valid MP4.".to_string())?;
+            #[cfg(target_os = "macos")]
+            let (pixel_width, pixel_height, duration) =
+                crate::record::probe_video_native(&video_path)
+                    .ok_or_else(|| "The pending recording is not a valid MP4.".to_string())?;
             import_recovery_output(
                 &state,
                 &video_path,
@@ -1283,8 +1272,8 @@ fn convert_asset_to_gif(
 fn export_gif_file(
     app: &AppHandle,
     source_path: &std::path::Path,
-    source_width: i64,
-    source_height: i64,
+    _source_width: i64,
+    _source_height: i64,
     source_duration: Option<f64>,
 ) -> Result<(PathBuf, i64, i64, Option<f64>), String> {
     let max_long_edge = crate::core::policy::RecordingPolicy::MAXIMUM_GIF_LONG_EDGE;
@@ -1295,8 +1284,8 @@ fn export_gif_file(
         let _ = app;
         let gif_path = crate::gif::export_gif(source_path, max_long_edge, fps)
             .map_err(|error| error.to_string())?;
-        let (width, height) = if source_width > 0 && source_height > 0 {
-            (source_width as u32, source_height as u32)
+        let (width, height) = if _source_width > 0 && _source_height > 0 {
+            (_source_width as u32, _source_height as u32)
         } else {
             crate::gif::video_dimensions(source_path).map_err(|error| error.to_string())?
         };
@@ -1309,18 +1298,14 @@ fn export_gif_file(
         ))
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
     {
-        let state = app.state::<AppState>();
-        let ffmpeg = state.ffmpeg().map_err(|error| error.to_string())?;
-        let gif_path = crate::gif::export_gif(source_path, max_long_edge, fps, &ffmpeg)
-            .map_err(|error| error.to_string())?;
-        let metadata = crate::record::probe_video(&ffmpeg, &gif_path).unwrap_or((
-            source_width,
-            source_height,
-            source_duration,
-        ));
-        Ok((gif_path, metadata.0, metadata.1, metadata.2))
+        let _ = app;
+        crate::macos_media::export_gif(source_path, max_long_edge, fps)
+            .map(|(path, width, height, duration)| {
+                (path, width, height, duration.or(source_duration))
+            })
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -3205,34 +3190,28 @@ fn start_encoder(
         configuration.region.height,
         configuration.backing_scale,
     );
-    let mut encoder_config = crate::record::EncoderConfig {
+    let encoder_config = crate::record::EncoderConfig {
         width,
         height,
         fps: crate::core::policy::RecordingPolicy::FRAMES_PER_SECOND,
         bitrate: crate::record::bitrate_for(width, height),
         audio: recorder.system_audio_spec,
         mic: recorder.microphone_spec,
-        video_encoder: String::new(),
     };
     match prepared {
-        PreparedEncoder::Ffmpeg {
-            ffmpeg,
-            video_encoder,
-        } => {
-            encoder_config.video_encoder.clone_from(video_encoder);
+        #[cfg(target_os = "macos")]
+        PreparedEncoder::MacosNative => {
             log::info!(
-                "start_encoder: ffmpeg={} video {}x{}@{}, audio={}, mic={}",
-                ffmpeg.display(),
+                "start_encoder: AVFoundation H.264 {}x{}@{}, audio={}, mic={}",
                 encoder_config.width,
                 encoder_config.height,
                 encoder_config.fps,
                 encoder_config.audio.is_some(),
                 encoder_config.mic.is_some(),
             );
-            crate::record::SegmentEncoder::start(
+            crate::record::SegmentEncoder::start_macos_native(
                 &encoder_config,
                 out_path,
-                ffmpeg,
                 receivers.video,
                 receivers.system_audio,
                 receivers.microphone,
@@ -3262,39 +3241,26 @@ fn start_encoder(
 }
 
 enum PreparedEncoder {
-    Ffmpeg {
-        ffmpeg: PathBuf,
-        video_encoder: String,
-    },
+    #[cfg(target_os = "macos")]
+    MacosNative,
     #[cfg(windows)]
     WindowsNative,
 }
 
 async fn prepare_encoder(
-    app: AppHandle,
+    _app: AppHandle,
     _output_format: RecordingOutputFormat,
 ) -> Result<PreparedEncoder, String> {
     #[cfg(windows)]
     {
-        let _ = (app, _output_format);
+        let _ = (_app, _output_format);
         return Ok(PreparedEncoder::WindowsNative);
     }
-    #[cfg(not(windows))]
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        let ffmpeg = state.ffmpeg().map_err(|error| error.to_string())?;
-        // Hardware probing can launch several short ffmpeg processes on first
-        // use. Finish it before native capture starts so live audio cannot fill
-        // its bounded queue while no pipe writer exists yet.
-        let video_encoder =
-            crate::record::pick_video_encoder(&ffmpeg).map_err(|error| error.to_string())?;
-        Ok(PreparedEncoder::Ffmpeg {
-            ffmpeg,
-            video_encoder,
-        })
-    })
-    .await
-    .map_err(|error| format!("video encoder preparation task failed: {error}"))?
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (_app, _output_format);
+        Ok(PreparedEncoder::MacosNative)
+    }
 }
 
 fn spawn_recording_clock(app: &AppHandle, session_id: uuid::Uuid) {
@@ -3382,7 +3348,7 @@ pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
 
     // Windows MP4 and GIF sessions both start with the native Media Foundation
     // MP4 fallback, so encoder preparation is immediate and offline. Other
-    // platforms still resolve their FFmpeg encoder before native capture begins.
+    // platform-native encoder setup finishes before capture begins.
     let prepared = match prepare_encoder(app.clone(), configuration.options.output_format).await {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -3791,7 +3757,7 @@ pub async fn stop_recording(app: AppHandle) -> Result<(), String> {
     close_recording_windows(&app);
 
     // Entire stop + finalize runs on a background thread: recorder.stop()
-    // and encoder.finish() can block on SCK/ffmpeg callbacks, and merging
+    // and encoder.finish() can block on SCK/native callbacks, and merging
     // + probing takes time. The UI already shows the finalizing spinner, so
     // the async command returns immediately and the panel stays responsive.
     let handle = app.clone();
@@ -4021,14 +3987,6 @@ fn finalize_recording(
     let mut merge_completed = false;
     let mut pending = None;
     let result: Result<RecordingFinalizeOutcome, String> = (|| {
-        #[cfg(windows)]
-        let ffmpeg: Option<PathBuf> = None;
-        #[cfg(not(windows))]
-        let ffmpeg = if windows_native {
-            None
-        } else {
-            Some(state.ffmpeg().map_err(|error| error.to_string())?)
-        };
         if windows_native {
             if segments.len() != 1 {
                 return Err("The Windows recording did not produce exactly one segment.".into());
@@ -4036,12 +3994,11 @@ fn finalize_recording(
             std::fs::copy(&segments[0], &merged_path)
                 .map_err(|error| format!("could not stage the Windows MP4: {error}"))?;
         } else {
-            crate::record::merge_segments(
-                &segments,
-                &merged_path,
-                ffmpeg.as_deref().expect("ffmpeg path was prepared"),
-            )
-            .map_err(|e| e.to_string())?;
+            #[cfg(target_os = "macos")]
+            crate::record::merge_segments_native(&segments, &merged_path)
+                .map_err(|e| e.to_string())?;
+            #[cfg(windows)]
+            return Err("The Windows recording unexpectedly used segmented output.".into());
         }
         merge_completed = true;
         let (pixel_width, pixel_height, duration) = if windows_native {
@@ -4055,11 +4012,14 @@ fn finalize_recording(
                 })
                 .unwrap_or((0, 0, None))
         } else {
-            crate::record::probe_video(
-                ffmpeg.as_deref().expect("ffmpeg path was prepared"),
-                &merged_path,
-            )
-            .unwrap_or((0, 0, None))
+            #[cfg(target_os = "macos")]
+            {
+                crate::record::probe_video_native(&merged_path).unwrap_or((0, 0, None))
+            }
+            #[cfg(windows)]
+            {
+                (0, 0, None)
+            }
         };
         match state.recording_recovery.lock().unwrap().persist(
             &merged_path,

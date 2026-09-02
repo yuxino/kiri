@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import { KiriIcon } from "../components/KiriIcons";
 import { fmt, getLanguage, setLanguage, t, type KiriLanguage } from "../i18n";
 import {
@@ -179,19 +181,52 @@ export function SettingsView() {
   );
 }
 
+type UpdateDetails = {
+  version: string;
+  notes: string | null;
+};
+
+type UpdateAction = "check" | "download" | "install" | "relaunch" | "open";
+
 type UpdateState =
   | { kind: "idle" }
   | { kind: "checking" }
-  | { kind: "upToDate"; currentVersion: string }
-  | { kind: "available"; latestVersion: string }
-  | { kind: "error"; action: "check" | "open"; latestVersion?: string };
+  | { kind: "upToDate" }
+  | ({ kind: "available" } & UpdateDetails)
+  | ({ kind: "downloading"; downloaded: number; total?: number } & UpdateDetails)
+  | ({ kind: "downloaded" } & UpdateDetails)
+  | ({ kind: "installing"; isWindows: boolean } & UpdateDetails)
+  | ({ kind: "readyToRestart" } & UpdateDetails)
+  | ({ kind: "relaunching" } & UpdateDetails)
+  | ({ kind: "error"; action: UpdateAction; details?: UpdateDetails });
+
+function updateDetails(update: Update): UpdateDetails {
+  return {
+    version: update.version,
+    notes: update.body?.trim() || null,
+  };
+}
 
 function AboutSettingsSection() {
   const [currentVersion, setCurrentVersion] = useState("");
   const [updateState, setUpdateState] = useState<UpdateState>({ kind: "idle" });
+  const updateRef = useRef<Update | null>(null);
+  const operationRef = useRef(false);
+  const mountedRef = useRef(true);
+  const isWindows = /Windows/i.test(navigator.userAgent);
+
+  const finishOperation = () => {
+    operationRef.current = false;
+    if (!mountedRef.current) {
+      const update = updateRef.current;
+      updateRef.current = null;
+      if (update) void update.close().catch(() => {});
+    }
+  };
 
   useEffect(() => {
     let active = true;
+    mountedRef.current = true;
     void getVersion()
       .then((version) => {
         if (active) setCurrentVersion(version);
@@ -199,61 +234,183 @@ function AboutSettingsSection() {
       .catch(() => {});
     return () => {
       active = false;
+      mountedRef.current = false;
+      if (!operationRef.current) {
+        const update = updateRef.current;
+        updateRef.current = null;
+        if (update) void update.close().catch(() => {});
+      }
     };
   }, []);
 
   const checkForUpdates = async () => {
-    if (updateState.kind === "checking") return;
+    if (operationRef.current) return;
+    operationRef.current = true;
     setUpdateState({ kind: "checking" });
     try {
-      const result = await api.checkForUpdates();
-      setCurrentVersion(result.currentVersion);
-      setUpdateState(
-        result.updateAvailable
-          ? { kind: "available", latestVersion: result.latestVersion }
-          : { kind: "upToDate", currentVersion: result.currentVersion },
-      );
+      const previous = updateRef.current;
+      updateRef.current = null;
+      if (previous) await previous.close();
+
+      const update = await check({ timeout: 15_000 });
+      if (!update) {
+        setUpdateState({ kind: "upToDate" });
+        return;
+      }
+      updateRef.current = update;
+      setCurrentVersion(update.currentVersion);
+      setUpdateState({ kind: "available", ...updateDetails(update) });
     } catch {
       setUpdateState({ kind: "error", action: "check" });
+    } finally {
+      finishOperation();
     }
   };
 
-  const openUpdate = async (latestVersion: string) => {
+  const downloadUpdate = async () => {
+    if (operationRef.current) return;
+    const update = updateRef.current;
+    if (!update) {
+      setUpdateState({ kind: "error", action: "check" });
+      return;
+    }
+    operationRef.current = true;
+    const details = updateDetails(update);
+    let downloaded = 0;
+    let total: number | undefined;
+    setUpdateState({ kind: "downloading", downloaded, ...details });
+    try {
+      await update.download((event) => {
+        if (event.event === "Started") {
+          downloaded = 0;
+          total = event.data.contentLength;
+        } else if (event.event === "Progress") {
+          downloaded += event.data.chunkLength;
+        }
+        setUpdateState({ kind: "downloading", downloaded, total, ...details });
+      }, { timeout: 120_000 });
+      setUpdateState({ kind: "downloaded", ...details });
+    } catch {
+      setUpdateState({ kind: "error", action: "download", details });
+    } finally {
+      finishOperation();
+    }
+  };
+
+  const installUpdate = async () => {
+    if (operationRef.current) return;
+    const update = updateRef.current;
+    if (!update) {
+      setUpdateState({ kind: "error", action: "check" });
+      return;
+    }
+    operationRef.current = true;
+    const details = updateDetails(update);
+    setUpdateState({ kind: "installing", isWindows, ...details });
+    try {
+      await update.install({ restartAfterInstall: false });
+      if (!isWindows) setUpdateState({ kind: "readyToRestart", ...details });
+    } catch {
+      setUpdateState({ kind: "error", action: "install", details });
+    } finally {
+      finishOperation();
+    }
+  };
+
+  const restartUpdatedApp = async () => {
+    if (operationRef.current) return;
+    const details = stateDetails(updateState);
+    if (!details) return;
+    operationRef.current = true;
+    setUpdateState({ kind: "relaunching", ...details });
+    try {
+      await relaunch();
+    } catch {
+      setUpdateState({ kind: "error", action: "relaunch", details });
+    } finally {
+      finishOperation();
+    }
+  };
+
+  const openRecoveryPage = async () => {
+    if (operationRef.current) return;
+    operationRef.current = true;
+    const details = stateDetails(updateState);
     try {
       await api.openReleasePage();
     } catch {
-      setUpdateState({ kind: "error", action: "open", latestVersion });
+      setUpdateState({ kind: "error", action: "open", details: details ?? undefined });
+    } finally {
+      finishOperation();
     }
   };
 
-  const opensUpdate =
-    updateState.kind === "available" ||
-    (updateState.kind === "error" && updateState.action === "open");
-  const latestVersion =
-    updateState.kind === "available" || updateState.kind === "error"
-      ? updateState.latestVersion
-      : undefined;
-
-  let status = t("Check GitHub Releases for a newer version.");
+  let status = t("Updates are checked only when you choose to check.");
   if (updateState.kind === "checking") {
     status = t("Checking…");
   } else if (updateState.kind === "upToDate") {
-    status = fmt("Kiri %@ is up to date.", `v${updateState.currentVersion}`);
+    status = fmt("Kiri %@ is up to date.", `v${currentVersion}`);
   } else if (updateState.kind === "available") {
-    status = fmt("Kiri %@ is available.", `v${updateState.latestVersion}`);
-  } else if (updateState.kind === "error") {
+    status = fmt("Kiri %@ is available.", `v${updateState.version}`);
+  } else if (updateState.kind === "downloading") {
+    status = updateState.total
+      ? fmt("Downloading… %@", `${Math.min(100, Math.round((updateState.downloaded / updateState.total) * 100))}%`)
+      : t("Downloading…");
+  } else if (updateState.kind === "downloaded") {
+    status = t("Download and signature verification complete. Ready to install.");
+  } else if (updateState.kind === "installing") {
     status = t(
-      updateState.action === "open"
-        ? "Couldn't open the update page. Try again."
-        : "Couldn't check for updates. Try again.",
+      updateState.isWindows
+        ? "Kiri will close while Windows completes the installation."
+        : "Installing the signed update…",
     );
+  } else if (updateState.kind === "readyToRestart") {
+    status = t("Update installed. Restart Kiri when you're ready.");
+  } else if (updateState.kind === "relaunching") {
+    status = t("Restarting Kiri…");
+  } else if (updateState.kind === "error") {
+    const errors: Record<UpdateAction, string> = {
+      check: "Couldn't check for updates. Try again.",
+      download: "Couldn't download the update. Try again.",
+      install: "Couldn't install the update. Try again.",
+      relaunch: "Couldn't restart Kiri. Try again.",
+      open: "Couldn't open the update page. Try again.",
+    };
+    status = t(errors[updateState.action]);
   }
+
+  const details = stateDetails(updateState);
+  const busy = ["checking", "downloading", "installing", "relaunching"].includes(updateState.kind);
+
+  const runPrimaryAction = () => {
+    if (busy) return;
+    if (updateState.kind === "available") return void downloadUpdate();
+    if (updateState.kind === "downloaded") return void installUpdate();
+    if (updateState.kind === "readyToRestart") return void restartUpdatedApp();
+    if (updateState.kind === "error") {
+      if (updateState.action === "download") return void downloadUpdate();
+      if (updateState.action === "install") return void installUpdate();
+      if (updateState.action === "relaunch") return void restartUpdatedApp();
+      if (updateState.action === "open") return void openRecoveryPage();
+    }
+    return void checkForUpdates();
+  };
 
   const buttonLabel = updateState.kind === "checking"
     ? t("Checking…")
-    : opensUpdate
-      ? t("View Update")
-      : t("Check for Updates");
+    : updateState.kind === "downloading"
+      ? t("Downloading…")
+      : updateState.kind === "downloaded"
+        ? t("Install Update")
+        : updateState.kind === "installing"
+          ? t("Installing…")
+          : updateState.kind === "readyToRestart" || updateState.kind === "relaunching"
+            ? t(updateState.kind === "relaunching" ? "Restarting…" : "Restart and Finish Update")
+            : updateState.kind === "available"
+              ? t("Download Update")
+              : updateState.kind === "error"
+                ? t("Retry")
+                : t("Check for Updates");
 
   return (
     <section className="kiri-settings-section" aria-labelledby="about-settings-title">
@@ -262,41 +419,80 @@ function AboutSettingsSection() {
           <h2 id="about-settings-title">{t("About")}</h2>
           <p>
             {t(
-              "Check for updates manually. Kiri never downloads or installs them automatically.",
+              "Check, download, and install updates only when you choose each step.",
             )}
           </p>
         </div>
       </div>
       <div className="kiri-settings-card kiri-version-row">
-        <div>
+        <div className="kiri-update-copy">
           <div className="kiri-version-title">
             <strong>Kiri</strong>
             <span className="kiri-settings-badge">
               {fmt("Version %@", currentVersion ? `v${currentVersion}` : "—")}
             </span>
           </div>
-          <span id="kiri-update-status" role="status" aria-live="polite">
+          <span
+            id="kiri-update-status"
+            role={updateState.kind === "error" ? "alert" : "status"}
+            aria-live={updateState.kind === "error" ? "assertive" : "polite"}
+          >
             {status}
           </span>
+          {updateState.kind === "downloading" && (
+            <progress
+              className="kiri-update-progress"
+              max={updateState.total}
+              value={updateState.total ? Math.min(updateState.downloaded, updateState.total) : undefined}
+              aria-label={t("Update download progress")}
+            />
+          )}
+          {details?.notes && (
+            <div className="kiri-update-notes" aria-label={t("Release notes")}>
+              <strong>{t("What's new")}</strong>
+              <p>{details.notes}</p>
+            </div>
+          )}
         </div>
-        <button
-          type="button"
-          className="kiri-button kiri-button--secondary kiri-update-button"
-          disabled={updateState.kind === "checking"}
-          aria-describedby="kiri-update-status"
-          onClick={() => {
-            if (opensUpdate && latestVersion) {
-              void openUpdate(latestVersion);
-            } else {
-              void checkForUpdates();
-            }
-          }}
-        >
-          {buttonLabel}
-        </button>
+        <div className="kiri-update-actions">
+          <button
+            type="button"
+            className="kiri-button kiri-button--secondary kiri-update-button"
+            disabled={busy}
+            aria-describedby="kiri-update-status"
+            onClick={runPrimaryAction}
+          >
+            {buttonLabel}
+          </button>
+          {updateState.kind === "error" && (
+            <button
+              type="button"
+              className="kiri-button kiri-button--ghost"
+              onClick={() => void openRecoveryPage()}
+            >
+              {t("Open Releases Page")}
+            </button>
+          )}
+        </div>
       </div>
     </section>
   );
+}
+
+function stateDetails(state: UpdateState): UpdateDetails | null {
+  switch (state.kind) {
+    case "available":
+    case "downloading":
+    case "downloaded":
+    case "installing":
+    case "readyToRestart":
+    case "relaunching":
+      return { version: state.version, notes: state.notes };
+    case "error":
+      return state.details ?? null;
+    default:
+      return null;
+  }
 }
 
 function GeneralSettingsSection() {

@@ -1529,7 +1529,7 @@ function AssetCard(props: {
               preload="metadata"
               onLoadedMetadata={(event) => {
                 // Seeking a fraction past zero asks WebView2 to decode the
-                // first frame without playing or downloading FFmpeg.
+                // first frame without playing the video or downloading a helper.
                 event.currentTarget.currentTime = 0.001;
               }}
               onError={() => void checkAvailability(true)}

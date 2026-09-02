@@ -884,7 +884,7 @@ impl MacRecordingSession {
             // The delegate intentionally holds only a Weak reference. Queue
             // drain guarantees no callback owns a temporary strong Arc, so
             // this closes every frame channel before stop_done and gives
-            // ffmpeg deterministic EOF even if SCK retains the delegate.
+            // the native encoder deterministic EOF even if SCK retains the delegate.
             drop(senders);
             log::info!("MacRecordingSession: capture stopped; releasing stream…");
             // DelegateState is owned by the Objective-C delegate through an
@@ -896,7 +896,7 @@ impl MacRecordingSession {
             drop(queue);
             // Notify the stop waiter that the stream thread has finished
             // releasing stream/delegate ownership and all frame senders have
-            // closed, so ffmpeg has observed EOF.
+            // closed, so the native encoder has observed EOF.
             let _ = stop_done_tx.send(stop_result.map_err(|error| error.to_string()));
         });
 

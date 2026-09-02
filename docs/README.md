@@ -14,6 +14,8 @@ application or a durable product decision.
   network, credential, and local-data boundaries.
 - [`windows-capture-incident.md`](windows-capture-incident.md) — current
   Windows screenshot lifecycle failure, diagnostics, and native retest gate.
+- [`releases/v1.4.9.md`](releases/v1.4.9.md) — first signed-updater release
+  notes and one-time bootstrap instructions.
 
 ## Decision records
 
@@ -38,7 +40,7 @@ application or a durable product decision.
   — historical fail-closed signing rationale, superseded for release
   orchestration by ADR 0017.
 - [`adr/0014-user-initiated-update-checks.md`](adr/0014-user-initiated-update-checks.md)
-  — explicit, bounded update checks without background downloads or installs.
+  — historical browser-only update checks, superseded by ADR 0025.
 - [`adr/0015-monochrome-workspace-visual-system.md`](adr/0015-monochrome-workspace-visual-system.md)
   — the black, white, and neutral-gray application visual system.
 - [`adr/0016-editable-screenshot-projects.md`](adr/0016-editable-screenshot-projects.md)
@@ -61,6 +63,12 @@ application or a durable product decision.
   — shared last-used annotation styling without persisting the active tool.
 - [`adr/0023-universal-macos-release.md`](adr/0023-universal-macos-release.md)
   — one verified Universal DMG for Apple silicon and Intel.
+- [`adr/0024-native-media-pipelines.md`](adr/0024-native-media-pipelines.md)
+  — AVFoundation/ImageIO on macOS and Media Foundation on Windows without a
+  downloaded media executable.
+- [`adr/0025-signed-user-initiated-updates.md`](adr/0025-signed-user-initiated-updates.md)
+  — separately confirmed signed checks, downloads, installation, and
+  platform-accurate restart behavior.
 
 Completed implementation plans and the former Swift migration specifications
 are intentionally not kept in the working tree. Git history and release tags

@@ -60,7 +60,7 @@ impl CaptureHealth {
 }
 
 /// Raw Retina frames are very large (about 32 MiB at 4K). Keep only a tiny
-/// hand-off queue between native capture and the FFmpeg pipe writer; callbacks
+/// hand-off queue between native capture and the platform encoder; callbacks
 /// drop a frame when the encoder is behind instead of growing memory without
 /// bound or blocking the operating system's capture thread.
 pub const VIDEO_FRAME_QUEUE_CAPACITY: usize = 2;
