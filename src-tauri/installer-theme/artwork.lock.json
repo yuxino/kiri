@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "commit": "2e12d64acf6c6d3fd38642f9bc8c0a7fa6817afc",
+  "files": {
+    "header-0.b64": {
+      "size": 1448,
+      "sha256": "f2e15e4236c99cbe900350e6481bd71f20f35c58f6fb8eeab9b49eb2d814baef"
+    },
+    "manifest.json": {
+      "size": 663,
+      "sha256": "0b499a953760c7d9b775246e0000e19ed968a45b20c0f0b28acac827ad6d8616"
+    },
+    "sidebar-0.b64": {
+      "size": 5000,
+      "sha256": "1fb31cc821c82a1b48f7c8964f43ba769940f0e3dcfa75ea26a1fe82d06e9708"
+    },
+    "sidebar-1.b64": {
+      "size": 5000,
+      "sha256": "0fe439b25b389046bb5f85fe2c258c0d1994f3fa1b2ad14068914fac61090e7c"
+    },
+    "sidebar-2.b64": {
+      "size": 5000,
+      "sha256": "5ea01a2f06f18eb38f5e5b071ad3a848ad7b444eac95db147751da13c25ebf20"
+    },
+    "sidebar-3.b64": {
+      "size": 4396,
+      "sha256": "040945a2ef4b1b29814d497637501a34f86c20770836cea5cb58ed74e95ed2e6"
+    }
+  }
+}

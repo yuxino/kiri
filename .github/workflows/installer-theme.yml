@@ -1,0 +1,44 @@
+name: Installer theme
+on:
+  push:
+    branches: [feat/yuxino-installer-theme-v1]
+    paths: ['src-tauri/installer-theme/**', 'src-tauri/tauri.windows.conf.json', '.github/workflows/installer-theme.yml']
+  pull_request:
+    paths: ['src-tauri/installer-theme/**', 'src-tauri/tauri.windows.conf.json', '.github/workflows/installer-theme.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: installer-theme-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  theme:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: node src-tauri/installer-theme/build.mjs
+      - run: node --test src-tauri/installer-theme/theme.node.mjs
+      - run: node src-tauri/installer-theme/build.mjs --check
+      - name: Compile the harmless native UI preview
+        shell: pwsh
+        run: |
+          $compiler = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          if (!(Test-Path $compiler)) {
+            choco install nsis --version=3.11 --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
+          }
+          Push-Location src-tauri/installer-theme
+          try {
+            & $compiler /V3 preview.nsi
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS preview compilation failed' }
+          } finally { Pop-Location }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installer-theme-preview-only
+          path: src-tauri/installer-theme/preview-only-setup.exe
+          if-no-files-found: error
+          retention-days: 7
