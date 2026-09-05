@@ -1,0 +1,31 @@
+name: Import expanded demo media
+on:
+  push:
+    branches: [docs/demo-expanded-10x]
+    paths: [.github/workflows/import-expanded-demo.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          repository: yuxino/kiri
+          run-id: 33992739387
+          name: expanded-demo-deliverables
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/expanded-bundle
+      - name: Verify and import only reviewed documentation
+        shell: bash
+        env:
+          DEMO_BUNDLE: ${{ runner.temp }}/expanded-bundle
+          DEMO_MANIFEST_SHA256: ee8880534fd9e9b19b733dbb43cee252e5e485afa9b5dfab97f6c60426946576
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/yuxino/kiri/50d938536a7fa4d9e61ab806453da9f2d82ef3ff/docs/demos/capture/import-expanded.py -o "$RUNNER_TEMP/import-expanded.py"
+          test "$(git hash-object "$RUNNER_TEMP/import-expanded.py")" = 3d8152d0f9ddf50bb432741daeabbd757631f0c6
+          python3 -I "$RUNNER_TEMP/import-expanded.py"
