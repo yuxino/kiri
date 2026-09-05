@@ -1,4 +1,4 @@
-"""Import this repository's audited documentation assets on the dedicated work branch only."""
+"""Import audited documentation on the dedicated work branch; preserve unrelated text."""
 import hashlib
 import json
 import os
@@ -8,7 +8,8 @@ import shutil
 import subprocess
 
 repo=os.environ['GITHUB_REPOSITORY']
-if repo not in {f'yuxino/{x}' for x in ['kiri','mimi','satori','viva','tick','wnacg']}:
+projects=['kiri','mimi','satori','viva','tick','wnacg']
+if repo not in {f'yuxino/{x}' for x in projects}:
     raise SystemExit('Unexpected repository')
 slug=repo.split('/')[1]
 if subprocess.check_output(['git','branch','--show-current'],text=True).strip()!='docs/project-demo-v1':
@@ -43,6 +44,9 @@ files={
  'tick':{'README.md':'zh'},
  'wnacg':{'README.md':'zh','README.en.md':'en'},
 }[slug]
+# Mimi's old Chinese pages already differ in updater documentation. This task
+# inserts identical demo sections without overwriting those unrelated passages.
+alias_equal_before=slug in ['kiri','mimi'] and Path('README.md').read_bytes()==Path('README_ZH.md').read_bytes()
 features={
  'kiri':('框选、箭头、文字标注，以及撤销与重做。','Rectangle, arrow and text annotations, with undo and redo.','矩形・矢印・文字の注釈と、取り消し・やり直し。'),
  'mimi':('字幕语言、字号、对齐与沉浸模式设置。','Subtitle language, size, alignment and immersive-mode settings.','字幕の言語・サイズ・配置・没入モードの設定。'),
@@ -82,10 +86,12 @@ for filename,language in files.items():
 '''
     match=re.search(r'^## ',text,flags=re.M)
     if not match:raise SystemExit(f'No section anchor in {filename}')
-    text=text[:match.start()]+block+text[match.start():]
-    path.write_text(text,encoding='utf-8')
-if slug in ['kiri','mimi'] and Path('README.md').read_bytes()!=Path('README_ZH.md').read_bytes():
-    raise SystemExit('Chinese README aliases drifted')
+    path.write_text(text[:match.start()]+block+text[match.start():],encoding='utf-8')
+if alias_equal_before and Path('README.md').read_bytes()!=Path('README_ZH.md').read_bytes():
+    raise SystemExit('Identical README aliases drifted')
+if slug in ['kiri','mimi']:
+    sections=[re.search(r'<!-- project-demo-v1 -->.*?<!-- /project-demo-v1 -->',Path(p).read_text(),re.S).group() for p in ['README.md','README_ZH.md']]
+    if sections[0]!=sections[1]:raise SystemExit('Chinese demo sections differ')
 if slug=='satori':
     status=Path('docs/status.md')
     status.write_text(status.read_text()+'''\n\n### 2026-09-06 · README 界面演示\n\n新增真实前端操作录屏、GIF 预览和来源记录，使用原创三页 PDF 展示翻页、缩放、双页与目录。录制环境替代了原生 API 边界，不调用 AI，也不代表原生系统端到端验收。应用代码、模型配置与发布版本均未改变。\n''')
