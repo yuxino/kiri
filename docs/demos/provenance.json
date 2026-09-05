@@ -1,61 +1,122 @@
 {
   "project": "kiri",
   "source_commit": "d3ebccbe86f1df4990651ce1e2569a60d88646fb",
-  "capture": "Unmodified production frontend in Chrome, documentation-only native-boundary fixtures",
+  "capture": "Unmodified production frontend in Chrome with isolated local sample data and mocked native APIs",
   "limitations": "Annotation UI · original sample image · no OS screen capture",
-  "steps": [
+  "browser": "152.0.7977.64",
+  "speed_factor": 10,
+  "result_hold_seconds": 0.8,
+  "duration": 21.933333,
+  "source_duration": 139.40649999999997,
+  "sha256": "76e70e1bee5a4b6f8290d5e2ca6b8290ea1599caa693246b9d36333c534a0b0e",
+  "scenes": [
     {
-      "zh": "先圈出最想保留的那一点。",
-      "en": "Highlight one detail with a rectangle."
+      "zh": "矩形标注：先圈出重点",
+      "en": "01 / Rectangle annotation",
+      "start": 3.297,
+      "end": 21.374600000000004,
+      "poster": "01.png"
     },
     {
-      "zh": "用箭头，把视线引过去。",
-      "en": "Add an arrow to guide the eye."
+      "zh": "调整接下来绘制的线宽",
+      "en": "02 / Adjust the annotation style",
+      "start": 21.374600000000004,
+      "end": 29.905100000000004,
+      "poster": "02.png"
     },
     {
-      "zh": "再留下一句自己的说明。",
-      "en": "Add a short note, then review it."
+      "zh": "箭头：把视线引向关键细节",
+      "en": "03 / Draw an arrow",
+      "start": 29.905100000000004,
+      "end": 56.01269999999998,
+      "poster": "03.png"
     },
     {
-      "zh": "随时撤销，随时重来。",
-      "en": "Undo and redo without starting over."
+      "zh": "文字标注：补上一句说明",
+      "en": "04 / Add an editable text annotation",
+      "start": 56.01269999999998,
+      "end": 74.41319999999999,
+      "poster": "04.png"
+    },
+    {
+      "zh": "画笔：随手划一道重点",
+      "en": "05 / Freehand pen",
+      "start": 74.41319999999999,
+      "end": 93.26339999999999,
+      "poster": "05.png"
+    },
+    {
+      "zh": "马赛克：遮住不想展示的区域",
+      "en": "06 / Pixel mosaic with adjustable strength",
+      "start": 93.26339999999999,
+      "end": 119.06069999999998,
+      "poster": "06.png"
+    },
+    {
+      "zh": "也可以换成柔和的模糊",
+      "en": "07 / Switch to the blur brush",
+      "start": 119.06069999999998,
+      "end": 132.0721,
+      "poster": "07.png"
+    },
+    {
+      "zh": "一步撤销，继续修改",
+      "en": "08 / Undo an edit",
+      "start": 132.0721,
+      "end": 135.2669,
+      "poster": "08.png"
+    },
+    {
+      "zh": "重做后，回到完整标注",
+      "en": "09 / Redo and review",
+      "start": 135.2669,
+      "end": 139.56380000000001,
+      "poster": "09.png"
+    },
+    {
+      "zh": "裁剪工具也在同一处",
+      "en": "10 / Inspect crop controls without exporting",
+      "start": 139.56380000000001,
+      "end": 142.70349999999996,
+      "poster": "10.png"
     }
   ],
-  "browser": "152.0.7977.64",
-  "duration": 21.04,
-  "sha256": "e90d254b3ce63e4b59226650bec9a9b7e48fc5063f99d3fcb730910fa4002412",
-  "recording_tool_sha256": "4167ddf8ad21f68b88e09fccfe56ce753ba4275b9c129b4cc3e2c5c7bbbee1f0",
-  "fixture_sha256": {
-    "page-1.png": "4d3c3aa80d2b0cd34bb8bcb6082273a10359d4fa6db1fbda0c891b9d9ab99518",
-    "page-2.png": "39aa63b25ac99652921004658f87bfc960cd6e13f0873a2141549879b85a72a5",
-    "page-3.png": "c0a63e7280fdcde7a64e7ea24b645853851a863c01d3af40db8780b8250c75d1",
-    "sample.pdf": "3780d846aa7ca61b185d52fa78ecc9b8d9d82555c7a7a77e4b7eefc45bf66444",
-    "source.png": "97d3fefc662fe60947efd6e9870b16164f2fb72fb6aac8883a552c8f0bb41572"
-  },
+  "actions": [
+    "Rectangle (R)",
+    "Draw or move canvas region",
+    "Line",
+    "Arrow (A)",
+    "Draw or move canvas region",
+    "Text (T)",
+    "",
+    "Type: Start small.",
+    "Select (V)",
+    "Pen (P)",
+    "Draw or move canvas region",
+    "Mosaic (M)",
+    "Strong",
+    "Draw or move canvas region",
+    "Gaussian blur",
+    "Draw or move canvas region",
+    "Undo (⌘Z)",
+    "Redo (⇧⌘Z)",
+    "Select (V)",
+    "Crop (C)"
+  ],
+  "disclosure": "New, expanded frontend interaction recording. Every action interval is retimed at 10x; each result receives a 0.8-second hold. Native API boundaries use original sample data. No live AI request, system capture, task execution or native filesystem acceptance is claimed.",
+  "recording_tool_sha256": "9a88822bb8cffe05bc0c48e805c9d0b843e9b7b8a5bb2e68c64d4e37c108005e",
   "media": {
     "demo.mp4": {
-      "bytes": 418060,
-      "sha256": "e90d254b3ce63e4b59226650bec9a9b7e48fc5063f99d3fcb730910fa4002412"
-    },
-    "poster.png": {
-      "bytes": 104909,
-      "sha256": "c861c99b753fcba896273a0049966156b5fc56c29f7ab5ffbf2c1f4368639a97"
+      "bytes": 540907,
+      "sha256": "76e70e1bee5a4b6f8290d5e2ca6b8290ea1599caa693246b9d36333c534a0b0e"
     },
     "preview.gif": {
-      "bytes": 1694295,
-      "sha256": "5d3663f77a24af47382bd4fe3985804e57fd2b35060aa33b49891bf5e7fd3f24"
+      "bytes": 2249594,
+      "sha256": "073ed804cd91fc403b20d2442e6eb9e185d6484f27f095f8a05688e4783b001e"
+    },
+    "poster.png": {
+      "bytes": 106233,
+      "sha256": "7d6e1cca3e863ee19b34c2f0f3f7d703228b152ec73c33fea4f2c40221c7b2bf"
     }
-  },
-  "disclosure": "Real frontend interaction recording with synthetic local data and mocked native boundaries. Not native end-to-end validation. No personal data, external content, provider requests, audio capture or task execution.",
-  "retiming": {
-    "speed": 2.0,
-    "source_duration": 42.08,
-    "source_video_sha256": "6b7813ece1e4f15a4d55f97c550b2103ba93b6d95cd77c51f364b49fb0c62a80",
-    "source_preview_sha256": "aac3a0f2416dd1bcb5a157f87a2e1094a4f9aad6ae90a5e7984e260010512ceb",
-    "tool_sha256": "d761d3bdbb5c3903f6654e3d9bc109d8baf026cfe5b899199274e5e1e5cdfd9f",
-    "video_fps": 25,
-    "gif_fps": 10,
-    "method": "Uniform timestamp acceleration; no scene removal, cropping, new UI or audio.",
-    "disclosures_preserved": true
   }
 }

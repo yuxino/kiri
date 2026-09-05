@@ -25,3 +25,8 @@ python -I retime.py /path/to/repository
 ```
 
 This retimes the existing MP4, rebuilds its looping GIF preview at 10 fps, and updates the media hashes, duration and pacing note. It keeps every scene, caption, sample-data disclosure and the original poster; it does not alter the application. The script verifies input hashes, output decoding, unchanged dimensions and matching video/GIF timing before replacing media. It refuses a second retime so repeated runs do not keep doubling the speed. Start from fresh original recordings when changing the pace again. The original recording commit and input-video hash remain in `provenance.json`.
+
+
+## Expanded 10x tour
+
+The current README clips use `python -I expanded.py` followed by `python -I package-expanded.py`. Run `fixtures.py` first and provide the same pinned production builds described above. `expanded.py` records more UI scenes, accelerates each action interval by 10, and adds a 0.8-second result hold. The older `retime.py` documents the previous 2x edit and is not applied to these new clips. All original sample-data and no-native-acceptance boundaries still apply.

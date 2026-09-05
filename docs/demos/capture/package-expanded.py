@@ -56,6 +56,11 @@ This replaces the earlier three-to-four-scene, 2x demo with **{len(state['scenes
 The reproducible documentation-only recorder is `yuxino/kiri/docs/demos/capture/expanded.py`. It is not loaded by the applications. The shipped application code, versions, signing and update workflows remain unchanged.
 ''')
     print(repo,len(state['scenes']),state['duration'],flush=True)
+# Preserve the exact recorder that created these files, without the one-time patcher.
+capture=OUT/'kiri/docs/demos/capture'
+capture.mkdir(parents=True,exist_ok=True)
+for name in ['expanded.py','package-expanded.py']:
+    shutil.copyfile(ROOT/name,capture/name)
 manifest={str(p.relative_to(OUT)):{'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted(OUT.rglob('*')) if p.is_file()}
 (OUT/'manifest.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
 print('Manifest SHA256:',hashlib.sha256((OUT/'manifest.json').read_bytes()).hexdigest())
