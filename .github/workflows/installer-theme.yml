@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 22
       - run: node src-tauri/installer-theme/build.mjs
-      - run: node --test src-tauri/installer-theme/theme.test.mjs
+      - run: node --test src-tauri/installer-theme/theme.node.mjs
       - run: node src-tauri/installer-theme/build.mjs --check
       - name: Compile the harmless native UI preview
         shell: pwsh
