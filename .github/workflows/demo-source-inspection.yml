@@ -1,0 +1,28 @@
+name: Demo source inspection
+on:
+  push:
+    branches: [docs/project-demo-v1]
+    paths: [.github/workflows/demo-source-inspection.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Collect the six current public source trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p snapshots
+          for repo in kiri mimi satori viva tick wnacg; do
+            git clone --quiet --depth=1 "https://github.com/yuxino/$repo.git" "$RUNNER_TEMP/$repo"
+            git -C "$RUNNER_TEMP/$repo" rev-parse HEAD > "snapshots/$repo.sha"
+            git -C "$RUNNER_TEMP/$repo" archive --format=tar.gz --output="$GITHUB_WORKSPACE/snapshots/$repo.tar.gz" HEAD
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: demo-source-snapshots
+          path: snapshots/
+          retention-days: 2
+          if-no-files-found: error
