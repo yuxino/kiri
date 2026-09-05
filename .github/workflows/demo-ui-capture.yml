@@ -6,6 +6,9 @@ on:
 permissions:
   contents: read
   actions: read
+concurrency:
+  group: documentation-ui-capture
+  cancel-in-progress: true
 jobs:
   capture:
     runs-on: ubuntu-24.04
@@ -30,9 +33,9 @@ jobs:
           python -m playwright install --with-deps chromium
           sudo apt-get install -y ffmpeg fonts-noto-cjk
       - name: Generate original harmless fixtures
-        run: python scripts/demos/fixtures.py
+        run: python -I scripts/demos/fixtures.py
       - name: Inspect actual frontend scenes
-        run: python scripts/demos/inspect.py
+        run: python -I scripts/demos/inspect.py
       - uses: actions/upload-artifact@v7
         if: always()
         with:
