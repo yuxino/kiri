@@ -11,6 +11,16 @@
 
 Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on Windows, then select a window or region to capture, annotate, recognize text, or record. Screenshots are copied to the clipboard; screenshots, MP4 recordings, and GIFs are saved in the local library.
 
+<!-- project-demo-v1 -->
+## Demo
+
+[![kiri — Demo](docs/demos/preview.gif)](docs/demos/demo.mp4)
+
+[Full video (MP4)](docs/demos/demo.mp4) · [About this demo](docs/demos/README.md)
+
+Rectangle, arrow and text annotations, with undo and redo. Recorded from the actual frontend with sample data. No native capture, OCR or export validation is shown.
+<!-- /project-demo-v1 -->
+
 ## Features
 
 - **Screenshots and annotation**: click a window or drag a region, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Annotations created by current releases can be reopened from the completion card or library.

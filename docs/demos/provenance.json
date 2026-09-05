@@ -1,0 +1,50 @@
+{
+  "project": "kiri",
+  "source_commit": "d3ebccbe86f1df4990651ce1e2569a60d88646fb",
+  "capture": "Unmodified production frontend in Chrome, documentation-only native-boundary fixtures",
+  "limitations": "Annotation UI · original sample image · no OS screen capture",
+  "steps": [
+    {
+      "zh": "先圈出最想保留的那一点。",
+      "en": "Highlight one detail with a rectangle."
+    },
+    {
+      "zh": "用箭头，把视线引过去。",
+      "en": "Add an arrow to guide the eye."
+    },
+    {
+      "zh": "再留下一句自己的说明。",
+      "en": "Add a short note, then review it."
+    },
+    {
+      "zh": "随时撤销，随时重来。",
+      "en": "Undo and redo without starting over."
+    }
+  ],
+  "browser": "152.0.7977.64",
+  "duration": 42.08,
+  "sha256": "6b7813ece1e4f15a4d55f97c550b2103ba93b6d95cd77c51f364b49fb0c62a80",
+  "recording_tool_sha256": "4167ddf8ad21f68b88e09fccfe56ce753ba4275b9c129b4cc3e2c5c7bbbee1f0",
+  "fixture_sha256": {
+    "page-1.png": "4d3c3aa80d2b0cd34bb8bcb6082273a10359d4fa6db1fbda0c891b9d9ab99518",
+    "page-2.png": "39aa63b25ac99652921004658f87bfc960cd6e13f0873a2141549879b85a72a5",
+    "page-3.png": "c0a63e7280fdcde7a64e7ea24b645853851a863c01d3af40db8780b8250c75d1",
+    "sample.pdf": "3780d846aa7ca61b185d52fa78ecc9b8d9d82555c7a7a77e4b7eefc45bf66444",
+    "source.png": "97d3fefc662fe60947efd6e9870b16164f2fb72fb6aac8883a552c8f0bb41572"
+  },
+  "media": {
+    "demo.mp4": {
+      "bytes": 588308,
+      "sha256": "6b7813ece1e4f15a4d55f97c550b2103ba93b6d95cd77c51f364b49fb0c62a80"
+    },
+    "poster.png": {
+      "bytes": 104909,
+      "sha256": "c861c99b753fcba896273a0049966156b5fc56c29f7ab5ffbf2c1f4368639a97"
+    },
+    "preview.gif": {
+      "bytes": 1943694,
+      "sha256": "aac3a0f2416dd1bcb5a157f87a2e1094a4f9aad6ae90a5e7984e260010512ceb"
+    }
+  },
+  "disclosure": "Real frontend interaction recording with synthetic local data and mocked native boundaries. Not native end-to-end validation. No personal data, external content, provider requests, audio capture or task execution."
+}
