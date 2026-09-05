@@ -17,7 +17,7 @@ patches={
 "await drag(.135,.875,.50,.875)":"await drag(.135,.421,.43,.421)",
 "await drag(.57,.875,.83,.875)":"await drag(.57,.725,.83,.725)",
 "(ROOT/'bridge.js').read_text().replace('__PROJECT__',repo)":"(ROOT/'bridge.js').read_text().replace('__PROJECT__',repo).replace(\"localStorage.setItem('mimi-ui-language', 'en');\", \"if (!localStorage.getItem('mimi-ui-language')) localStorage.setItem('mimi-ui-language', 'en');\")",
-"actions.append('Switch UI language to Chinese');await mark":"actions.append('Switch UI language to Chinese');await f.get_by_text('识别语言',exact=True).wait_for();await mark",
+"actions.append('Switch UI language to Chinese');await mark":"actions.append('Switch UI language to Chinese');await f.get_by_role('heading',name='设置',exact=True).wait_for();await mark",
 }
 for old,new in patches.items():
     if text.count(old)!=1:raise SystemExit('Source changed; review patch: '+old)
