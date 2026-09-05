@@ -1,0 +1,147 @@
+name: Installer appearance screenshots
+on:
+  push:
+    branches: [preview/installer-appearance-20260905]
+    paths: [.github/workflows/installer-appearance-preview.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  screenshots:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Prepare checked-in theme for a clearly marked fallback preview
+        run: node src-tauri/installer-theme/build.mjs
+      - name: Open installers and capture windows without installing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public static class InstallerWindow {
+            public delegate bool EnumProc(IntPtr h, IntPtr l);
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
+            [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc p, IntPtr l);
+            [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr h, EnumProc p, IntPtr l);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+            [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr dc, uint f);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+            [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr c);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint p);
+            [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr h, int id);
+            [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+            public static string Text(IntPtr h) { var s=new StringBuilder(4096); GetWindowText(h,s,s.Capacity); return s.ToString(); }
+            public static IntPtr Find(string name) {
+              IntPtr found=IntPtr.Zero;
+              EnumWindows((h,l)=> { var c=new StringBuilder(256); GetClassName(h,c,256);
+                if(IsWindowVisible(h) && c.ToString()=="#32770" && Text(h).IndexOf(name,StringComparison.OrdinalIgnoreCase)>=0) { found=h; return false; } return true;
+              },IntPtr.Zero); return found;
+            }
+            public static string Children(IntPtr h) { var s=new StringBuilder(); EnumChildWindows(h,(w,l)=> {s.AppendLine(Text(w));return true;},IntPtr.Zero);return s.ToString(); }
+          }
+          '@
+          [InstallerWindow]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null
+          $output = Join-Path $env:GITHUB_WORKSPACE 'installer-screenshots'
+          New-Item -ItemType Directory -Force $output | Out-Null
+          $apps = @(
+            @{repo='kiri'; name='kiri'; artifact='9971241535'; sha='d3ebccbe86f1df4990651ce1e2569a60d88646fb'; digest='353fb7259639b68814cf07c0facbc91ff570a488883a982b00dc4ac981b0456c'},
+            @{repo='mimi'; name='mimi'; artifact='9971147643'; sha='4bbcde72b9bcb9a2540f0b230c8ce45d842a50dc'; digest='78889c66093c60db5f5241dbb864329f2dfc2cfe3b8f3b31940636c6951121dd'},
+            @{repo='satori'; name='Satori'; artifact='9971396546'; sha='f31740ce5f7f722f1adffc52ce12d08c3e05b7f6'; digest='8de842be889e08622e4c75f653e9f2c290cacc64cc8f129e1943a6f2cc942206'},
+            @{repo='viva'; name='Viva'; artifact='9971216884'; sha='f026142b7d53d5a41831872b40aef735fa66c246'; digest='678570895204d3e6cccbd7209e1df8929981f6adac0a0f8ac740d0975b07d6c4'},
+            @{repo='tick'; name='Tick'; artifact='9971246542'; sha='cfd84896f682d80967f7791b1221f1097dd06ad8'; digest='7ce1eed1dd633f2a762ba57dbb2754469d90eae35917f9aba9ebccfec8324308'},
+            @{repo='wnacg'; name='wnacg'; artifact='9971418194'; sha='062e0a39c70cc7b37872863ae34e9ba538e2a0e2'; digest='8a698a28d81de608a3f8933b33a8fe82b1a7edb6ae0b8c08d8d4935f1497ae7c'}
+          )
+          function Save-Window([IntPtr] $handle, [string] $path) {
+            [InstallerWindow]::ShowWindow($handle,9) | Out-Null
+            [InstallerWindow]::SetForegroundWindow($handle) | Out-Null
+            Start-Sleep -Milliseconds 700
+            $r = New-Object InstallerWindow+RECT
+            [InstallerWindow]::GetWindowRect($handle,[ref]$r) | Out-Null
+            $w=$r.R-$r.L; $h=$r.B-$r.T
+            if ($w -lt 300 -or $h -lt 200) { throw 'Unexpected installer window dimensions' }
+            $bitmap = [System.Drawing.Bitmap]::new($w,$h)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $dc=$graphics.GetHdc()
+            try { $ok=[InstallerWindow]::PrintWindow($handle,$dc,0) } finally { $graphics.ReleaseHdc($dc) }
+            if (!$ok) { $graphics.CopyFromScreen($r.L,$r.T,0,0,$bitmap.Size) }
+            $bitmap.Save($path,[System.Drawing.Imaging.ImageFormat]::Png)
+            $graphics.Dispose(); $bitmap.Dispose()
+            [InstallerWindow]::Children($handle) | Set-Content "$path.txt" -Encoding utf8
+          }
+          $report=@()
+          foreach($app in $apps) {
+            $folder=Join-Path $env:RUNNER_TEMP $app.repo
+            New-Item -ItemType Directory -Force $folder | Out-Null
+            $entry=@{project=$app.repo; commit=$app.sha; artifact=$app.artifact; source='CI installer'; screenshot=''; error=''}
+            $launch=$null; $window=[IntPtr]::Zero
+            try {
+              $zip=Join-Path $folder 'installer.zip'
+              try {
+                Invoke-WebRequest "https://api.github.com/repos/yuxino/$($app.repo)/actions/artifacts/$($app.artifact)/zip" -Headers @{Authorization="Bearer $env:GH_TOKEN"; Accept='application/vnd.github+json'} -OutFile $zip -TimeoutSec 60
+                if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $app.digest) { throw 'Archive checksum mismatch' }
+                Expand-Archive $zip -DestinationPath $folder
+                $exe=Get-ChildItem $folder -Recurse -Filter '*setup.exe' | Select-Object -First 1
+                if(!$exe) { throw 'NSIS installer missing' }
+                $executable=$exe.FullName
+              } catch {
+                $entry.source='Native theme preview (not the application installer)'
+                $entry.downloadError=$_.Exception.Message
+                $theme=Join-Path $env:GITHUB_WORKSPACE 'src-tauri/installer-theme'
+                $compiler="${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+                if(!(Test-Path $compiler)) { choco install nsis --version=3.11 -y --no-progress; if($LASTEXITCODE -ne 0){throw 'NSIS unavailable'} }
+                $iconPath=if($app.repo -eq 'wnacg'){'icons/kiri/icon.ico'}else{'icons/icon.ico'}
+                $icon=Join-Path $theme "$($app.repo).ico"
+                Invoke-WebRequest "https://raw.githubusercontent.com/yuxino/$($app.repo)/$($app.sha)/src-tauri/$iconPath" -OutFile $icon -TimeoutSec 30
+                $preview=Get-Content (Join-Path $theme 'preview.nsi') -Raw
+                $preview=$preview.Replace('Name "yuxino theme preview"',"Name `"$($app.name)`"")
+                $preview=$preview.Replace('Caption "yuxino theme preview - no application will be installed"',"Caption `"$($app.name) - native theme preview`"")
+                $preview=$preview.Replace('!include "MUI2.nsh"',"!define MUI_ICON `"$icon`"`n!include `"MUI2.nsh`"")
+                $previewPath=Join-Path $theme 'capture-preview.nsi'
+                $preview | Set-Content $previewPath -Encoding utf8
+                Push-Location $theme
+                try { & $compiler /V2 $previewPath; if($LASTEXITCODE -ne 0){throw 'Preview compilation failed'} } finally { Pop-Location }
+                $executable=Join-Path $theme 'preview-only-setup.exe'
+              }
+              $entry.executableSha256=(Get-FileHash $executable -Algorithm SHA256).Hash.ToLowerInvariant()
+              $launch=Start-Process -FilePath $executable -PassThru
+              for($i=0;$i -lt 60;$i++) { Start-Sleep -Milliseconds 500; $window=[InstallerWindow]::Find($app.name); if($window -ne [IntPtr]::Zero){break} }
+              if($window -eq [IntPtr]::Zero){throw 'Installer window not found'}
+              $entry.windowTitle=[InstallerWindow]::Text($window)
+              $path=Join-Path $output "$($app.repo)-welcome.png"
+              Save-Window $window $path
+              $entry.screenshot="$($app.repo)-welcome.png"
+              $next=[InstallerWindow]::GetDlgItem($window,1)
+              if([InstallerWindow]::Text($next) -match 'Next|下一步|次へ') {
+                [InstallerWindow]::SendMessage($next,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero) | Out-Null
+                Start-Sleep -Milliseconds 700
+                Save-Window $window (Join-Path $output "$($app.repo)-next-page.png")
+              }
+            } catch { $entry.error=$_.Exception.Message; Write-Warning "$($app.repo): $($entry.error)" }
+            finally {
+              if($window -ne [IntPtr]::Zero) { [uint32]$windowProcess=0; [InstallerWindow]::GetWindowThreadProcessId($window,[ref]$windowProcess) | Out-Null; if($windowProcess){taskkill /PID $windowProcess /T /F 2>$null | Out-Null} }
+              if($launch -and !$launch.HasExited){Stop-Process -Id $launch.Id -Force -ErrorAction SilentlyContinue}
+              $report += $entry
+            }
+          }
+          $report | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $output 'provenance.json') -Encoding utf8
+          $report | ForEach-Object { Write-Host "$($_.project): $($_.source) $($_.screenshot) $($_.error)" }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: installer-appearance-screenshots
+          path: installer-screenshots/
+          if-no-files-found: error
+          retention-days: 7
