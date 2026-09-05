@@ -22,8 +22,8 @@
     }
   ],
   "browser": "152.0.7977.64",
-  "duration": 42.08,
-  "sha256": "6b7813ece1e4f15a4d55f97c550b2103ba93b6d95cd77c51f364b49fb0c62a80",
+  "duration": 21.04,
+  "sha256": "e90d254b3ce63e4b59226650bec9a9b7e48fc5063f99d3fcb730910fa4002412",
   "recording_tool_sha256": "4167ddf8ad21f68b88e09fccfe56ce753ba4275b9c129b4cc3e2c5c7bbbee1f0",
   "fixture_sha256": {
     "page-1.png": "4d3c3aa80d2b0cd34bb8bcb6082273a10359d4fa6db1fbda0c891b9d9ab99518",
@@ -34,17 +34,28 @@
   },
   "media": {
     "demo.mp4": {
-      "bytes": 588308,
-      "sha256": "6b7813ece1e4f15a4d55f97c550b2103ba93b6d95cd77c51f364b49fb0c62a80"
+      "bytes": 418060,
+      "sha256": "e90d254b3ce63e4b59226650bec9a9b7e48fc5063f99d3fcb730910fa4002412"
     },
     "poster.png": {
       "bytes": 104909,
       "sha256": "c861c99b753fcba896273a0049966156b5fc56c29f7ab5ffbf2c1f4368639a97"
     },
     "preview.gif": {
-      "bytes": 1943694,
-      "sha256": "aac3a0f2416dd1bcb5a157f87a2e1094a4f9aad6ae90a5e7984e260010512ceb"
+      "bytes": 1694295,
+      "sha256": "5d3663f77a24af47382bd4fe3985804e57fd2b35060aa33b49891bf5e7fd3f24"
     }
   },
-  "disclosure": "Real frontend interaction recording with synthetic local data and mocked native boundaries. Not native end-to-end validation. No personal data, external content, provider requests, audio capture or task execution."
+  "disclosure": "Real frontend interaction recording with synthetic local data and mocked native boundaries. Not native end-to-end validation. No personal data, external content, provider requests, audio capture or task execution.",
+  "retiming": {
+    "speed": 2.0,
+    "source_duration": 42.08,
+    "source_video_sha256": "6b7813ece1e4f15a4d55f97c550b2103ba93b6d95cd77c51f364b49fb0c62a80",
+    "source_preview_sha256": "aac3a0f2416dd1bcb5a157f87a2e1094a4f9aad6ae90a5e7984e260010512ceb",
+    "tool_sha256": "d761d3bdbb5c3903f6654e3d9bc109d8baf026cfe5b899199274e5e1e5cdfd9f",
+    "video_fps": 25,
+    "gif_fps": 10,
+    "method": "Uniform timestamp acceleration; no scene removal, cropping, new UI or audio.",
+    "disclosures_preserved": true
+  }
 }
