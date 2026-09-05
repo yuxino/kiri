@@ -12,3 +12,7 @@ The visible sample-data label remains throughout the recording. No user files, p
 - `provenance.json`: source commit, actual steps, capture engine and media hashes.
 
 The shared documentation-only recorder and original fixture generators live in `yuxino/kiri` under `docs/demos/capture/`. The tooling is not bundled with the applications.
+
+<!-- demo-pacing -->
+Playback is paced at **2×** the original recording (42.08s → 21.04s). The MP4 and animated preview have matching timing; all scenes, captions and sample-data disclosures are retained.
+<!-- /demo-pacing -->
