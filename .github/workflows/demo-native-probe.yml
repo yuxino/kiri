@@ -1,0 +1,88 @@
+name: Native demo inspection
+on:
+  push:
+    branches: [docs/project-demo-v1]
+    paths: [.github/workflows/demo-native-probe.yml, scripts/demos/probe-native.cjs]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {repo: kiri, artifact: 9971241535, digest: '353fb7259639b68814cf07c0facbc91ff570a488883a982b00dc4ac981b0456c'}
+          - {repo: mimi, artifact: 9971147643, digest: '78889c66093c60db5f5241dbb864329f2dfc2cfe3b8f3b31940636c6951121dd'}
+          - {repo: satori, artifact: 9971396546, digest: '8de842be889e08622e4c75f653e9f2c290cacc64cc8f129e1943a6f2cc942206'}
+          - {repo: viva, artifact: 9971216884, digest: '678570895204d3e6cccbd7209e1df8929981f6adac0a0f8ac740d0975b07d6c4'}
+          - {repo: tick, artifact: 9971246542, digest: '7ce1eed1dd633f2a762ba57dbb2754469d90eae35917f9aba9ebccfec8324308'}
+          - {repo: wnacg, artifact: 9971418194, digest: '8a698a28d81de608a3f8933b33a8fe82b1a7edb6ae0b8c08d8d4935f1497ae7c'}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install documentation automation only
+        shell: pwsh
+        run: npm install --prefix "$env:RUNNER_TEMP/demo-tools" --no-audit --no-fund playwright-core@1.55.0
+      - name: Download verified existing artifact
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEMO_REPO: ${{ matrix.repo }}
+          DEMO_ARTIFACT: ${{ matrix.artifact }}
+          DEMO_DIGEST: ${{ matrix.digest }}
+        run: |
+          @'
+          const fs=require('node:fs');
+          const crypto=require('node:crypto');
+          (async()=>{
+            const url=`https://api.github.com/repos/yuxino/${process.env.DEMO_REPO}/actions/artifacts/${process.env.DEMO_ARTIFACT}/zip`;
+            const r=await fetch(url,{headers:{Authorization:`Bearer ${process.env.GH_TOKEN}`,Accept:'application/vnd.github+json'},redirect:'manual'});
+            if(r.status!==302) throw Error(`Artifact request failed: ${r.status} ${await r.text()}`);
+            const d=await fetch(r.headers.get('location'));
+            if(!d.ok)throw Error(`Artifact download failed: ${d.status}`);
+            const b=Buffer.from(await d.arrayBuffer());
+            if(crypto.createHash('sha256').update(b).digest('hex')!==process.env.DEMO_DIGEST)throw Error('Artifact checksum mismatch');
+            fs.writeFileSync('app.zip',b);
+          })().catch(e=>{console.error(e);process.exitCode=1});
+          '@ | node
+          if ($LASTEXITCODE -ne 0) { throw 'Artifact download failed' }
+          Expand-Archive app.zip -DestinationPath unpacked
+      - name: Launch native app in disposable runner
+        shell: pwsh
+        env:
+          DEMO_REPO: ${{ matrix.repo }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = @(Get-ChildItem unpacked -Filter '*setup.exe' -Recurse | Where-Object { $_.Name -match 'x64' })
+          if ($installer.Count -ne 1) { throw "Expected one x64 NSIS installer, found $($installer.Count)" }
+          $root = Join-Path $env:RUNNER_TEMP 'demo-install'
+          $p = Start-Process $installer[0].FullName -ArgumentList @('/S', "/D=$root") -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
+          $app = @(Get-ChildItem $root -Filter '*.exe' -Recurse | Where-Object { $_.BaseName -ieq $env:DEMO_REPO })
+          if ($app.Count -ne 1) { throw 'Could not uniquely identify the installed app' }
+          if ($env:DEMO_REPO -eq 'wnacg') {
+            New-NetFirewallRule -DisplayName 'Demo: block upstream comic network' -Direction Outbound -Program $app[0].FullName -Action Block | Out-Null
+          }
+          $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
+          $env:WEBVIEW2_USER_DATA_FOLDER=Join-Path $env:RUNNER_TEMP 'demo-webview'
+          $env:MIMI_UI_TEST='1'
+          $env:MIMI_UI_TEST_STANDARD_OVERLAY='1'
+          $process = Start-Process $app[0].FullName -PassThru
+          "DEMO_APP=$($app[0].FullName)" >> $env:GITHUB_ENV
+          "DEMO_PID=$($process.Id)" >> $env:GITHUB_ENV
+          "DEMO_OUTPUT=$env:GITHUB_WORKSPACE/inspection" >> $env:GITHUB_ENV
+          "PLAYWRIGHT_MODULE=$env:RUNNER_TEMP/demo-tools/node_modules/playwright-core" >> $env:GITHUB_ENV
+      - name: Inspect real WebView2 surfaces
+        run: node scripts/demos/probe-native.cjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: native-inspection-${{ matrix.repo }}
+          path: inspection/
+          retention-days: 2
+          if-no-files-found: warn
