@@ -2,7 +2,7 @@ name: Documentation UI capture
 on:
   push:
     branches: [docs/project-demo-v1]
-    paths: ['.github/workflows/demo-ui-capture.yml', 'scripts/demos/bridge.js', 'scripts/demos/fixtures.py', 'scripts/demos/record.py']
+    paths: ['.github/workflows/demo-ui-capture.yml', 'scripts/demos/bridge.js', 'scripts/demos/fixtures.py', 'scripts/demos/record.py', 'scripts/demos/finalize-recording.py', 'scripts/demos/package.py']
 permissions:
   contents: read
   actions: read
@@ -35,12 +35,20 @@ jobs:
           google-chrome --version
       - name: Generate original sample files
         run: python -I scripts/demos/fixtures.py
-      - name: Record actual UI actions and encode H.264 MP4s
-        run: python -I scripts/demos/record.py
+      - name: Record actual frontend actions
+        run: python -I scripts/demos/finalize-recording.py
+      - name: Package successful recordings and animated previews
+        run: python -I scripts/demos/package.py
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: project-demo-recordings
           path: scripts/demos/recordings/
           retention-days: 2
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: project-demo-deliverables
+          path: scripts/demos/deliverables/
+          retention-days: 7
           if-no-files-found: error
