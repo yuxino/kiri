@@ -1,0 +1,42 @@
+name: Documentation UI capture
+on:
+  push:
+    branches: [docs/project-demo-v1]
+    paths: ['.github/workflows/demo-ui-capture.yml', 'scripts/demos/bridge.js', 'scripts/demos/fixtures.py', 'scripts/demos/inspect.py', 'scripts/demos/record.py']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Download already built immutable production frontends
+        uses: actions/download-artifact@v7
+        with:
+          github-token: ${{ github.token }}
+          run-id: 33984702908
+          pattern: demo-frontend-*
+          path: scripts/demos/dist
+      - name: Set up isolated documentation tools
+        run: |
+          python -m pip install playwright==1.55.0 Pillow==11.3.0 reportlab==4.4.3
+          python -m playwright install --with-deps chromium
+          sudo apt-get install -y ffmpeg fonts-noto-cjk
+      - name: Generate original harmless fixtures
+        run: python scripts/demos/fixtures.py
+      - name: Inspect actual frontend scenes
+        run: python scripts/demos/inspect.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: documentation-ui-inspection
+          path: scripts/demos/inspection/
+          retention-days: 2
+          if-no-files-found: error
