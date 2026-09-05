@@ -4,8 +4,9 @@ import ast
 root=Path(__file__).resolve().parent
 p=root/'expanded.py';text=p.read_text()
 patches={
-"close=f.get_by_label('收起目录',exact=True)\n            if await close.is_visible():await click(close)\n            ":"", # Choosing a chapter already closes this drawer.
+"close=f.get_by_label('收起目录',exact=True)\n            if await close.is_visible():await click(close)\n            ":"",
 "f.get_by_role('tab',name='Weekend.md',exact=True)":"f.get_by_role('tab',name=re.compile('^Weekend\\.md'))",
+"f.get_by_label('Find in document',exact=True)":"f.get_by_role('searchbox',name='Find in document',exact=True)",
 "f.get_by_role('button',name='添加变量',exact=True)":"f.get_by_role('button',name=re.compile('添加变量'))",
 "await click(f.get_by_label('放大阅读页面',exact=True));await click(f.get_by_label('放大阅读页面',exact=True))":"await click(f.get_by_label('阅读设置',exact=True).first);await click(f.get_by_role('button',name='连续',exact=True));await page.keyboard.press('Escape');await click(f.get_by_label('放大阅读页面',exact=True));await click(f.get_by_label('放大阅读页面',exact=True))",
 "await click(f.get_by_label('Line',exact=True));await f.get_by_label('Line',exact=True).press('ArrowRight')":"await click(f.get_by_label('Line',exact=True));await f.get_by_label('Line',exact=True).press('Home');await f.get_by_label('Line',exact=True).press('ArrowRight')",
