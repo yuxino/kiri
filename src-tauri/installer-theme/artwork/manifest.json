@@ -1,0 +1,27 @@
+{
+  "format": "yuxino-indexed-brotli-v1",
+  "source": "User-approved installer design, 2026-09-05; illustration crops only.",
+  "assets": {
+    "sidebar": {
+      "width": 164,
+      "height": 314,
+      "paletteSize": 32,
+      "sha256": "93dbe5d2d97f7df516ef793e1699dcec563fc11101cb20bbaa5719bf0329acd5",
+      "parts": [
+        "sidebar-0.b64",
+        "sidebar-1.b64",
+        "sidebar-2.b64",
+        "sidebar-3.b64"
+      ]
+    },
+    "header": {
+      "width": 150,
+      "height": 57,
+      "paletteSize": 32,
+      "sha256": "d15868793f73ac45567aceff349aea1355b4318159983b917c850d728c94d265",
+      "parts": [
+        "header-0.b64"
+      ]
+    }
+  }
+}
