@@ -1,0 +1,31 @@
+name: Import reviewed demo documentation
+on:
+  push:
+    branches: [docs/project-demo-v1]
+    paths: [.github/workflows/import-demo-docs.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          repository: yuxino/kiri
+          run-id: 33986296353
+          name: project-demo-deliverables
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/demo-bundle
+      - name: Verify and import only this project's documentation
+        shell: bash
+        env:
+          DEMO_BUNDLE: ${{ runner.temp }}/demo-bundle
+          DEMO_MANIFEST_SHA256: bddc669f866fe1a0c7f210392529742db5579b1bbc4e7bb44ba0d4af25aea32d
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/yuxino/kiri/d34286e70c81e748ea714905ee77d03156555596/scripts/demos/import-docs.py -o "$RUNNER_TEMP/import-demo-docs.py"
+          test "$(git hash-object "$RUNNER_TEMP/import-demo-docs.py")" = 35de678bc9c42a19a4d368b03eba0755ea601ff5
+          python3 -I "$RUNNER_TEMP/import-demo-docs.py"
