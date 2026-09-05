@@ -18,7 +18,7 @@ Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on W
 
 [Full video (MP4)](docs/demos/demo.mp4) · [About this demo](docs/demos/README.md)
 
-Rectangle, arrow and text annotations, with undo and redo. Recorded from the actual frontend with sample data. No native capture, OCR or export validation is shown.
+Rectangles, line width, arrows, text, pen, pixel/blur mosaic, undo/redo and crop controls. **10x actions with 0.8-second result holds.** Actual frontend with sample data. No native capture, OCR or export validation.
 <!-- /project-demo-v1 -->
 
 ## Features
