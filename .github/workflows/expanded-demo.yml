@@ -2,7 +2,7 @@ name: Expanded 10x documentation demos
 on:
   push:
     branches: [docs/demo-expanded-10x]
-    paths: ['.github/workflows/expanded-demo.yml', 'docs/demos/capture/expanded.py']
+    paths: ['.github/workflows/expanded-demo.yml', 'docs/demos/capture/refine-expanded.py']
 permissions:
   contents: read
   actions: read
@@ -31,10 +31,14 @@ jobs:
           python -m pip install playwright==1.55.0 Pillow==11.3.0 reportlab==4.4.3
           python -m playwright install ffmpeg
           sudo apt-get install -y ffmpeg fonts-noto-cjk
-      - name: Generate original sample documents
-        run: python -I docs/demos/capture/fixtures.py
+      - name: Prepare reviewed capture scripts and original samples
+        run: |
+          python -I docs/demos/capture/refine-expanded.py
+          python -I docs/demos/capture/fixtures.py
       - name: Record richer interactions at 10x with readable result holds
         run: python -I docs/demos/capture/expanded.py
+      - name: Decode, verify and package all six videos and GIFs
+        run: python -I docs/demos/capture/package-expanded.py
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -42,3 +46,9 @@ jobs:
           path: docs/demos/capture/expanded/
           if-no-files-found: error
           retention-days: 5
+      - uses: actions/upload-artifact@v7
+        with:
+          name: expanded-demo-deliverables
+          path: docs/demos/capture/expanded-deliverables/
+          if-no-files-found: error
+          retention-days: 7
