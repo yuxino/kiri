@@ -11,6 +11,16 @@
 
 Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Windows），选择窗口或区域，即可截图、标注、识别文字或录屏。截图会复制到剪贴板；截图、MP4 和 GIF 保存在本地素材库。
 
+<!-- project-demo-v1 -->
+## 演示
+
+[![kiri — 演示](docs/demos/preview.gif)](docs/demos/demo.mp4)
+
+[完整视频（MP4）](docs/demos/demo.mp4) · [演示说明](docs/demos/README.md)
+
+框选、箭头、文字标注，以及撤销与重做。 真实前端录制，使用示例数据。不包含系统截图、OCR 或导出验收。
+<!-- /project-demo-v1 -->
+
 ## 功能
 
 - **截图与标注**：点击窗口或拖选区域，使用裁剪、画笔、图形、箭头、文字、马赛克、撤销和重做。新版创建的标注可从完成卡或素材库继续编辑。
