@@ -40,6 +40,16 @@ fn apply_transient_window_policy(ns_window: &NSWindow, policy: TransientWindowPo
     if policy.screen_saver_level {
         ns_window.setLevel(NSScreenSaverWindowLevel);
     }
+    // A shortcut may be pressed while another application owns a native
+    // full-screen Space. Changing collectionBehavior makes this window
+    // eligible for that Space, but a window that was created before the
+    // policy change can remain behind the full-screen owner until it is
+    // explicitly reordered. orderFrontRegardless is intentionally
+    // non-activating: it keeps the video/app in its full-screen Space instead
+    // of switching the user back to Kiri's ordinary Space.
+    if policy.full_screen_auxiliary {
+        ns_window.orderFrontRegardless();
+    }
 }
 
 fn transient_window_behavior(
@@ -330,6 +340,7 @@ mod transient_window_tests {
         assert!(behavior.contains(NSWindowCollectionBehavior::CanJoinAllSpaces));
         assert!(behavior.contains(NSWindowCollectionBehavior::CanJoinAllApplications));
         assert!(behavior.contains(NSWindowCollectionBehavior::FullScreenAuxiliary));
+        assert!(behavior.contains(NSWindowCollectionBehavior::CanJoinAllApplications));
         assert!(!behavior.contains(NSWindowCollectionBehavior::MoveToActiveSpace));
         assert!(!behavior.contains(NSWindowCollectionBehavior::Managed));
         assert!(!behavior.contains(NSWindowCollectionBehavior::Primary));
