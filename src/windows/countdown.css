@@ -54,7 +54,7 @@
 .kiri-countdown-action:hover:not(:disabled) { background: rgba(17, 17, 17, 0.035); }
 .kiri-countdown-action:active:not(:disabled) { background: rgba(17, 17, 17, 0.07); }
 .kiri-countdown-action:focus-visible { outline: 2px solid var(--countdown-ink); outline-offset: 3px; }
-.kiri-countdown-action:disabled { cursor: wait; }
+.kiri-countdown-action:disabled { background: rgba(255, 255, 255, 0.45); cursor: wait; }
 .kiri-countdown-error {
   position: absolute;
   top: calc(100% + 12px);
