@@ -1,0 +1,137 @@
+name: Refine countdown and refresh main demo
+on:
+  push:
+    branches: [fix/compact-countdown-demo]
+    paths: [.github/workflows/refine-countdown-demo.yml]
+permissions:
+  contents: write
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Build the actual changed application frontend
+        run: |
+          git status -sb
+          test -z "$(git status --porcelain)"
+          pnpm install --frozen-lockfile
+          pnpm test:release-tools
+          pnpm build
+          echo "KIRI_SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "KIRI_SOURCE_TREE=$(git rev-parse HEAD^{tree})" >> "$GITHUB_ENV"
+      - name: Install isolated recording tools
+        run: |
+          python -m pip install playwright==1.55.0 Pillow==11.3.0 imageio-ffmpeg==0.6.0
+          sudo apt-get install -y ffmpeg fonts-noto-cjk
+      - name: Verify compact geometry, focus and cancellation on the built renderer
+        run: python scripts/qa/countdown-ui.py --record
+      - name: Refresh recorder metadata and assert the actual smaller component
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('docs/demos/full-flow/record.py');s=p.read_text(encoding='utf-8')
+          changes={
+            "'source_tree':'fcd30ff9d323dd79f5adf248bbd3a82070d262ce'":"'source_tree':os.environ['KIRI_SOURCE_TREE']",
+            "'source_commit':'cea661eff7d05ce63210825f9f0014ca494f67a5'":"'source_commit':os.environ['KIRI_SOURCE_COMMIT']",
+            "'artifact_id':9985893052":"'artifact_id':None",
+            "'artifact_run':34022248971":"'artifact_run':int(os.environ['GITHUB_RUN_ID'])",
+            "await click(c.get_by_role('button',name='取消倒计时'),pause=0)":"await c.locator('.kiri-countdown').press('Escape')",
+            "'可直接取消倒计时'":"'按 Esc 取消倒计时'",
+          }
+          for old,new in changes.items():
+            assert s.count(old)==1,old
+            s=s.replace(old,new)
+          anchor="   report['countdown_start']=time.monotonic()-start"
+          extra=[
+            "   size=await c.locator('.kiri-countdown-ring').evaluate('(e)=>({width:e.offsetWidth,height:e.offsetHeight})')",
+            "   assert size=={'width':112,'height':112},size",
+            "   assert await c.locator('.kiri-countdown-cancel,kbd').count()==0",
+            "   assert await c.get_by_role('button',name='取消倒计时').inner_text()==''",
+            "   report['checks']['compact_ring_size']=112",
+            "   report['checks']['separate_cancel_row_absent']=True",
+          ]
+          assert s.count(anchor)==1
+          s=s.replace(anchor,'\n'.join(extra)+'\n'+anchor)
+          compile(s,str(p),'exec');p.write_text(s,encoding='utf-8')
+          p=Path('docs/demos/full-flow/package.py');s=p.read_text(encoding='utf-8')
+          old="'previous_media_sha256':'b8d0fb08852940c475a61f0a89bd45532c94d7482be48430d8599512c8217149'"
+          assert s.count(old)==1
+          s=s.replace(old,"'previous_media_sha256':hashlib.sha256(Path('docs/demos/demo.mp4').read_bytes()).hexdigest()")
+          s=s.replace('actual black CountdownWindow and ControlPanelWindow components','actual compact black CountdownWindow (112px, no separate cancel row) and ControlPanelWindow components')
+          compile(s,str(p),'exec');p.write_text(s,encoding='utf-8')
+          PY
+      - name: Record one complete continuous walkthrough with the rebuilt UI
+        env:
+          KIRI_DEMO_DIST: ${{ github.workspace }}/dist
+          KIRI_DEMO_OUT: ${{ github.workspace }}/full-flow-review
+          CHROME_BIN: /usr/bin/google-chrome
+        run: python docs/demos/full-flow/record.py
+      - name: Encode and verify the replacement main video and GIF
+        run: python docs/demos/full-flow/package.py
+      - name: Update only reviewed documentation on the work branch
+        run: |
+          python - <<'PY'
+          import hashlib,json,re,shutil,subprocess
+          from pathlib import Path
+          assert subprocess.check_output(['git','branch','--show-current'],text=True).strip()=='fix/compact-countdown-demo'
+          source=Path('full-flow-delivery');p=json.loads((source/'provenance.json').read_text())
+          assert p['checks']['compact_ring_size']==112 and p['checks']['separate_cancel_row_absent']
+          assert p['checks']['countdown_numerals']==[3,2,1] and p['checks']['video_playback_ready']
+          assert p['recording_resolution']==[1920,1080] and p['single_take'] and p['scene_cuts']==0
+          def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
+          assert sha(Path('docs/demos/demo.mp4'))==p['previous_media_sha256']
+          for name,meta in p['media'].items():
+            assert name in ['demo.mp4','preview.gif','poster.png'] and sha(source/name)==meta['sha256']
+          for name in ['demo.mp4','preview.gif','poster.png','provenance.json','README.md']:
+            shutil.copyfile(source/name,Path('docs/demos')/name)
+          for name in ['README.md','README_ZH.md','README_EN.md','README_JA.md']:
+            f=Path(name);text=f.read_text(encoding='utf-8')
+            assert text.count('docs/demos/preview.gif')==1 and 'countdown-black.gif' not in text
+            text,n=re.subn(r'docs/demos/preview\.gif(?:\?v=[0-9a-f]+)?','docs/demos/preview.gif?v='+p['sha256'][:12],text)
+            assert n==1
+            if name in ['README.md','README_ZH.md']:
+              old='开始前显示圆环倒计时，可点击取消或按 Esc 退出'
+              assert text.count(old)==1
+              text=text.replace(old,'开始前显示小巧的圆环倒计时，点击圆环或按 Esc 可取消')
+            f.write_text(text,encoding='utf-8')
+          assert Path('README.md').read_bytes()==Path('README_ZH.md').read_bytes()
+          f=Path('docs/architecture.md');text=f.read_text(encoding='utf-8')
+          old='The countdown is a compact coral ring with a large 3-2-1 numeral and a visible\nCancel Countdown button (Escape also cancels). Only the small numeral surface'
+          assert text.count(old)==1
+          new='The countdown is a compact 112px black ring with a 44px numeral and no separate\ncancel row (ADR 0027). Escape or a click on the ring cancels. Initial focus goes\nto the surface; Tab reaches the accessible ring action. Only the small numeral surface'
+          f.write_text(text.replace(old,new),encoding='utf-8')
+          f=Path('docs/README.md');text=f.read_text(encoding='utf-8')
+          assert '0027-compact-countdown.md' not in text
+          f.write_text(text.rstrip()+'\n\n- [ADR 0027: Compact countdown](adr/0027-compact-countdown.md)\n',encoding='utf-8')
+          PY
+          git rm -- .github/workflows/refine-countdown-demo.yml
+          git add -- README.md README_ZH.md README_EN.md README_JA.md docs/architecture.md docs/README.md docs/demos/demo.mp4 docs/demos/preview.gif docs/demos/poster.png docs/demos/provenance.json docs/demos/README.md docs/demos/full-flow/record.py docs/demos/full-flow/package.py
+          git diff --cached --check
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'docs: replace main demo with the refined compact countdown'
+          git push origin HEAD:refs/heads/fix/compact-countdown-demo
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: compact-countdown-demo-review
+          path: |
+            full-flow-delivery/
+            countdown-review/
+          retention-days: 7
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: compact-countdown-diagnostics
+          path: |
+            full-flow-review/report.json
+            full-flow-review/*.png
+          retention-days: 2
+          if-no-files-found: warn
