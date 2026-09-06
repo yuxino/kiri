@@ -74,3 +74,5 @@ Completed implementation plans and the former Swift migration specifications
 are intentionally not kept in the working tree. Git history and release tags
 preserve them without letting obsolete paths or constraints guide current
 development.
+
+- [ADR 0027: Compact countdown](adr/0027-compact-countdown.md)

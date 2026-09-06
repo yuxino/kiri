@@ -34,7 +34,7 @@ class Handler(SimpleHTTPRequestHandler):
   super().do_GET()
 async def run(args):
  server=ThreadingHTTPServer(('127.0.0.1',8791),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
- report={'success':False,'source_tree':'fcd30ff9d323dd79f5adf248bbd3a82070d262ce','source_commit':'cea661eff7d05ce63210825f9f0014ca494f67a5','artifact_id':9985893052,'artifact_run':34022248971,'native':False,'single_take':True,'scene_cuts':0,'speed_factor':10,'scenes':[],'checks':{},'errors':[],'http_errors':[]}
+ report={'success':False,'source_tree':os.environ['KIRI_SOURCE_TREE'],'source_commit':os.environ['KIRI_SOURCE_COMMIT'],'artifact_id':None,'artifact_run':int(os.environ['GITHUB_RUN_ID']),'native':False,'single_take':True,'scene_cuts':0,'speed_factor':10,'scenes':[],'checks':{},'errors':[],'http_errors':[]}
  async with async_playwright() as pw:
   browser=await pw.chromium.launch(executable_path=os.environ.get('CHROME_BIN','/usr/bin/google-chrome'))
   context=await browser.new_context(viewport={'width':1280,'height':720},device_scale_factor=1.5,locale='zh-CN',color_scheme='light')
@@ -117,11 +117,17 @@ async def run(args):
    o=await capture('录屏');await drag(180,115,1110,566);await mark('区域录屏选区与选项')
    await click(o.get_by_role('button',name='开始录制',exact=True),pause=0)
    c=page.frame_locator('#countdown');await c.get_by_role('button',name='取消倒计时').wait_for();await page.wait_for_timeout(250)
-   await pixels(path=str(OUT/'countdown-cancel.png'));await click(c.get_by_role('button',name='取消倒计时'),pause=0)
-   report['checks']['countdown_cancelled']=await page.locator('#countdown').count()==0;await mark('可直接取消倒计时',4)
+   await pixels(path=str(OUT/'countdown-cancel.png'));await c.locator('.kiri-countdown').press('Escape')
+   report['checks']['countdown_cancelled']=await page.locator('#countdown').count()==0;await mark('按 Esc 取消倒计时',4)
    o=await capture('录屏');await drag(180,115,1110,566);await click(o.get_by_role('button',name='开始录制',exact=True),pause=0)
    c=page.frame_locator('#countdown');await c.get_by_role('button',name='取消倒计时').wait_for();seen=[]
    await page.mouse.move(1180,630,steps=12)
+   size=await c.locator('.kiri-countdown-ring').evaluate('(e)=>({width:e.offsetWidth,height:e.offsetHeight})')
+   assert size=={'width':112,'height':112},size
+   assert await c.locator('.kiri-countdown-cancel,kbd').count()==0
+   assert await c.get_by_role('button',name='取消倒计时').inner_text()==''
+   report['checks']['compact_ring_size']=112
+   report['checks']['separate_cancel_row_absent']=True
    report['countdown_start']=time.monotonic()-start
    for n in [3,2,1]:
     await c.get_by_role('status',name=re.compile(str(n))).wait_for();await pixels(path=str(OUT/f'countdown-{n}.png'));seen.append(n)
