@@ -94,8 +94,13 @@ test harness.
 
 On macOS, transient capture, countdown, recording-control, ripple, and
 completion windows explicitly join other applications' full-screen Spaces.
-Display coordinates use the fixed Core Graphics main-display baseline rather
-than the current key window's screen. Windows retains the selected monitor's
+After applying the full-screen collection behavior they are reordered at their
+existing high window level without activating Kiri. In particular, a global
+capture shortcut pressed over a full-screen video must not switch back to
+Kiri's ordinary Space merely to present the capture overlay. The overlay
+becomes normally interactive when clicked. Display coordinates use the fixed
+Core Graphics main-display baseline rather than the current key window's
+screen. Windows retains the selected monitor's
 virtual-desktop origin so a secondary-display capture is not shown on the
 primary display.
 

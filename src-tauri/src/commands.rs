@@ -1487,8 +1487,12 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
         log::error!("start_capture: overlay window creation failed: {error}");
         return Err(error.to_string());
     }
-    // Make the app active so the overlay webview receives keyboard input
-    // (Esc/Return/tool keys) while the user interacts with it.
+    // Windows needs explicit activation so the overlay receives keyboard
+    // input. On macOS, activating Kiri here can leave another application's
+    // native full-screen Space. The AppKit transient policy orders the overlay
+    // above that Space without activation; clicking the overlay then gives it
+    // normal interaction focus without a Space switch.
+    #[cfg(windows)]
     platform::activate_self();
     log::info!("start_capture: overlay window ready ({overlay_label})");
 
@@ -1576,12 +1580,17 @@ fn create_overlay_window(
     log::info!("create_overlay_window: configuring window label={label}");
     platform::configure_transient_window(&window, platform::TransientWindowRole::CaptureOverlay);
     log::info!("create_overlay_window: window configured label={label}");
-    log::info!("create_overlay_window: focusing window label={label}");
-    if let Err(error) = window.set_focus() {
-        let _ = window.close();
-        return Err(error.into());
+    #[cfg(windows)]
+    {
+        log::info!("create_overlay_window: focusing window label={label}");
+        if let Err(error) = window.set_focus() {
+            let _ = window.close();
+            return Err(error.into());
+        }
+        log::info!("create_overlay_window: window focused label={label}");
     }
-    log::info!("create_overlay_window: window focused label={label}");
+    #[cfg(target_os = "macos")]
+    log::info!("create_overlay_window: ordered over active full-screen Space without activation label={label}");
     Ok(label)
 }
 
