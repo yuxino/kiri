@@ -331,5 +331,9 @@
   "Couldn't load this item": "无法加载此项目",
   "Remove this record?": "移除此记录？",
   "%d recording is waiting to save": "%d 个录屏等待保存",
-  "%d recordings are waiting to save": "%d 个录屏等待保存"
+  "%d recordings are waiting to save": "%d 个录屏等待保存",
+  "Cancel Countdown": "取消倒计时",
+  "Recording starts in %d": "%d 秒后开始录制",
+  "Could not start recording. Cancel and try again.": "无法开始录制，请取消后重试。",
+  "Could not cancel recording. Try again.": "未能取消录制，请重试。"
 }

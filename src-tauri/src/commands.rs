@@ -2793,10 +2793,11 @@ pub async fn start_recording_flow(
 
     if !options.uses_countdown {
         // No countdown requested: start recording immediately.
-        return begin_recording(app).await;
+        return begin_recording(app, None).await;
     }
 
     let label = "countdown".to_string();
+    let session_id = app.state::<AppState>().recording.lock().unwrap().session_id;
     let region_screen = Rect::new(
         screen_frame.x + request.region.x,
         screen_frame.y + request.region.y,
@@ -2817,13 +2818,15 @@ pub async fn start_recording_flow(
     let builder = WebviewWindowBuilder::new(
         &app,
         label.clone(),
-        WebviewUrl::App("index.html?window=countdown".into()),
+        WebviewUrl::App(format!("index.html?window=countdown&session={session_id}").into()),
     )
     .title("kiri")
     // Cover the whole display so the countdown badge is centered on the
     // SCREEN, not on the selected region (the user's expectation).
     .inner_size(screen_frame.width, screen_frame.height)
     .position(screen_frame.x, screen_frame.y)
+    .visible(false)
+    .focused(false)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
@@ -2841,19 +2844,70 @@ pub async fn start_recording_flow(
         reset_recording_session(&app);
         return Err(error.to_string());
     }
-    platform::set_window_capture_excluded(&app, &label, true);
-    // Spec (recording §5.1): the countdown window is level .screenSaver.
-    platform::configure_transient_window(
-        &window,
-        platform::TransientWindowRole::RecordingCountdown,
-    );
-    let _ = window.show();
+    // React reveals/focuses the window after mounting its controls. Do not
+    // spend the three-second interval loading a hidden/lazy WebView.
     Ok(())
 }
 
 #[tauri::command]
-pub fn cancel_recording_flow(app: AppHandle) -> Result<(), String> {
-    reset_recording_session(&app);
+pub async fn recording_countdown_ready(
+    app: AppHandle,
+    window: WebviewWindow,
+    session_id: uuid::Uuid,
+) -> Result<(), String> {
+    if window.label() != "countdown" {
+        return Err("Only the countdown can present itself.".into());
+    }
+    let configuration = {
+        let state = app.state::<AppState>();
+        let recording = state.recording.lock().unwrap();
+        if !recording.pending_start_is_current(session_id) || recording.startup_token.is_some() {
+            return Err("The recording countdown is no longer active.".into());
+        }
+        recording.configuration.clone().unwrap()
+    };
+    platform::place_transient_window(
+        &window, configuration.screen_frame, configuration.backing_scale,
+    ).map_err(|error| error.to_string())?;
+    platform::set_window_capture_excluded(&app, "countdown", true);
+    platform::configure_transient_window(
+        &window, platform::TransientWindowRole::RecordingCountdown,
+    );
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_recording_state(app: AppHandle) -> crate::state::RecordingStateDto {
+    let state = app.state::<AppState>();
+    let recording = state.recording.lock().unwrap();
+    crate::state::recording_state(&recording)
+}
+
+#[tauri::command]
+pub async fn cancel_recording_flow(
+    app: AppHandle,
+    session_id: uuid::Uuid,
+) -> Result<(), String> {
+    let abandoned = {
+        let state = app.state::<AppState>();
+        let mut recording = state.recording.lock().unwrap();
+        if !recording.pending_start_is_current(session_id) {
+            return Ok(());
+        }
+        let abandoned = recording.take_and_reset();
+        emit_recording_state(&app, &recording);
+        abandoned
+    };
+    let return_pid = abandoned.return_pid;
+    let was_kiri_frontmost = abandoned.was_kiri_frontmost;
+    cleanup_abandoned_recording(&app, abandoned);
+    if !was_kiri_frontmost {
+        if let Some(pid) = return_pid {
+            platform::activate_application(pid);
+        }
+    }
     Ok(())
 }
 
@@ -3291,15 +3345,14 @@ fn spawn_recording_clock(app: &AppHandle, session_id: uuid::Uuid) {
 }
 
 #[tauri::command]
-pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
+pub async fn begin_recording(app: AppHandle, session_id: Option<uuid::Uuid>) -> Result<(), String> {
     log::info!("begin_recording: called");
-    if let Some(window) = app.get_webview_window("countdown") {
-        let _ = window.close();
-    }
-
     let (startup_token, configuration, session_id) = {
         let state = app.state::<AppState>();
         let mut recording = state.recording.lock().unwrap();
+        if session_id.is_some_and(|id| !recording.pending_start_is_current(id)) {
+            return Ok(());
+        }
         if recording.is_recording || recording.is_paused {
             return Ok(());
         }
@@ -3315,6 +3368,11 @@ pub async fn begin_recording(app: AppHandle) -> Result<(), String> {
         (token, configuration, recording.session_id)
     };
 
+    // Claim first: a late completion from an old WebView cannot close the
+    // countdown belonging to a newer recording.
+    if let Some(window) = app.get_webview_window("countdown") {
+        let _ = window.close();
+    }
     if let Err(error) = create_control_panel(&app, &configuration) {
         if reset_startup_if_current(&app, startup_token) {
             return Err(error);

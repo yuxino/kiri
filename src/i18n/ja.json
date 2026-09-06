@@ -331,5 +331,9 @@
   "Couldn't load this item": "この項目を読み込めません",
   "Remove this record?": "この記録を削除しますか？",
   "%d recording is waiting to save": "%d 件の録画が保存待ちです",
-  "%d recordings are waiting to save": "%d 件の録画が保存待ちです"
+  "%d recordings are waiting to save": "%d 件の録画が保存待ちです",
+  "Cancel Countdown": "カウントダウンを中止",
+  "Recording starts in %d": "%d 秒後に録画を開始",
+  "Could not start recording. Cancel and try again.": "録画を開始できません。中止してやり直してください。",
+  "Could not cancel recording. Try again.": "録画を中止できません。もう一度お試しください。"
 }

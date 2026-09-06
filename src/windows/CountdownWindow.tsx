@@ -1,16 +1,43 @@
-// Compact 3-2-1 recording countdown. The selected region is never dimmed.
-
-import { useEffect, useState } from "react";
+// Recording countdown. The rest of the display remains clear and undimmed.
+import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/ipc";
+import { fmt, t } from "../i18n";
+import { createCountdownClock, type CountdownClock } from "./countdown-clock.js";
+import "./countdown.css";
 
 export function CountdownWindow() {
-  const [value, setValue] = useState(3);
-  const [pulse, setPulse] = useState(0);
+  const sessionId = new URLSearchParams(window.location.search).get("session") ?? "";
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const [tick, setTick] = useState({ value: 3, remaining: 1 });
+  const [cancelling, setCancelling] = useState(false);
+  const [error, setError] = useState<"start" | "cancel" | null>(null);
+  const clock = useRef<CountdownClock | null>(null);
+  const cancelled = useRef(false);
+  const cancelPending = useRef(false);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+
+  const cancel = () => {
+    if (cancelPending.current) return;
+    // Stop locally before IPC: Esc/click at the last tick must not enqueue start.
+    cancelled.current = true;
+    clock.current?.stop();
+    cancelPending.current = true;
+    setCancelling(true);
+    setError(null);
+    void api.cancelRecordingFlow(sessionId).catch(() => {
+      cancelPending.current = false;
+      setCancelling(false);
+      setError("cancel");
+    });
+  };
+  const cancelRef = useRef(cancel);
+  cancelRef.current = cancel;
 
   useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        void api.cancelRecordingFlow().catch(() => {});
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelRef.current();
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -18,64 +45,84 @@ export function CountdownWindow() {
   }, []);
 
   useEffect(() => {
-    const started = Date.now();
-    const timer = setInterval(() => {
-      const elapsed = (Date.now() - started) / 1000;
-      const next = 3 - Math.floor(elapsed);
-      if (next <= 0) {
-        clearInterval(timer);
-        void api.beginRecording().catch(() => {});
-        return;
-      }
-      setValue(next);
-      setPulse((p) => p + 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+    let disposed = false;
+    let paintFrame = 0;
+    const timer = createCountdownClock({
+      now: () => performance.now(),
+      requestFrame: (callback) => requestAnimationFrame(callback),
+      cancelFrame: (frame) => cancelAnimationFrame(frame),
+      onTick: setTick,
+      onComplete: () => {
+        if (disposed || cancelled.current) return;
+        void api.beginRecording(sessionId).catch(() => {
+          if (!disposed && !cancelled.current) setError("start");
+        });
+      },
+    });
+    clock.current = timer;
+    // Native placement, exclusion and focus finish before the first three seconds.
+    // Do not wait for RAF while hidden: some WebViews throttle hidden documents.
+    void api.recordingCountdownReady(sessionId).then(() => {
+      if (disposed || cancelled.current) return;
+      cancelButton.current?.focus({ preventScroll: true });
+      paintFrame = requestAnimationFrame(() => {
+        paintFrame = requestAnimationFrame(() => {
+          if (!disposed && !cancelled.current) timer.start();
+        });
+      });
+    }).catch(() => {
+      if (!disposed && !cancelled.current) setError("start");
+    });
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(paintFrame);
+      timer.stop();
+      if (clock.current === timer) clock.current = null;
+    };
+  }, [sessionId]);
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "transparent",
-      }}
-    >
-      <div
-        key={pulse}
-        role="status"
-        aria-live="polite"
-        aria-label={String(value)}
-        style={{
-          width: "1ch",
-          textAlign: "center",
-          color: "rgba(24, 24, 28, 0.94)",
-          fontFamily:
-            'ui-rounded, "SF Pro Rounded", "Segoe UI Variable Display", "Segoe UI Variable", system-ui, sans-serif',
-          fontSize: "clamp(68px, 62vmin, 72px)",
-          fontWeight: 700,
-          fontVariantNumeric: "tabular-nums lining-nums",
-          fontFeatureSettings: '"tnum" 1, "lnum" 1',
-          lineHeight: 1,
-          letterSpacing: "-0.025em",
-          WebkitTextStroke: "1.1px rgba(255, 255, 255, 0.96)",
-          animation: "kiri-countdown-enter 0.17s cubic-bezier(0.2, 0.8, 0.2, 1)",
-        }}
-      >
-        {value}
+    <div className="kiri-countdown">
+      <div className="kiri-countdown-ring">
+        <svg viewBox="0 0 192 192" aria-hidden="true">
+          <circle className="kiri-countdown-disc" cx="96" cy="96" r="87" />
+          <circle className="kiri-countdown-track" cx="96" cy="96" r="87" />
+          <circle
+            className="kiri-countdown-progress"
+            cx="96" cy="96" r="87" pathLength="1"
+            strokeDasharray="1"
+            strokeDashoffset={1 - (reduceMotion ? tick.value / 3 : tick.remaining)}
+            transform="rotate(-90 96 96)"
+          />
+        </svg>
+        <span
+          className="kiri-countdown-number"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          aria-label={fmt("Recording starts in %d", tick.value)}
+        >
+          {tick.value}
+        </span>
+        <button
+          ref={cancelButton}
+          type="button"
+          className="kiri-countdown-cancel"
+          onClick={cancel}
+          disabled={cancelling}
+        >
+          <span className="kiri-countdown-stop" aria-hidden="true" />
+          {t("Cancel Countdown")}
+          <kbd aria-hidden="true">Esc</kbd>
+        </button>
+        {error && (
+          <p className="kiri-countdown-error" role="alert">
+            {t(error === "cancel"
+              ? "Could not cancel recording. Try again."
+              : "Could not start recording. Cancel and try again.")}
+          </p>
+        )}
       </div>
-      <style>{`
-        @keyframes kiri-countdown-enter {
-          from { transform: scale(0.975); opacity: 0; }
-          to { transform: scale(1); opacity: 1; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          [role="status"] { animation: none !important; }
-        }
-      `}</style>
     </div>
   );
 }
