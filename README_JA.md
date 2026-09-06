@@ -14,7 +14,7 @@ Kiri は macOS と Windows に対応しています。macOS では `⇧⌘A`、W
 <!-- project-demo-v1 -->
 ## デモ
 
-[![Kiri](docs/demos/preview.gif)](docs/demos/demo.mp4)
+[![Kiri](docs/demos/preview.gif?v=474223a4fa36)](docs/demos/demo.mp4)
 
 [動画を見る](docs/demos/demo.mp4)
 
