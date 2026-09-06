@@ -23,6 +23,7 @@
         return null;
       }
       if(command.startsWith('plugin:webview|'))return null;
+      if(command==='confirm_capture')return parent.invoke(kind,command,Array.from(args instanceof ArrayBuffer?new Uint8Array(args):args));
       return parent.invoke(kind,command,args);
     }
   };
