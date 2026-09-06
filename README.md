@@ -14,11 +14,11 @@ Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Win
 <!-- project-demo-v1 -->
 ## 演示
 
-[![kiri — 演示](docs/demos/preview.gif)](docs/demos/demo.mp4)
+[![Kiri](docs/demos/preview.gif)](docs/demos/demo.mp4)
 
-[完整视频（MP4）](docs/demos/demo.mp4) · [演示说明](docs/demos/README.md)
+[观看视频](docs/demos/demo.mp4)
 
-矩形、线宽、箭头、文字、画笔、像素／模糊马赛克、撤销重做与裁剪入口。 **10× 操作快放，结果停留 0.8 秒。** 真实前端录制，使用示例数据。不包含原生截图、OCR 或导出验收。
+截图、标注、识别文字和录屏，在素材库里统一查看。
 <!-- /project-demo-v1 -->
 
 ## 功能
