@@ -1,0 +1,41 @@
+name: Import approved HD media
+on:
+  push:
+    branches: [docs/hd-media-v4]
+    paths: [.github/workflows/import-reviewed-hd.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: yuxino/kiri
+          ref: df3cf33349e330a084cc66f4083681440cecdb5f
+          path: capture-tools
+          sparse-checkout: scripts/import-reviewed-hd.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: actions/download-artifact@v7
+        with:
+          repository: yuxino/kiri
+          github-token: ${{ github.token }}
+          run-id: 34011579006
+          name: hd-native-kiri
+          path: ${{ runner.temp }}/reviewed-media
+      - name: Verify and copy approved media only
+        env:
+          HD_INPUT: ${{ runner.temp }}/reviewed-media
+        run: |
+          set -euo pipefail
+          sudo apt-get install -y ffmpeg
+          python3 -I capture-tools/scripts/import-reviewed-hd.py
+          git add -- docs/demos/demo.mp4 docs/demos/preview.gif docs/demos/poster.png docs/demos/provenance.json docs/demos/README.md
+          git rm -- .github/workflows/import-reviewed-hd.yml scripts/import-reviewed-hd.py
+          git diff --cached --check
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'docs: replace the demo with the approved continuous HD recording'
+          git push origin HEAD:refs/heads/docs/hd-media-v4
