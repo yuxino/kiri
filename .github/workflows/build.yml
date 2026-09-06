@@ -13,6 +13,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  countdown-ui:
+    name: Countdown renderer checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:release-tools
+      - run: pnpm build
+      - run: python -m pip install playwright==1.55.0
+      - run: python scripts/qa/countdown-ui.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: countdown-renderer-review
+          path: |
+            countdown-review/
+            dist/
+          retention-days: 5
+          if-no-files-found: warn
+
   test-rust:
     name: Rust tests (macOS)
     runs-on: macos-latest
@@ -81,6 +109,21 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --bundles nsis
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Verify countdown and recording controls on the actual desktop
+        timeout-minutes: 4
+        run: |
+          python -m pip install pywinauto==0.6.9
+          python scripts/qa/countdown-native.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: countdown-native-review
+          path: countdown-native-review/
+          retention-days: 5
+          if-no-files-found: warn
       - name: Upload Windows bundle
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
