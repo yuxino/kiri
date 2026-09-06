@@ -1,0 +1,69 @@
+name: Import reviewed complete demonstration
+on:
+  push:
+    branches: [docs/complete-recording-demo]
+    paths: [.github/workflows/import-complete-demo.yml]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          run-id: 34032540986
+          name: complete-demo-delivery
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/reviewed-complete-demo
+      - name: Verify exact reviewed bytes and replace only the original demonstration
+        env:
+          DEMO_BUNDLE: ${{ runner.temp }}/reviewed-complete-demo
+        run: |
+          python3 - <<'PY'
+          import ast,hashlib,json,os,shutil,subprocess
+          from pathlib import Path
+          assert os.environ['GITHUB_REPOSITORY']=='yuxino/kiri'
+          assert subprocess.check_output(['git','branch','--show-current'],text=True).strip()=='docs/complete-recording-demo'
+          assert not subprocess.check_output(['git','status','--porcelain'],text=True).strip()
+          source=Path(os.environ['DEMO_BUNDLE'])
+          def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
+          assert sha(source/'provenance.json')=='9790d27d67ffb0ffd6a74487550f7400c110a54f01f869f1b1b8445c4370c891'
+          p=json.loads((source/'provenance.json').read_text())
+          assert p['sha256']=='474223a4fa367f419300c50b6ba5ffdf3e1030de4bfeb0c650556d28e4af645a'
+          assert sha(Path('docs/demos/demo.mp4'))==p['previous_media_sha256']
+          assert p['single_take'] and p['scene_cuts']==0 and p['recording_resolution']==[1920,1080]
+          assert p['checks']['countdown_numerals']==[3,2,1] and p['checks']['pause_shown'] and p['checks']['video_playback_ready']
+          for name,meta in p['media'].items():
+              assert name in ['demo.mp4','preview.gif','poster.png']
+              assert sha(source/name)==meta['sha256'] and (source/name).stat().st_size==meta['bytes']
+          assert sha(source/'capture/record.py')==p['recording_tool_sha256']
+          ast.parse((source/'capture/record.py').read_text())
+          for name in ['demo.mp4','preview.gif','poster.png','provenance.json','README.md']:
+              shutil.copyfile(source/name,Path('docs/demos')/name)
+          shutil.copyfile(source/'capture/record.py','docs/demos/full-flow/record.py')
+          for name in ['README.md','README_ZH.md','README_EN.md','README_JA.md']:
+              f=Path(name);text=f.read_text(encoding='utf-8')
+              assert text.count('docs/demos/preview.gif')==1
+              assert 'countdown-black.gif' not in text and 'countdown-black.mp4' not in text
+              text=text.replace('docs/demos/preview.gif','docs/demos/preview.gif?v=474223a4fa36')
+              f.write_text(text,encoding='utf-8')
+          assert Path('README.md').read_bytes()==Path('README_ZH.md').read_bytes()
+          Path('docs/demos/full-flow/README.md').write_text('''# Complete interface recording
+
+This documentation-only harness records the unmodified production frontend in one continuous multiwindow session. It does not ship with Kiri or change native recording/capture protection. The local sample and OCR text are original fixtures; screenshots are exported by the actual annotation canvas, and the sample video is encoded from browser frames captured during the same session.
+
+Build the frontend at the source commit in the parent provenance file. Install Python 3.12, Playwright 1.55.0, Pillow 11.3.0, Chrome, ffmpeg and Noto Sans CJK. Set `KIRI_DEMO_DIST` to the built dist directory and `KIRI_DEMO_OUT` to a fresh local output directory; run `python record.py` from the repository root. Set `FULL_FLOW_REVIEW` to that output directory and run `python package.py` to encode and validate the delivery. Use absolute script paths when invoking them from another directory.
+
+`--fast` checks the interactions but is not a publishable recording. The packager rejects incomplete flows, bad dimensions, missing 3-2-1 or pause/playback checks, renderer errors and mismatched timing. All network requests except local fixture resources are blocked. Never use personal files or credentials in the sample.
+
+The published main MP4 includes the countdown and controls directly in its captured frames, not as separately rendered material pasted into an older video.
+''',encoding='utf-8')
+          PY
+          git rm -- .github/workflows/record-full-demo.yml .github/workflows/import-complete-demo.yml
+          git add -- README.md README_ZH.md README_EN.md README_JA.md docs/demos
+          git diff --cached --check
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'docs: replace main video with complete countdown-to-playback demonstration'
+          git push origin HEAD:refs/heads/docs/complete-recording-demo
