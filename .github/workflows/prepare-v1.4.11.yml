@@ -1,0 +1,42 @@
+name: Prepare v1.4.11 source
+on:
+  push:
+    branches: [release/v1.4.11-fullscreen]
+    paths:
+      - '.github/workflows/prepare-v1.4.11.yml'
+      - 'scripts/maintenance/prepare-v1.4.11.py'
+permissions:
+  contents: write
+concurrency:
+  group: prepare-v1.4.11
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Prepare source version and release notes
+        run: python scripts/maintenance/prepare-v1.4.11.py
+      - name: Verify release surfaces
+        run: |
+          node scripts/release-version.mjs v1.4.11
+          git diff --check
+      - name: Commit prepared source and remove one-time helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm scripts/maintenance/prepare-v1.4.11.py .github/workflows/prepare-v1.4.11.yml
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock docs/demos/full-flow/desktop.js docs/releases/v1.4.11.md scripts/maintenance/prepare-v1.4.11.py .github/workflows/prepare-v1.4.11.yml
+          git diff --cached --check
+          git commit -m 'chore: prepare Kiri v1.4.11'
+          git fetch origin release/v1.4.11-fullscreen
+          test "$(git rev-parse origin/release/v1.4.11-fullscreen)" = "$GITHUB_SHA"
+          git push origin HEAD:refs/heads/release/v1.4.11-fullscreen
