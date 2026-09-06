@@ -19,10 +19,6 @@ Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on W
 [Watch video](docs/demos/demo.mp4)
 
 Capture, annotate, recognize text, and record your screen. Keep everything together in the library.
-
-[Recording countdown](docs/demos/countdown-black.mp4)
-
-<a href="docs/demos/countdown-black.mp4"><img src="docs/demos/countdown-black.gif" width="360" alt="Recording countdown"></a>
 <!-- /project-demo-v1 -->
 
 ## Features
