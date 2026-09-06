@@ -124,6 +124,13 @@ jobs:
           path: countdown-native-review/
           retention-days: 5
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v7
+        if: failure() && github.event_name == 'pull_request'
+        with:
+          name: countdown-debug-build
+          path: src-tauri/target/release/kiri.exe
+          retention-days: 2
+          if-no-files-found: warn
       - name: Upload Windows bundle
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v7
