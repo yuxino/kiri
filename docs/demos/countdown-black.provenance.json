@@ -1,0 +1,37 @@
+{
+  "source_run": 34022248971,
+  "source_artifact": 9985893052,
+  "source_commit": "97bad12b32dadc395eca517faa7d0b9ecc2da3fe",
+  "visual_source": "Actual built CountdownWindow component and countdown.css",
+  "native_ipc": "Isolated test stub; not a native desktop recording",
+  "speed_factor": 1,
+  "scene_cuts": 0,
+  "extra_holds": 0,
+  "gif_crop": [
+    600,
+    280,
+    720,
+    640
+  ],
+  "checks": [
+    "black numerals, progress, stop icon, button and focus; neutral hover; transparent backdrop",
+    "ready -> 3 -> 2 -> 1 -> one native start",
+    "click cancels before expiry",
+    "Escape cancels before expiry",
+    "failed cancellation can retry without restarting",
+    "late control panel hydrates its cancel action",
+    "compact window and reduced motion keep the black controls visible",
+    "recorded one real built-renderer 3-2-1 at device resolution"
+  ],
+  "disclosure": "Separate recording of the actual built countdown component with isolated IPC. The native full-workflow video remains unchanged because protected countdown/control windows are intentionally excluded from screen capture. No protection was disabled and no countdown was composited into that video.",
+  "media": {
+    "countdown-black.mp4": {
+      "bytes": 32242,
+      "sha256": "f59644a547f8f8eaa8a675a8fa6916126b3be63593fb6a3f6df242b5eeff37aa"
+    },
+    "countdown-black.gif": {
+      "bytes": 83027,
+      "sha256": "4dcf0273c95b7d0892b49cf4cfa07d7b4258f2d9c662c333c8c80008a0591590"
+    }
+  }
+}
