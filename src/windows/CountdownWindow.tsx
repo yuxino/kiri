@@ -14,7 +14,7 @@ export function CountdownWindow() {
   const clock = useRef<CountdownClock | null>(null);
   const cancelled = useRef(false);
   const cancelPending = useRef(false);
-  const cancelButton = useRef<HTMLButtonElement>(null);
+  const surface = useRef<HTMLDivElement>(null);
 
   const cancel = () => {
     if (cancelPending.current) return;
@@ -60,11 +60,11 @@ export function CountdownWindow() {
       },
     });
     clock.current = timer;
-    // Native placement, exclusion and focus finish before the first three seconds.
-    // Do not wait for RAF while hidden: some WebViews throttle hidden documents.
+    // Focus the surface, not the ring: keep Esc reliable without an initial
+    // focus halo. Tab still reaches the ring's accessible cancellation action.
     void api.recordingCountdownReady(sessionId).then(() => {
       if (disposed || cancelled.current) return;
-      cancelButton.current?.focus({ preventScroll: true });
+      surface.current?.focus({ preventScroll: true });
       paintFrame = requestAnimationFrame(() => {
         paintFrame = requestAnimationFrame(() => {
           if (!disposed && !cancelled.current) timer.start();
@@ -82,17 +82,17 @@ export function CountdownWindow() {
   }, [sessionId]);
 
   return (
-    <div className="kiri-countdown">
+    <div ref={surface} className="kiri-countdown" tabIndex={-1}>
       <div className="kiri-countdown-ring">
-        <svg viewBox="0 0 192 192" aria-hidden="true">
-          <circle className="kiri-countdown-disc" cx="96" cy="96" r="87" />
-          <circle className="kiri-countdown-track" cx="96" cy="96" r="87" />
+        <svg viewBox="0 0 112 112" aria-hidden="true">
+          <circle className="kiri-countdown-disc" cx="56" cy="56" r="51" />
+          <circle className="kiri-countdown-track" cx="56" cy="56" r="49" />
           <circle
             className="kiri-countdown-progress"
-            cx="96" cy="96" r="87" pathLength="1"
+            cx="56" cy="56" r="49" pathLength="1"
             strokeDasharray="1"
             strokeDashoffset={1 - (reduceMotion ? tick.value / 3 : tick.remaining)}
-            transform="rotate(-90 96 96)"
+            transform="rotate(-90 56 56)"
           />
         </svg>
         <span
@@ -105,16 +105,13 @@ export function CountdownWindow() {
           {tick.value}
         </span>
         <button
-          ref={cancelButton}
           type="button"
-          className="kiri-countdown-cancel"
+          className="kiri-countdown-action"
+          aria-label={t("Cancel Countdown")}
+          aria-keyshortcuts="Escape"
           onClick={cancel}
           disabled={cancelling}
-        >
-          <span className="kiri-countdown-stop" aria-hidden="true" />
-          {t("Cancel Countdown")}
-          <kbd aria-hidden="true">Esc</kbd>
-        </button>
+        />
         {error && (
           <p className="kiri-countdown-error" role="alert">
             {t(error === "cancel"
