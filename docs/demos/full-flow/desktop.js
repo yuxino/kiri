@@ -29,7 +29,7 @@ window.invoke=async(kind,c,a={})=>{
   S.calls.push({c,a:c==='confirm_capture'?'PNG bytes':a,at:performance.now()});
   if(c==='get_language'||c==='get_locale')return 'zh-Hans';
   if(c==='log_frontend_error'){console.error('App error:',a.message);return null;}
-  if(c==='plugin:app|version')return '1.4.10';
+  if(c==='plugin:app|version')return '1.4.11';
   if(c==='plugin:app|name')return 'Kiri';
   if(c==='get_annotation_appearance')return S.appearance;
   if(c==='set_annotation_appearance'){S.appearance=a.appearance;return null;}
