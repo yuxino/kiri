@@ -14,11 +14,11 @@ Kiri は macOS と Windows に対応しています。macOS では `⇧⌘A`、W
 <!-- project-demo-v1 -->
 ## デモ
 
-[![kiri — デモ](docs/demos/preview.gif)](docs/demos/demo.mp4)
+[![Kiri](docs/demos/preview.gif)](docs/demos/demo.mp4)
 
-[動画（MP4）](docs/demos/demo.mp4) · [デモについて](docs/demos/README.md)
+[動画を見る](docs/demos/demo.mp4)
 
-実際のフロントエンドをサンプルデータで操作。**操作は 10 倍速、結果画面は 0.8 秒保持。** 10 シーン。ネイティブ機能や AI の実動作検証ではありません。
+スクリーンショット・注釈・文字認識・画面録画を、ライブラリでまとめて管理。
 <!-- /project-demo-v1 -->
 
 ## 機能

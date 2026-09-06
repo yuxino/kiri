@@ -14,11 +14,11 @@ Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on W
 <!-- project-demo-v1 -->
 ## Demo
 
-[![kiri — Demo](docs/demos/preview.gif)](docs/demos/demo.mp4)
+[![Kiri](docs/demos/preview.gif)](docs/demos/demo.mp4)
 
-[Full video (MP4)](docs/demos/demo.mp4) · [About this demo](docs/demos/README.md)
+[Watch video](docs/demos/demo.mp4)
 
-Rectangles, line width, arrows, text, pen, pixel/blur mosaic, undo/redo and crop controls. **10x actions with 0.8-second result holds.** Actual frontend with sample data. No native capture, OCR or export validation.
+Capture, annotate, recognize text, and record your screen. Keep everything together in the library.
 <!-- /project-demo-v1 -->
 
 ## Features
