@@ -1,6 +1,6 @@
 'use strict';
 // Documentation-only window/IPC harness. The production bundles are never edited.
-const S={assets:[],record:{isStarting:false,isRecording:false,isPaused:false,isTransitioning:false,isFinalizing:false,elapsed:0,elapsedLabel:'00:00'},session:'',region:null,options:{outputFormat:'mp4',usesCountdown:true,capturesSystemAudio:false,capturesMicrophone:false,showsCursor:true,highlightsClicks:false},appearance:{colorPreset:'red',textBackgroundStyle:'transparent',mosaicIntensity:'standard',mosaicStyle:'pixel',penWidth:3,shapeWidth:3,textFontSize:24,mosaicBrushDiameter:20},calls:[],pendingAnnotation:null};
+const S={assets:[],record:{isStarting:false,isRecording:false,isPaused:false,isTransitioning:false,isFinalizing:false,elapsed:0,elapsedLabel:'00:00'},session:'',region:null,options:{outputFormat:'mp4',usesCountdown:true,capturesSystemAudio:false,capturesMicrophone:false,showsCursor:true,highlightsClicks:false},appearance:{colorPreset:'cherry',textBackgroundStyle:'transparent',mosaicIntensity:'standard',mosaicStyle:'pixel',penWidth:3,shapeWidth:3,textFontSize:24,mosaicBrushDiameter:20},calls:[],pendingAnnotation:null};
 const TOKEN='c61f85ca24b84be18a8ee98c04c1b875';
 window.state=S;
 window.movePointer=(sender,x,y)=>{
