@@ -28,7 +28,7 @@ setInterval(()=>{if(S.record.isRecording&&!S.record.isPaused){const e=S.record.e
 window.invoke=async(kind,c,a={})=>{
   S.calls.push({c,a:c==='confirm_capture'?'PNG bytes':a,at:performance.now()});
   if(c==='get_language'||c==='get_locale')return 'zh-Hans';
-  if(c==='log_frontend_error'){console.error('App error:',a.message);throw Error(a.message);}
+  if(c==='log_frontend_error'){console.error('App error:',a.message);return null;}
   if(c==='plugin:app|version')return '1.4.9';
   if(c==='plugin:app|name')return 'Kiri';
   if(c==='get_annotation_appearance')return S.appearance;
