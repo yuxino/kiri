@@ -1,122 +1,98 @@
 {
+  "recording_resolution": [
+    1920,
+    1080
+  ],
   "project": "kiri",
-  "source_commit": "d3ebccbe86f1df4990651ce1e2569a60d88646fb",
-  "capture": "Unmodified production frontend in Chrome with isolated local sample data and mocked native APIs",
-  "limitations": "Annotation UI · original sample image · no OS screen capture",
-  "browser": "152.0.7977.64",
+  "success": true,
+  "native": true,
   "speed_factor": 10,
-  "result_hold_seconds": 0.8,
-  "duration": 21.933333,
-  "source_duration": 139.40649999999997,
-  "sha256": "76e70e1bee5a4b6f8290d5e2ca6b8290ea1599caa693246b9d36333c534a0b0e",
-  "scenes": [
+  "single_take": true,
+  "scene_cuts": 0,
+  "added_holds": 0,
+  "source_commit": "d3ebccbe86f1df4990651ce1e2569a60d88646fb",
+  "checks": {
+    "screenshot_saved": true,
+    "ocr_verified": true,
+    "ocr_character_count": 74,
+    "recording_saved": true,
+    "recording_decoded": true,
+    "recording_preview_opened": true
+  },
+  "steps": [
     {
-      "zh": "矩形标注：先圈出重点",
-      "en": "01 / Rectangle annotation",
-      "start": 3.297,
-      "end": 21.374600000000004,
-      "poster": "01.png"
+      "name": "Library and capture interface",
+      "at": 0.04599999999999227
     },
     {
-      "zh": "调整接下来绘制的线宽",
-      "en": "02 / Adjust the annotation style",
-      "start": 21.374600000000004,
-      "end": 29.905100000000004,
-      "poster": "02.png"
+      "name": "Application settings",
+      "at": 6.264999999999986
     },
     {
-      "zh": "箭头：把视线引向关键细节",
-      "en": "03 / Draw an arrow",
-      "start": 29.905100000000004,
-      "end": 56.01269999999998,
-      "poster": "03.png"
+      "name": "Screenshot selection and annotations",
+      "at": 36.04599999999999
     },
     {
-      "zh": "文字标注：补上一句说明",
-      "en": "04 / Add an editable text annotation",
-      "start": 56.01269999999998,
-      "end": 74.41319999999999,
-      "poster": "04.png"
+      "name": "Screenshot copied and saved",
+      "at": 43.203
     },
     {
-      "zh": "画笔：随手划一道重点",
-      "en": "05 / Freehand pen",
-      "start": 74.41319999999999,
-      "end": 93.26339999999999,
-      "poster": "05.png"
+      "name": "Local OCR result",
+      "at": 54.031000000000006
     },
     {
-      "zh": "马赛克：遮住不想展示的区域",
-      "en": "06 / Pixel mosaic with adjustable strength",
-      "start": 93.26339999999999,
-      "end": 119.06069999999998,
-      "poster": "06.png"
+      "name": "Recording region and options",
+      "at": 71.031
     },
     {
-      "zh": "也可以换成柔和的模糊",
-      "en": "07 / Switch to the blur brush",
-      "start": 119.06069999999998,
-      "end": 132.0721,
-      "poster": "07.png"
+      "name": "Native recording running",
+      "at": 80.625
     },
     {
-      "zh": "一步撤销，继续修改",
-      "en": "08 / Undo an edit",
-      "start": 132.0721,
-      "end": 135.2669,
-      "poster": "08.png"
+      "name": "Pause the recording",
+      "at": 91.57799999999997
     },
     {
-      "zh": "重做后，回到完整标注",
-      "en": "09 / Redo and review",
-      "start": 135.2669,
-      "end": 139.56380000000001,
-      "poster": "09.png"
+      "name": "Recording saved to the library",
+      "at": 102.59300000000002
     },
     {
-      "zh": "裁剪工具也在同一处",
-      "en": "10 / Inspect crop controls without exporting",
-      "start": 139.56380000000001,
-      "end": 142.70349999999996,
-      "poster": "10.png"
+      "name": "Image and video in the capture library",
+      "at": 108.45299999999997
+    },
+    {
+      "name": "Open the recording preview",
+      "at": 117.281
     }
   ],
-  "actions": [
-    "Rectangle (R)",
-    "Draw or move canvas region",
-    "Line",
-    "Arrow (A)",
-    "Draw or move canvas region",
-    "Text (T)",
-    "",
-    "Type: Start small.",
-    "Select (V)",
-    "Pen (P)",
-    "Draw or move canvas region",
-    "Mosaic (M)",
-    "Strong",
-    "Draw or move canvas region",
-    "Gaussian blur",
-    "Draw or move canvas region",
-    "Undo (⌘Z)",
-    "Redo (⇧⌘Z)",
-    "Select (V)",
-    "Crop (C)"
+  "dimensions": [
+    1920,
+    1080
   ],
-  "disclosure": "New, expanded frontend interaction recording. Every action interval is retimed at 10x; each result receives a 0.8-second hold. Native API boundaries use original sample data. No live AI request, system capture, task execution or native filesystem acceptance is claimed.",
-  "recording_tool_sha256": "9a88822bb8cffe05bc0c48e805c9d0b843e9b7b8a5bb2e68c64d4e37c108005e",
+  "raw_seconds": 123.81200000000001,
+  "sha256": "b8d0fb08852940c475a61f0a89bd45532c94d7482be48430d8599512c8217149",
+  "capture_run": 34011579006,
+  "capture_artifact": 9982660592,
+  "duration": 12.333333,
+  "previous_media_sha256": "76e70e1bee5a4b6f8290d5e2ca6b8290ea1599caa693246b9d36333c534a0b0e",
+  "preview_dimensions": [
+    1440,
+    810
+  ],
+  "preview_fps": 12,
+  "disclosure": "Installed Windows app, actual screenshot/OCR/recording/library workflow. This recording predates the subsequent countdown redesign. Protected countdown and control windows are excluded from screen capture.",
   "media": {
     "demo.mp4": {
-      "bytes": 540907,
-      "sha256": "76e70e1bee5a4b6f8290d5e2ca6b8290ea1599caa693246b9d36333c534a0b0e"
+      "bytes": 863469,
+      "sha256": "b8d0fb08852940c475a61f0a89bd45532c94d7482be48430d8599512c8217149"
     },
     "preview.gif": {
-      "bytes": 2249594,
-      "sha256": "073ed804cd91fc403b20d2442e6eb9e185d6484f27f095f8a05688e4783b001e"
+      "bytes": 2111786,
+      "sha256": "7377d4de3032156988219d0bad72c70647131a0685f38e2741f7e4d7255a3b50"
     },
     "poster.png": {
-      "bytes": 106233,
-      "sha256": "7d6e1cca3e863ee19b34c2f0f3f7d703228b152ec73c33fea4f2c40221c7b2bf"
+      "bytes": 125750,
+      "sha256": "0638d0202442d8a69c50230e630b8b5f64696f51a98fee3b55abc57e52391f64"
     }
   }
 }
