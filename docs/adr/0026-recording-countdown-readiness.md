@@ -37,3 +37,14 @@ remounts, session identity, initial control state, and a recording starting only
 once. Run packaged-app acceptance on supported desktop systems; browser UI
 tests alone do not verify native focus, display affinity or multi-monitor
 placement.
+
+## Palette refinement — 2026-09-06
+
+After reviewing the implementation, the maintainer requested black rather than
+coral. The ring, numerals, stop icon, cancel label and keyboard focus indicator
+now use near-black (#111111); the track, borders and interaction states use
+neutral grays. Keep the small white readability disc and transparent outer
+surface. Geometry, timing, session safety and native capture exclusion do not
+change. Built-renderer tests verify the palette and export an optional
+high-resolution recording of the actual component, with IPC isolated in the
+harness rather than weakening native capture protection.
