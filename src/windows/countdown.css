@@ -4,7 +4,7 @@
   display: grid;
   place-items: center;
   background: transparent;
-  --countdown-coral: #ff4d55;
+  --countdown-ink: #111111;
 }
 .kiri-countdown-ring {
   position: relative;
@@ -15,14 +15,14 @@
 .kiri-countdown-disc { fill: rgba(255, 255, 255, 0.96); }
 .kiri-countdown-track,
 .kiri-countdown-progress { fill: none; stroke-width: 6; }
-.kiri-countdown-track { stroke: #ffe1e3; }
-.kiri-countdown-progress { stroke: var(--countdown-coral); stroke-linecap: round; }
+.kiri-countdown-track { stroke: #e5e5e5; }
+.kiri-countdown-progress { stroke: var(--countdown-ink); stroke-linecap: round; }
 .kiri-countdown-number {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
-  color: var(--countdown-coral);
+  color: var(--countdown-ink);
   font-family: ui-rounded, "SF Pro Rounded", "Segoe UI Variable Display", system-ui, sans-serif;
   font-size: 82px;
   font-weight: 600;
@@ -41,21 +41,21 @@
   gap: 9px;
   min-height: 40px;
   padding: 0 14px;
-  border: 1px solid #e7cdd0;
+  border: 1px solid #d4d4d4;
   border-radius: 999px;
   background: #fff;
-  color: #81333c;
+  color: var(--countdown-ink);
   font: 500 13px/1 var(--kiri-font-ui);
   white-space: nowrap;
   cursor: pointer;
   transition: background-color 120ms ease, border-color 120ms ease;
 }
-.kiri-countdown-cancel:hover:not(:disabled) { background: #fff0f1; border-color: #ffadb2; }
-.kiri-countdown-cancel:active:not(:disabled) { background: #ffe1e3; transform: translateX(-50%); }
-.kiri-countdown-cancel:focus-visible { outline: 2px solid var(--countdown-coral); outline-offset: 3px; }
+.kiri-countdown-cancel:hover:not(:disabled) { background: #f5f5f5; border-color: #a3a3a3; }
+.kiri-countdown-cancel:active:not(:disabled) { background: #e5e5e5; transform: translateX(-50%); }
+.kiri-countdown-cancel:focus-visible { outline: 2px solid var(--countdown-ink); outline-offset: 3px; }
 .kiri-countdown-cancel:disabled { opacity: 0.55; cursor: wait; }
-.kiri-countdown-stop { width: 9px; height: 9px; border-radius: 2px; background: var(--countdown-coral); }
-.kiri-countdown-cancel kbd { margin-left: 4px; font: 11px/1 var(--kiri-font-ui); color: #827075; }
+.kiri-countdown-stop { width: 9px; height: 9px; border-radius: 2px; background: var(--countdown-ink); }
+.kiri-countdown-cancel kbd { margin-left: 4px; font: 11px/1 var(--kiri-font-ui); color: #737373; }
 .kiri-countdown-error {
   position: absolute;
   top: calc(100% + 63px);
@@ -66,7 +66,7 @@
   padding: 10px;
   border-radius: 8px;
   background: #fff;
-  color: #8b2831;
+  color: #404040;
   text-align: center;
   font: 13px/1.5 var(--kiri-font-ui);
 }
