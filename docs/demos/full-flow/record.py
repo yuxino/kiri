@@ -112,10 +112,19 @@ async def run(args):
    await click(o.get_by_role('button',name=re.compile('完成.*Return')))
    await page.wait_for_function("state.assets.some(a=>a.kind==='image')")
    report['checks']['screenshot_saved']=True;await mark('截图完成与本地素材',4)
-   o=await capture('文字');await drag(194,104,1090,641);await o.get_by_text('识别结果',exact=True).wait_for();await mark('整页文字识别：标题、清单和段落',12)
+   o=await capture('文字')
+   await move(194,104);await page.mouse.down();await page.mouse.move(220,120,steps=5);await wait(1)
+   assert await page.evaluate("state.calls.filter(x=>x.c==='prepare_ocr_request').length")==0,'Premature OCR while pointer held'
+   await page.mouse.move(1090,641,steps=36);await wait(1)
+   assert await page.evaluate("state.calls.filter(x=>x.c==='prepare_ocr_request').length")==0,'Premature OCR before release'
+   await page.mouse.up();await o.get_by_text('识别结果',exact=True).wait_for()
+   requests=await page.evaluate("state.calls.filter(x=>x.c==='prepare_ocr_request')");assert len(requests)==1,requests
+   actual=requests[0]['a']['selection'];assert actual=={'x':194,'y':104,'width':896,'height':537},actual
+   report['checks']['ocr_request_count']=len(requests);report['checks']['ocr_selection']=actual
+   await mark('整页文字识别：标题、清单和段落',8)
+   result=o.get_by_role('region',name='识别结果',exact=True);await result.hover();await page.mouse.wheel(0,240);await mark('回看识别内容并复制',8)
    await click(o.get_by_role('button',name='复制',exact=True));await wait(2)
    copied=await page.evaluate('state.copiedText');report['checks']['ocr_lines']=len(copied.splitlines());assert report['checks']['ocr_lines']>=12
-   report['checks']['ocr_selection']={'x':194,'y':104,'width':896,'height':537}
    o=await capture('录屏');await drag(180,115,1110,566);await mark('区域录屏选区与选项')
    await click(o.get_by_role('button',name='开始录制',exact=True),pause=0)
    c=page.frame_locator('#countdown');await c.get_by_role('button',name='取消倒计时').wait_for();seen=[]

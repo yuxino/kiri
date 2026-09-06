@@ -10,6 +10,8 @@ assert r['success'] and not r['errors'] and not r['http_errors']
 assert all(c['c']!='log_frontend_error' for c in r['calls'])
 assert r['dimensions']==[1920,1080] and r['single_take'] and r['scene_cuts']==0
 assert r['checks']['screenshot_saved'] and r['checks']['no_recording_cancel_demo'] and r['checks']['ocr_lines']>=12
+assert r['checks']['ocr_request_count']==1
+assert r['checks']['ocr_selection']=={'x':194,'y':104,'width':896,'height':537}
 assert r['checks']['countdown_numerals']==[3,2,1] and r['checks']['pause_shown']
 assert r['checks']['video_playback_ready'] and sorted(r['checks']['saved_assets'])==['image','video']
 assert r['checks']['real_browser_subject_frames']>=4
