@@ -19,6 +19,10 @@ Kiri は macOS と Windows に対応しています。macOS では `⇧⌘A`、W
 [動画を見る](docs/demos/demo.mp4)
 
 スクリーンショット・注釈・文字認識・画面録画を、ライブラリでまとめて管理。
+
+[録画カウントダウン](docs/demos/countdown-black.mp4)
+
+<a href="docs/demos/countdown-black.mp4"><img src="docs/demos/countdown-black.gif" width="360" alt="録画カウントダウン"></a>
 <!-- /project-demo-v1 -->
 
 ## 機能

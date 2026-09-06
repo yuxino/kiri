@@ -19,6 +19,10 @@ Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Win
 [观看视频](docs/demos/demo.mp4)
 
 截图、标注、识别文字和录屏，在素材库里统一查看。
+
+[录屏倒计时](docs/demos/countdown-black.mp4)
+
+<a href="docs/demos/countdown-black.mp4"><img src="docs/demos/countdown-black.gif" width="360" alt="录屏倒计时"></a>
 <!-- /project-demo-v1 -->
 
 ## 功能
