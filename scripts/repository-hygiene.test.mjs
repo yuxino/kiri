@@ -22,6 +22,11 @@ function releaseWindowsJob(source) {
   return workflow.match(/\n  build-windows:\n([\s\S]*)$/)?.[1];
 }
 
+function markdownTargetPath(destination) {
+  // Strip URL components before decoding; encoded ? and # can be filename text.
+  return destination.replace(/^<|>$/g, "").split(/[?#]/, 1)[0];
+}
+
 test("the repository has one canonical Tauri and Cargo project", () => {
   for (const obsoletePath of ["Cargo.toml", "Cargo.lock", "crates", "tauri-app"]) {
     assert.equal(
@@ -134,6 +139,18 @@ test("completed migration material stays in Git history", () => {
   }
 });
 
+test("Markdown link paths ignore queries and anchors but preserve encoded filename characters", () => {
+  for (const suffix of ["", "?v=abcdef", "#demo", "?raw=true#demo", "#demo?example"]) {
+    assert.equal(markdownTargetPath(`docs/demos/preview.gif${suffix}`), "docs/demos/preview.gif");
+  }
+  assert.equal(markdownTargetPath("<docs/demo%20image.png?v=abc>"), "docs/demo%20image.png");
+  assert.equal(markdownTargetPath("docs/question%3Fmark%23.md?raw=true"), "docs/question%3Fmark%23.md");
+  assert.equal(markdownTargetPath("#features"), "");
+  assert.equal(markdownTargetPath("?raw=true"), "");
+  assert.equal(markdownTargetPath("missing-file.md?v=abc"), "missing-file.md");
+  assert.equal(existsSync(resolve(repositoryRoot, markdownTargetPath("missing-file.md?v=abc"))), false);
+});
+
 test("current Markdown links resolve inside the repository", () => {
   const topLevelMarkdown = readdirSync(repositoryRoot, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
@@ -146,7 +163,7 @@ test("current Markdown links resolve inside the repository", () => {
   for (const markdownPath of markdownFiles) {
     const markdown = readFileSync(markdownPath, "utf8");
     for (const match of markdown.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
-      const destination = match[1].replace(/^<|>$/g, "").split("#", 1)[0];
+      const destination = markdownTargetPath(match[1]);
       if (!destination || /^(?:[a-z]+:|\/)/i.test(destination)) continue;
       const resolved = resolve(dirname(markdownPath), decodeURIComponent(destination));
       if (!existsSync(resolved)) {
