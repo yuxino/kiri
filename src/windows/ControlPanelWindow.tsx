@@ -16,8 +16,19 @@ export function ControlPanelWindow() {
   const [state, setState] = useState<RecordingState | null>(null);
 
   useEffect(() => {
-    const unlisten = onRecordingState(setState);
+    let disposed = false;
+    let receivedEvent = false;
+    const unlisten = onRecordingState((next) => {
+      receivedEvent = true;
+      if (!disposed) setState(next);
+    });
+    // The starting event can precede this lazy-loaded WebView. Subscribe first,
+    // then hydrate; never replace a newer event with a stale snapshot.
+    void unlisten.then(() => api.getRecordingState()).then((snapshot) => {
+      if (!disposed && !receivedEvent) setState(snapshot);
+    }).catch(() => {});
     return () => {
+      disposed = true;
       void unlisten.then((dispose) => dispose()).catch(() => {});
     };
   }, []);

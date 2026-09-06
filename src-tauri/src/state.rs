@@ -238,6 +238,17 @@ pub struct RecordingFlow {
 }
 
 impl RecordingFlow {
+    /// A stale countdown must never start/cancel a replacement or active recording.
+    pub fn pending_start_is_current(&self, session_id: uuid::Uuid) -> bool {
+        self.session_id == session_id
+            && self.is_starting
+            && self.configuration.is_some()
+            && !self.is_recording
+            && !self.is_paused
+            && !self.is_transitioning
+            && !self.is_finalizing
+    }
+
     /// Claims the pending recording session for asynchronous preparation.
     /// A second begin request is ignored while the first claim is live.
     pub fn claim_startup(&mut self) -> Option<uuid::Uuid> {
@@ -1276,4 +1287,32 @@ mod tests {
         assert!(!flow.is_paused);
         assert!(flow.active.is_some());
     }
+    #[test]
+    fn countdown_messages_are_scoped_to_a_pending_session() {
+        let id = uuid::Uuid::new_v4();
+        let mut flow = RecordingFlow {
+            session_id: id,
+            is_starting: true,
+            configuration: Some(RecordingConfiguration {
+                display_id: 1,
+                display_identity: None,
+                region: Rect::new(0.0, 0.0, 320.0, 240.0),
+                screen_frame: Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                backing_scale: 1.0,
+                options: RecordingOptions::default(),
+            }),
+            ..Default::default()
+        };
+        assert!(flow.pending_start_is_current(id));
+        assert!(!flow.pending_start_is_current(uuid::Uuid::new_v4()));
+        // Cancellation may abort an in-flight encoder preparation for this session.
+        let token = flow.claim_startup().unwrap();
+        assert!(flow.pending_start_is_current(id));
+        assert!(flow.complete_startup(token, ActiveRecording::default()).is_ok());
+        // A delayed cancel must never discard an active recording.
+        assert!(!flow.pending_start_is_current(id));
+        flow.take_and_reset();
+        assert!(!flow.pending_start_is_current(id));
+    }
+
 }

@@ -286,8 +286,10 @@ export const api = {
 
   startRecordingFlow: (region: RectDto, options: RecordingOptions) =>
     invoke<void>("start_recording_flow", { request: { region, options } }),
-  cancelRecordingFlow: () => invoke<void>("cancel_recording_flow"),
-  beginRecording: () => invoke<void>("begin_recording"),
+  recordingCountdownReady: (sessionId: string) => invoke<void>("recording_countdown_ready", { sessionId }),
+  cancelRecordingFlow: (sessionId: string) => invoke<void>("cancel_recording_flow", { sessionId }),
+  beginRecording: (sessionId: string) => invoke<void>("begin_recording", { sessionId }),
+  getRecordingState: () => invoke<RecordingState>("get_recording_state"),
   pauseRecording: () => invoke<void>("pause_recording"),
   resumeRecording: () => invoke<void>("resume_recording"),
   stopRecording: () => invoke<void>("stop_recording"),

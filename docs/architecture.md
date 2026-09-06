@@ -235,11 +235,15 @@ unavailable or rejects the write, Kiri moves it into a local recovery area
 with a manifest. The library exposes the pending count and a retry action.
 Recovery files are removed only after a durable import.
 
-The countdown is a single background-free 3-2-1 numeral in system display
-typography. It has no ring, disc, panel, hint pill, blur, or shadow, remains
-centered without dimming the selected region, supports Escape cancellation and
-reduced-motion preferences, and stays visually independent of the selected
-output format.
+The countdown is a compact coral ring with a large 3-2-1 numeral and a visible
+Cancel Countdown button (Escape also cancels). Only the small numeral surface
+has a light backing; the selected display is never dimmed or blurred. The
+window is placed, protected and focused after the renderer is ready, then the
+three-second clock starts after paint. Countdown IPC is bound to the recording
+session so late messages cannot affect a replacement or active recording.
+Reduced motion keeps the digit changes and steps the ring without continuous
+motion. The control panel subscribes before reading its initial state, so
+loading the window cannot lose the starting state or its cancel action.
 
 Windows uses Media Foundation plus the bundled Rust GIF encoder for MP4
 recording, recovery validation, thumbnails, and MP4-to-GIF conversion. macOS

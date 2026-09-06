@@ -197,6 +197,8 @@ pub fn run() {
             ocr_commands::cancel_prepared_ocr,
             commands::copy_text,
             commands::start_recording_flow,
+            commands::recording_countdown_ready,
+            commands::get_recording_state,
             commands::cancel_recording_flow,
             commands::begin_recording,
             commands::pause_recording,

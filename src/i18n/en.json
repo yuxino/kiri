@@ -331,5 +331,9 @@
   "Couldn't load this item": "Couldn't load this item",
   "Remove this record?": "Remove this record?",
   "%d recording is waiting to save": "%d recording is waiting to save",
-  "%d recordings are waiting to save": "%d recordings are waiting to save"
+  "%d recordings are waiting to save": "%d recordings are waiting to save",
+  "Cancel Countdown": "Cancel Countdown",
+  "Recording starts in %d": "Recording starts in %d",
+  "Could not start recording. Cancel and try again.": "Could not start recording. Cancel and try again.",
+  "Could not cancel recording. Try again.": "Could not cancel recording. Try again."
 }
