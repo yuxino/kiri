@@ -235,8 +235,9 @@ unavailable or rejects the write, Kiri moves it into a local recovery area
 with a manifest. The library exposes the pending count and a retry action.
 Recovery files are removed only after a durable import.
 
-The countdown is a compact coral ring with a large 3-2-1 numeral and a visible
-Cancel Countdown button (Escape also cancels). Only the small numeral surface
+The countdown is a compact 112px black ring with a 44px numeral and no separate
+cancel row (ADR 0027). Escape or a click on the ring cancels. Initial focus goes
+to the surface; Tab reaches the accessible ring action. Only the small numeral surface
 has a light backing; the selected display is never dimmed or blurred. The
 window is placed, protected and focused after the renderer is ready, then the
 three-second clock starts after paint. Countdown IPC is bound to the recording

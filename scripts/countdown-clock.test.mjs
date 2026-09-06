@@ -63,7 +63,10 @@ test("the displayed circle and cancel action keep capture protection and scoped 
   assert.match(ui, /api\.recordingCountdownReady\(sessionId\)/);
   assert.match(ui, /api\.cancelRecordingFlow\(sessionId\)/);
   assert.match(ui, /api\.beginRecording\(sessionId\)/);
-  assert.match(ui, /className="kiri-countdown-cancel"/);
+  assert.match(ui, /className="kiri-countdown-action"/);
+  assert.match(ui, /aria-label=\{t\("Cancel Countdown"\)\}/);
+  assert.match(ui, /onClick=\{cancel\}/);
+  assert.doesNotMatch(ui, /kiri-countdown-cancel|kiri-countdown-stop|<kbd/);
   assert.match(ui, /event\.key === "Escape"/);
   assert.match(css, /prefers-reduced-motion/);
   assert.doesNotMatch(css, /backdrop-filter|radial-gradient|linear-gradient/);

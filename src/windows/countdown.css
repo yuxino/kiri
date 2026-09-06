@@ -4,17 +4,18 @@
   display: grid;
   place-items: center;
   background: transparent;
+  outline: none;
   --countdown-ink: #111111;
 }
 .kiri-countdown-ring {
   position: relative;
-  width: 192px;
-  height: 192px;
+  width: 112px;
+  height: 112px;
 }
 .kiri-countdown-ring svg { display: block; width: 100%; height: 100%; }
 .kiri-countdown-disc { fill: rgba(255, 255, 255, 0.96); }
 .kiri-countdown-track,
-.kiri-countdown-progress { fill: none; stroke-width: 6; }
+.kiri-countdown-progress { fill: none; stroke-width: 2.5; }
 .kiri-countdown-track { stroke: #e5e5e5; }
 .kiri-countdown-progress { stroke: var(--countdown-ink); stroke-linecap: round; }
 .kiri-countdown-number {
@@ -24,44 +25,42 @@
   place-items: center;
   color: var(--countdown-ink);
   font-family: ui-rounded, "SF Pro Rounded", "Segoe UI Variable Display", system-ui, sans-serif;
-  font-size: 82px;
-  font-weight: 600;
+  font-size: 44px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums lining-nums;
+  letter-spacing: -0.035em;
   line-height: 1;
+  transform: translateY(-1px);
   pointer-events: none;
+  user-select: none;
 }
-.kiri-countdown-cancel {
+/* The ring itself is the cancel target. There is no separate button row. */
+.kiri-countdown-action {
   position: absolute;
-  top: calc(100% + 16px);
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 9px;
-  min-height: 40px;
-  padding: 0 14px;
-  border: 1px solid #d4d4d4;
-  border-radius: 999px;
-  background: #fff;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  appearance: none;
+  background: transparent;
   color: var(--countdown-ink);
-  font: 500 13px/1 var(--kiri-font-ui);
-  white-space: nowrap;
+  box-shadow: none;
   cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  touch-action: manipulation;
+  transition: background-color 120ms ease;
 }
-.kiri-countdown-cancel:hover:not(:disabled) { background: #f5f5f5; border-color: #a3a3a3; }
-.kiri-countdown-cancel:active:not(:disabled) { background: #e5e5e5; transform: translateX(-50%); }
-.kiri-countdown-cancel:focus-visible { outline: 2px solid var(--countdown-ink); outline-offset: 3px; }
-.kiri-countdown-cancel:disabled { opacity: 0.55; cursor: wait; }
-.kiri-countdown-stop { width: 9px; height: 9px; border-radius: 2px; background: var(--countdown-ink); }
-.kiri-countdown-cancel kbd { margin-left: 4px; font: 11px/1 var(--kiri-font-ui); color: #737373; }
+.kiri-countdown-action:hover:not(:disabled) { background: rgba(17, 17, 17, 0.035); }
+.kiri-countdown-action:active:not(:disabled) { background: rgba(17, 17, 17, 0.07); }
+.kiri-countdown-action:focus-visible { outline: 2px solid var(--countdown-ink); outline-offset: 3px; }
+.kiri-countdown-action:disabled { background: rgba(255, 255, 255, 0.45); cursor: wait; }
 .kiri-countdown-error {
   position: absolute;
-  top: calc(100% + 63px);
+  top: calc(100% + 12px);
   left: 50%;
   transform: translateX(-50%);
-  width: 260px;
+  width: min(240px, calc(100vw - 24px));
   margin: 0;
   padding: 10px;
   border-radius: 8px;
@@ -71,10 +70,9 @@
   font: 13px/1.5 var(--kiri-font-ui);
 }
 @media (prefers-reduced-motion: reduce) {
-  .kiri-countdown-cancel { transition: none; }
+  .kiri-countdown-action { transition: none; }
 }
-@media (max-height: 360px) {
-  .kiri-countdown-ring { width: 128px; height: 128px; margin-bottom: 48px; }
-  .kiri-countdown-number { font-size: 62px; }
-  .kiri-countdown-cancel { top: calc(100% + 10px); }
+@media (max-height: 240px) {
+  .kiri-countdown-ring { width: 88px; height: 88px; }
+  .kiri-countdown-number { font-size: 36px; }
 }

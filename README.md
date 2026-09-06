@@ -14,7 +14,7 @@ Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Win
 <!-- project-demo-v1 -->
 ## 演示
 
-[![Kiri](docs/demos/preview.gif?v=474223a4fa36)](docs/demos/demo.mp4)
+[![Kiri](docs/demos/preview.gif?v=89634f0d7b78)](docs/demos/demo.mp4)
 
 [观看视频](docs/demos/demo.mp4)
 
@@ -25,7 +25,7 @@ Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Win
 
 - **截图与标注**：点击窗口或拖选区域，使用裁剪、画笔、图形、箭头、文字、马赛克、撤销和重做。新版创建的标注可从完成卡或素材库继续编辑。
 - **OCR**：默认使用 macOS Vision 或 Windows.Media.Ocr 在本机识别；可选远程 OCR 每次发送前都会确认。
-- **录屏与 GIF**：录制指定区域，可选系统声音、麦克风、指针和点击高亮，开始前显示圆环倒计时，可点击取消或按 Esc 退出；输出 MP4 或 GIF。
+- **录屏与 GIF**：录制指定区域，可选系统声音、麦克风、指针和点击高亮，开始前显示小巧的圆环倒计时，点击圆环或按 Esc 可取消；输出 MP4 或 GIF。
 - **本地素材库**：支持搜索、收藏、标签、重命名和可恢复的回收站。可在设置中使用其他本机目录或外接盘。
 
 ## 下载与安装
