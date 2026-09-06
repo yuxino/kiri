@@ -1,0 +1,70 @@
+name: Import reviewed v1.4.10 candidate
+on:
+  push:
+    branches: [release/v1.4.10-demo-polish]
+    paths: ['.github/workflows/import-reviewed-v1.4.10.yml', 'scripts/maintenance/import-reviewed-v1.4.10.py']
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: import-reviewed-kiri-v1.4.10
+  cancel-in-progress: false
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Import previously tested source and original encoded media
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          python scripts/maintenance/import-reviewed-v1.4.10.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:release-tools
+      - run: pnpm build
+      - name: Recheck committed-selection regression
+        run: |
+          python -m pip install playwright==1.55.0 Pillow==11.3.0
+          python docs/demos/full-flow/test-ocr.py
+        env:
+          KIRI_DEMO_DIST: ${{ github.workspace }}/dist
+          KIRI_DEMO_OUT: ${{ runner.temp }}/ocr-reviewed-source
+      - name: Commit non-workflow cleanup and push checked files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm scripts/maintenance/import-reviewed-v1.4.10.py
+          git add scripts/maintenance/import-reviewed-v1.4.10.py
+          git commit -m 'chore: remove the completed source import helper'
+          git diff "$GITHUB_SHA" --check
+          test -z "$(git diff "$GITHUB_SHA" --name-only -- .github/workflows)"
+          git fetch origin release/v1.4.10-demo-polish
+          test "$(git rev-parse origin/release/v1.4.10-demo-polish)" = "$GITHUB_SHA"
+          git push origin HEAD:refs/heads/release/v1.4.10-demo-polish
+          mkdir -p "$RUNNER_TEMP/import-result"
+          git log -3 --format='%H %s' > "$RUNNER_TEMP/import-result/commits.txt"
+          git diff 239afb392666f707501e34920ac76fd0dadb766d --stat > "$RUNNER_TEMP/import-result/diff-stat.txt"
+          cp docs/demos/provenance.json "$RUNNER_TEMP/import-result/"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: kiri-v1.4.10-import-result
+          path: |
+            ${{ runner.temp }}/import-result/
+            ${{ runner.temp }}/ocr-reviewed-source/
+          if-no-files-found: warn
+          retention-days: 5
