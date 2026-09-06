@@ -121,6 +121,7 @@ async def run(args):
    report['checks']['countdown_cancelled']=await page.locator('#countdown').count()==0;await mark('可直接取消倒计时',4)
    o=await capture('录屏');await drag(180,115,1110,566);await click(o.get_by_role('button',name='开始录制',exact=True),pause=0)
    c=page.frame_locator('#countdown');await c.get_by_role('button',name='取消倒计时').wait_for();seen=[]
+   await page.mouse.move(1180,630,steps=12)
    report['countdown_start']=time.monotonic()-start
    for n in [3,2,1]:
     await c.get_by_role('status',name=re.compile(str(n))).wait_for();await pixels(path=str(OUT/f'countdown-{n}.png'));seen.append(n)

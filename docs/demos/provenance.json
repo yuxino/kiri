@@ -1,98 +1,123 @@
 {
+  "project": "kiri",
+  "source_commit": "cea661eff7d05ce63210825f9f0014ca494f67a5",
+  "source_tree": "fcd30ff9d323dd79f5adf248bbd3a82070d262ce",
+  "source_build_run": 34022248971,
+  "source_build_artifact": 9985893052,
+  "capture_commit": "68acaee8e0ff2aba90efe01f90f7bbbd67fef25c",
+  "capture_run": "34032540986",
+  "recording_tool_sha256": "a71f17b975b93ba3958cfc0e5a7403779f37bc9f06dc32714a5309bb5498f432",
+  "native": false,
+  "single_take": true,
+  "scene_cuts": 0,
   "recording_resolution": [
     1920,
     1080
   ],
-  "project": "kiri",
-  "success": true,
-  "native": true,
-  "speed_factor": 10,
-  "single_take": true,
-  "scene_cuts": 0,
+  "duration": 24.666667,
+  "sha256": "474223a4fa367f419300c50b6ba5ffdf3e1030de4bfeb0c650556d28e4af645a",
+  "action_speed": 10,
+  "countdown_speed": 1,
+  "countdown_periods": [
+    [
+      100.76070000000001,
+      103.1782
+    ],
+    [
+      115.7047,
+      119.0841
+    ]
+  ],
   "added_holds": 0,
-  "source_commit": "d3ebccbe86f1df4990651ce1e2569a60d88646fb",
-  "checks": {
-    "screenshot_saved": true,
-    "ocr_verified": true,
-    "ocr_character_count": 74,
-    "recording_saved": true,
-    "recording_decoded": true,
-    "recording_preview_opened": true
-  },
-  "steps": [
+  "scenes": [
     {
-      "name": "Library and capture interface",
-      "at": 0.04599999999999227
+      "name": "素材库",
+      "at": 0.8
     },
     {
-      "name": "Application settings",
-      "at": 6.264999999999986
+      "name": "设置",
+      "at": 1.893
     },
     {
-      "name": "Screenshot selection and annotations",
-      "at": 36.04599999999999
+      "name": "工作笔记",
+      "at": 2.474
     },
     {
-      "name": "Screenshot copied and saved",
-      "at": 43.203
+      "name": "截图选区、图形与文字标注",
+      "at": 5.795
     },
     {
-      "name": "Local OCR result",
-      "at": 54.031000000000006
+      "name": "截图完成与本地素材",
+      "at": 6.479
     },
     {
-      "name": "Recording region and options",
-      "at": 71.031
+      "name": "文字识别结果",
+      "at": 7.934
     },
     {
-      "name": "Native recording running",
-      "at": 80.625
+      "name": "区域录屏选区与选项",
+      "at": 9.87
     },
     {
-      "name": "Pause the recording",
-      "at": 91.57799999999997
+      "name": "可直接取消倒计时",
+      "at": 12.884
     },
     {
-      "name": "Recording saved to the library",
-      "at": 102.59300000000002
+      "name": "黑色倒计时结束，录制控制条出现",
+      "at": 17.965
     },
     {
-      "name": "Image and video in the capture library",
-      "at": 108.45299999999997
+      "name": "暂停录制",
+      "at": 19.615
     },
     {
-      "name": "Open the recording preview",
-      "at": 117.281
+      "name": "恢复录制，完成操作",
+      "at": 21.895
+    },
+    {
+      "name": "停止并保存",
+      "at": 22.571
+    },
+    {
+      "name": "回放刚保存的录制",
+      "at": 23.859
+    },
+    {
+      "name": "截图和录屏都在素材库",
+      "at": 24.676
     }
   ],
-  "dimensions": [
-    1920,
-    1080
-  ],
-  "raw_seconds": 123.81200000000001,
-  "sha256": "b8d0fb08852940c475a61f0a89bd45532c94d7482be48430d8599512c8217149",
-  "capture_run": 34011579006,
-  "capture_artifact": 9982660592,
-  "duration": 12.333333,
-  "previous_media_sha256": "76e70e1bee5a4b6f8290d5e2ca6b8290ea1599caa693246b9d36333c534a0b0e",
-  "preview_dimensions": [
-    1440,
-    810
-  ],
-  "preview_fps": 12,
-  "disclosure": "Installed Windows app, actual screenshot/OCR/recording/library workflow. This recording predates the subsequent countdown redesign. Protected countdown and control windows are excluded from screen capture.",
+  "checks": {
+    "screenshot_saved": true,
+    "countdown_cancelled": true,
+    "countdown_numerals": [
+      3,
+      2,
+      1
+    ],
+    "pause_shown": true,
+    "real_browser_subject_frames": 93,
+    "video_playback_ready": true,
+    "saved_assets": [
+      "video",
+      "image"
+    ]
+  },
+  "poster_time": 15.436,
+  "previous_media_sha256": "b8d0fb08852940c475a61f0a89bd45532c94d7482be48430d8599512c8217149",
+  "disclosure": "One uninterrupted recording of the unchanged production frontend, coordinated in an isolated multiwindow documentation harness. The same main recording visibly includes actual black CountdownWindow and ControlPanelWindow components, cancellation, 3-2-1, pause/resume/stop, saving, library and playback. Native IPC is substituted; this is not native end-to-end validation. The OCR text is an original sample fixture, not a fresh OCR engine result. Screenshot annotation export uses actual canvas bytes. The local sample video is encoded from frames captured during this browser session with paused frames omitted. No provider requests, user files, credentials or runtime capture-protection changes. Operations play 10x; countdowns retain their original timing without any cuts or inserted frames.",
   "media": {
     "demo.mp4": {
-      "bytes": 863469,
-      "sha256": "b8d0fb08852940c475a61f0a89bd45532c94d7482be48430d8599512c8217149"
+      "bytes": 1040509,
+      "sha256": "474223a4fa367f419300c50b6ba5ffdf3e1030de4bfeb0c650556d28e4af645a"
     },
     "preview.gif": {
-      "bytes": 2111786,
-      "sha256": "7377d4de3032156988219d0bad72c70647131a0685f38e2741f7e4d7255a3b50"
+      "bytes": 2674233,
+      "sha256": "b1eebc7327d1ba1c454c9d866a58b9faca1e2a93b998991ae15674f3072f3ffa"
     },
     "poster.png": {
-      "bytes": 125750,
-      "sha256": "0638d0202442d8a69c50230e630b8b5f64696f51a98fee3b55abc57e52391f64"
+      "bytes": 218604,
+      "sha256": "4eacf5d95e32b250f89704eabce17c7022cd94644fa0442869c4f4eaa0ff8acb"
     }
   }
 }
