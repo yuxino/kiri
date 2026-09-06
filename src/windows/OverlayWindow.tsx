@@ -468,15 +468,6 @@ export function OverlayWindow() {
     [],
   );
 
-  // Auto-run OCR when the user switches to OCR mode with an existing valid
-  // selection (reuse instead of re-drawing the region). Fires once per
-  // transition because runOcr moves the phase to "ocr-result".
-  useEffect(() => {
-    if (mode === "ocr" && phase === "selecting" && selection && isValidSelection(selection, 3)) {
-      void runOcr(selection);
-    }
-  }, [mode, phase, selection, runOcr]);
-
   // Esc is a window-level capture action. Register it separately in the
   // capture phase so focused text/number controls cannot consume it before
   // the overlay closes, while leaving their other keys (notably Return)
@@ -692,16 +683,19 @@ export function OverlayWindow() {
       }
       if (drag) {
         const moved = Math.hypot(p.x - drag.start.x, p.y - drag.start.y) >= 3;
+        const committedSelection = normalized(drag.start, p);
         if (!moved && context && modeRef.current !== "ocr") {
           const candidate = windowCandidate(p, context.windowRects, bounds);
           if (candidate) {
             setSelection(candidate);
             afterSelection(candidate);
           }
-        } else if (moved && selectionRef.current && isValidSelection(selectionRef.current, 3)) {
-          // OCR (and screenshot/record) recognize only after an actual drag
-          // release — a plain click must not trigger recognition.
-          afterSelection(selectionRef.current);
+        } else if (moved && isValidSelection(committedSelection, 3)) {
+          // Commit the release endpoint, not a partial/stale pointer-move render.
+          // A plain click never starts OCR, and dragging cannot prepare a crop.
+          setSelection(committedSelection);
+          selectionRef.current = committedSelection;
+          afterSelection(committedSelection);
         }
         setDrag(null);
       }
@@ -725,11 +719,8 @@ export function OverlayWindow() {
     }
   }
 
-  // Spec §2.4 changeCaptureMode: switching the mode resets to the selection
-  // phase, tears down the recording-options popover and the OCR panel, and
-  // keeps or clears the region per mode (OCR always clears it). The mode
-  // selector stays visible throughout (spec §1.2), so this can be invoked
-  // at any point.
+  // Switching modes clears transient UI while reusing a completed selection.
+  // OCR starts only from this explicit action or a committed pointer release.
   const switchMode = useCallback(
     (next: Mode) => {
       if (completionLock.locked) return;
@@ -747,12 +738,10 @@ export function OverlayWindow() {
       setOcrFailed(false);
       setTool("select");
       if (next === "ocr") {
-        // Reuse an existing region when switching into OCR: run recognition
-        // on it right away instead of forcing a fresh drag (the effect below
-        // watches for a valid selection in OCR+selecting). Only clear when
-        // there is no usable selection yet.
+        // Reuse the finished crop once, without a render effect watching live
+        // selection changes during a new OCR drag.
         if (selectionRef.current && isValidSelection(selectionRef.current, 3)) {
-          setPhase("selecting");
+          void runOcr(selectionRef.current);
         } else {
           setSelection(null);
         }
@@ -768,7 +757,7 @@ export function OverlayWindow() {
       // With a valid region: screenshot re-shows the toolbar (selecting
       // phase with a selection); record shows the options popover.
     },
-    [completionLock, discardPreparedOcr],
+    [completionLock, discardPreparedOcr, runOcr],
   );
 
   // --- toolbar placement (spec §7.6) ---
@@ -1415,6 +1404,9 @@ function OcrPanel(props: {
         </button>
       </div>
       <div
+        role="region"
+        aria-label={t("Recognized Text")}
+        tabIndex={0}
         style={{
           background: "rgba(255,255,255,0.97)",
           color: "#0a0a0a",

@@ -1,12 +1,12 @@
 {
   "project": "kiri",
-  "source_commit": "488d010f219a2a7c741f25c9769ca7ab1cb5feb2",
-  "source_tree": "b00b4c2762a2933dc703227303d157316d7815a7",
-  "source_build_run": 34036147939,
-  "source_build_artifact": null,
-  "capture_commit": "488d010f219a2a7c741f25c9769ca7ab1cb5feb2",
-  "capture_run": "34036147939",
-  "recording_tool_sha256": "66e99976f1ebb55a2c63dd8be7ed95cdc574be98398625f50ef58d20aef207cc",
+  "source_commit": "5139fffd4e6227d474db938120eda25b4d21510c",
+  "source_tree": "9b08d5b94db34f8b067eed157ecd31d018a6747d",
+  "source_build_run": 34039717139,
+  "source_build_artifact": 9991358377,
+  "capture_commit": "2e3aec3cd8b09b49366b330080c670c1bb67c655",
+  "capture_run": "34039717139",
+  "recording_tool_sha256": "a3ce84a2b33eb855866561167c2db1c60ac3a46f461bde5132229354bdfde247",
   "native": false,
   "single_take": true,
   "scene_cuts": 0,
@@ -14,21 +14,18 @@
     1920,
     1080
   ],
-  "duration": 22.933333,
-  "sha256": "89634f0d7b7836dc7d8de838d55a929df9b76ea25b56dbdf14ecf95b98011e03",
+  "duration": 27.2,
+  "sha256": "f6f0d2f79880c0ae2990221f708940aadd70dd0365a0ca4ccc5abf9de01df5ab",
   "action_speed": 10,
   "countdown_speed": 1,
   "countdown_periods": [
     [
-      101.002,
-      101.7374
-    ],
-    [
-      114.21920000000001,
-      117.57330000000002
+      110.23830000000004,
+      113.60080000000004
     ]
   ],
   "added_holds": 0,
+  "ending_hold_seconds": 6.163,
   "scenes": [
     {
       "name": "素材库",
@@ -36,60 +33,67 @@
     },
     {
       "name": "设置",
-      "at": 1.89
+      "at": 1.88
     },
     {
       "name": "工作笔记",
-      "at": 2.471
+      "at": 2.462
     },
     {
       "name": "截图选区、图形与文字标注",
-      "at": 5.782
+      "at": 5.755
     },
     {
       "name": "截图完成与本地素材",
-      "at": 6.516
+      "at": 6.446
     },
     {
-      "name": "文字识别结果",
-      "at": 7.969
+      "name": "整页文字识别：标题、清单和段落",
+      "at": 8.094
+    },
+    {
+      "name": "回看识别内容并复制",
+      "at": 8.91
     },
     {
       "name": "区域录屏选区与选项",
-      "at": 9.895
-    },
-    {
-      "name": "按 Esc 取消倒计时",
-      "at": 11.226
+      "at": 10.83
     },
     {
       "name": "黑色倒计时结束，录制控制条出现",
-      "at": 16.279
+      "at": 15.229
     },
     {
       "name": "暂停录制",
-      "at": 17.93
+      "at": 16.873
     },
     {
       "name": "恢复录制，完成操作",
-      "at": 20.2
+      "at": 19.15
     },
     {
       "name": "停止并保存",
-      "at": 20.824
+      "at": 19.759
     },
     {
       "name": "回放刚保存的录制",
-      "at": 22.119
+      "at": 21.04
     },
     {
       "name": "截图和录屏都在素材库",
-      "at": 22.938
+      "at": 27.195
     }
   ],
   "checks": {
     "screenshot_saved": true,
-    "countdown_cancelled": true,
+    "ocr_request_count": 1,
+    "ocr_selection": {
+      "x": 194,
+      "y": 104,
+      "width": 896,
+      "height": 537
+    },
+    "ocr_lines": 12,
     "compact_ring_size": 112,
     "separate_cancel_row_absent": true,
     "countdown_numerals": [
@@ -98,28 +102,33 @@
       1
     ],
     "pause_shown": true,
-    "real_browser_subject_frames": 93,
+    "real_browser_subject_frames": 104,
     "video_playback_ready": true,
+    "no_recording_cancel_demo": true,
     "saved_assets": [
       "video",
       "image"
     ]
   },
-  "poster_time": 13.76,
-  "previous_media_sha256": "474223a4fa367f419300c50b6ba5ffdf3e1030de4bfeb0c650556d28e4af645a",
-  "disclosure": "One uninterrupted recording of the unchanged production frontend, coordinated in an isolated multiwindow documentation harness. The same main recording visibly includes actual compact black CountdownWindow (112px, no separate cancel row) and ControlPanelWindow components, cancellation, 3-2-1, pause/resume/stop, saving, library and playback. Native IPC is substituted; this is not native end-to-end validation. The OCR text is an original sample fixture, not a fresh OCR engine result. Screenshot annotation export uses actual canvas bytes. The local sample video is encoded from frames captured during this browser session with paused frames omitted. No provider requests, user files, credentials or runtime capture-protection changes. Operations play 10x; countdowns retain their original timing without any cuts or inserted frames.",
+  "poster_time": 12.705,
+  "previous_media_sha256": "4c2a2340781e765c7cc73794ae35f190c74f2b345005fa39f6e7a80d3f6e5f44",
+  "disclosure": "One uninterrupted recording of the unchanged production frontend, coordinated in an isolated multiwindow documentation harness. The same main recording visibly includes actual compact black CountdownWindow (112px, no separate cancel row) and ControlPanelWindow components, one 3-2-1, pause/resume/stop, saving, library and playback. Native IPC is substituted; this is not native end-to-end validation. The OCR text is a 12-line original sample fixture covering the visible title, checklist and paragraphs, not a fresh OCR engine result. Screenshot annotation export uses actual canvas bytes. The local sample video is encoded from frames captured during this browser session with paused frames omitted. No provider requests, user files, credentials or runtime capture-protection changes. Operations play 10x; the countdown and six-second final-library view retain their captured timing without cuts or inserted stills. No recording-cancellation scene is performed.",
   "media": {
     "demo.mp4": {
-      "bytes": 1004648,
-      "sha256": "89634f0d7b7836dc7d8de838d55a929df9b76ea25b56dbdf14ecf95b98011e03"
+      "bytes": 980432,
+      "sha256": "f6f0d2f79880c0ae2990221f708940aadd70dd0365a0ca4ccc5abf9de01df5ab"
     },
     "preview.gif": {
-      "bytes": 2583820,
-      "sha256": "34529f09e7d4dc008687bec7d0c74ea6a2f2c914334494ffe6b9331a6c42a004"
+      "bytes": 2150027,
+      "sha256": "a8016aa24b8885f5170afcd13771915554553724e82ac0083071a76779a83b49"
     },
     "poster.png": {
-      "bytes": 205048,
-      "sha256": "5836755504bc4a9b73eebdae440bc213fb1d63ccc922318a873f250c864493af"
+      "bytes": 206161,
+      "sha256": "ade26b8c72902ba50c46c5e39b2e8babfddf64b21a86cf26ed0157b2b94ff281"
     }
-  }
+  },
+  "verified_equivalent_source_commit": "f725a0b88e871d803f9cf45449a0413377c48ed9",
+  "verified_application_input_count": 120,
+  "source_archive_sha256": "6e702897f62c5806096414ea60d0f24ccfb665841ab6f201764829771cc10575",
+  "source_commit_note": "Original source commit was created in the capture runner. The equivalent published source has byte-identical application and build inputs; no new recording is claimed."
 }

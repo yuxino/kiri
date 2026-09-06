@@ -166,7 +166,11 @@ file is still missing.
 ## OCR flow
 
 Local OCR is the default and runs through macOS Vision or Windows.Media.Ocr.
-The normal local path does not use the network.
+The normal local path does not use the network. OCR crop preparation waits for
+pointer release and uses that final endpoint, never an intermediate drag
+frame. Explicitly switching a completed screenshot selection to OCR reuses
+that crop once. Plain clicks and partial drags do not prepare or send a crop
+(ADR 0028).
 
 Remote OCR profiles contain only non-secret metadata. API keys live in macOS
 Keychain or Windows Credential Manager. For a remote profile, Rust prepares

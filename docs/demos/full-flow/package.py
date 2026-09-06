@@ -9,7 +9,9 @@ r=json.loads((ROOT/'report.json').read_text(encoding='utf-8'))
 assert r['success'] and not r['errors'] and not r['http_errors']
 assert all(c['c']!='log_frontend_error' for c in r['calls'])
 assert r['dimensions']==[1920,1080] and r['single_take'] and r['scene_cuts']==0
-assert r['checks']['screenshot_saved'] and r['checks']['countdown_cancelled']
+assert r['checks']['screenshot_saved'] and r['checks']['no_recording_cancel_demo'] and r['checks']['ocr_lines']>=12
+assert r['checks']['ocr_request_count']==1
+assert r['checks']['ocr_selection']=={'x':194,'y':104,'width':896,'height':537}
 assert r['checks']['countdown_numerals']==[3,2,1] and r['checks']['pause_shown']
 assert r['checks']['video_playback_ready'] and sorted(r['checks']['saved_assets'])==['image','video']
 assert r['checks']['real_browser_subject_frames']>=4
@@ -24,10 +26,14 @@ for c in r['calls']:
  if c['c']=='recording_countdown_ready':current=max(0,t-.2)
  if c['c'] in ['cancel_recording_flow','begin_recording'] and current is not None:
   periods.append([current,t+.1]);current=None
-assert len(periods)==2
+assert len(periods)==1
 assert 2.9<periods[-1][1]-periods[-1][0]<3.7
 
-def elapsed(a,b):return (b-a)/10+sum(max(0,min(b,y)-max(a,x))*.9 for x,y in periods)
+ending=[r['ending_start'],r['raw_seconds']]
+assert 5.9 <= ending[1]-ending[0] < 10
+assert ending[0]>periods[-1][1]
+slow_periods=periods+[ending]
+def elapsed(a,b):return (b-a)/10+sum(max(0,min(b,y)-max(a,x))*.9 for x,y in slow_periods)
 def time_at(t):return elapsed(frames[0]['t'],t)
 def run(args):subprocess.run(['ffmpeg','-v','error','-y',*args],check=True)
 def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -51,12 +57,12 @@ for name in ['demo.mp4','preview.gif']:run(['-i',str(OUT/name),'-f','null','-'])
 assert abs(float(info(OUT/'preview.gif')['format']['duration'])-duration)<.15
 assert all((OUT/n).stat().st_size<20_000_000 for n in ['demo.mp4','preview.gif','poster.png'])
 scenes=[{'name':s['name'],'at':round(time_at(s['t']),3)} for s in r['scenes']]
-p={'project':'kiri','source_commit':r['source_commit'],'source_tree':r['source_tree'],'source_build_run':r['artifact_run'],'source_build_artifact':r['artifact_id'],'capture_commit':os.environ.get('GITHUB_SHA'),'capture_run':os.environ.get('GITHUB_RUN_ID'),'recording_tool_sha256':sha(Path(__file__).with_name('record.py')),'native':False,'single_take':True,'scene_cuts':0,'recording_resolution':[1920,1080],'duration':duration,'sha256':sha(OUT/'demo.mp4'),'action_speed':10,'countdown_speed':1,'countdown_periods':periods,'added_holds':0,'scenes':scenes,'checks':r['checks'],'poster_time':round(poster_time,3),'previous_media_sha256':hashlib.sha256(Path('docs/demos/demo.mp4').read_bytes()).hexdigest(),'disclosure':'One uninterrupted recording of the unchanged production frontend, coordinated in an isolated multiwindow documentation harness. The same main recording visibly includes actual compact black CountdownWindow (112px, no separate cancel row) and ControlPanelWindow components, cancellation, 3-2-1, pause/resume/stop, saving, library and playback. Native IPC is substituted; this is not native end-to-end validation. The OCR text is an original sample fixture, not a fresh OCR engine result. Screenshot annotation export uses actual canvas bytes. The local sample video is encoded from frames captured during this browser session with paused frames omitted. No provider requests, user files, credentials or runtime capture-protection changes. Operations play 10x; countdowns retain their original timing without any cuts or inserted frames.'}
+p={'project':'kiri','source_commit':r['source_commit'],'source_tree':r['source_tree'],'source_build_run':r['artifact_run'],'source_build_artifact':r['artifact_id'],'capture_commit':os.environ.get('GITHUB_SHA'),'capture_run':os.environ.get('GITHUB_RUN_ID'),'recording_tool_sha256':sha(Path(__file__).with_name('record.py')),'native':False,'single_take':True,'scene_cuts':0,'recording_resolution':[1920,1080],'duration':duration,'sha256':sha(OUT/'demo.mp4'),'action_speed':10,'countdown_speed':1,'countdown_periods':periods,'added_holds':0,'ending_hold_seconds':round(ending[1]-ending[0],3),'scenes':scenes,'checks':r['checks'],'poster_time':round(poster_time,3),'previous_media_sha256':hashlib.sha256(Path('docs/demos/demo.mp4').read_bytes()).hexdigest(),'disclosure':'One uninterrupted recording of the unchanged production frontend, coordinated in an isolated multiwindow documentation harness. The same main recording visibly includes actual compact black CountdownWindow (112px, no separate cancel row) and ControlPanelWindow components, one 3-2-1, pause/resume/stop, saving, library and playback. Native IPC is substituted; this is not native end-to-end validation. The OCR text is a 12-line original sample fixture covering the visible title, checklist and paragraphs, not a fresh OCR engine result. Screenshot annotation export uses actual canvas bytes. The local sample video is encoded from frames captured during this browser session with paused frames omitted. No provider requests, user files, credentials or runtime capture-protection changes. Operations play 10x; the countdown and six-second final-library view retain their captured timing without cuts or inserted stills. No recording-cancellation scene is performed.'}
 p['media']={n:{'bytes':(OUT/n).stat().st_size,'sha256':sha(OUT/n)} for n in ['demo.mp4','preview.gif','poster.png']}
 (OUT/'provenance.json').write_text(json.dumps(p,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 (OUT/'README.md').write_text('''# Kiri demo
 
-Screenshots, annotations, OCR interface, black recording countdown and cancellation, pause/resume, stop/save, library and playback in one continuous demonstration.
+Screenshots, annotations, OCR interface, compact black recording countdown, pause/resume, stop/save, library and playback in one continuous demonstration.
 
 Recorded from the actual production frontend in an isolated multiwindow harness. Native APIs and the OCR response use original sample fixtures; the saved screenshot comes from the annotation canvas and the sample video is encoded from this session's browser frames. This is an interface walkthrough, not native end-to-end acceptance. App code and capture exclusion are unchanged.
 
@@ -65,6 +71,7 @@ Recorded from the actual production frontend in an isolated multiwindow harness.
 # Keep the exact recorder used so the checked-in documentation can reproduce it.
 (OUT/'capture').mkdir(exist_ok=True);shutil.copyfile(Path(__file__).with_name('record.py'),OUT/'capture/record.py')
 (OUT/'review-frames').mkdir(exist_ok=True)
-for name in ['countdown-3','countdown-2','countdown-1','proof-10','proof-12','proof-13','proof-14']:
- shutil.copyfile(ROOT/(name+'.png'),OUT/'review-frames'/(name+'.png'))
+for path in sorted(ROOT.glob('*.png')):
+ if path.name.startswith(('countdown-','proof-')):
+  shutil.copyfile(path,OUT/'review-frames'/path.name)
 print(json.dumps({'duration':duration,'scenes':scenes,'media':p['media']},ensure_ascii=False,indent=2))

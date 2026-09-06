@@ -76,3 +76,5 @@ preserve them without letting obsolete paths or constraints guide current
 development.
 
 - [ADR 0027: Compact countdown](adr/0027-compact-countdown.md)
+
+- [ADR 0028: Committed OCR selection](adr/0028-ocr-committed-selection.md)

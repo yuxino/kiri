@@ -14,7 +14,7 @@ Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Win
 <!-- project-demo-v1 -->
 ## 演示
 
-[![Kiri](docs/demos/preview.gif?v=89634f0d7b78)](docs/demos/demo.mp4)
+[![Kiri](docs/demos/preview.gif?v=a8016aa24b88)](docs/demos/demo.mp4)
 
 [观看视频](docs/demos/demo.mp4)
 

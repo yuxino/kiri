@@ -14,7 +14,7 @@ Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on W
 <!-- project-demo-v1 -->
 ## Demo
 
-[![Kiri](docs/demos/preview.gif?v=89634f0d7b78)](docs/demos/demo.mp4)
+[![Kiri](docs/demos/preview.gif?v=a8016aa24b88)](docs/demos/demo.mp4)
 
 [Watch video](docs/demos/demo.mp4)
 
