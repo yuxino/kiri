@@ -1,0 +1,117 @@
+name: Prepare v1.4.10 demo
+on:
+  push:
+    branches: [release/v1.4.10-demo-polish]
+    paths:
+      - '.github/workflows/prepare-v1.4.10-demo.yml'
+      - 'scripts/maintenance/prepare-v1.4.10.py'
+permissions:
+  contents: write
+concurrency:
+  group: prepare-kiri-v1.4.10
+  cancel-in-progress: false
+jobs:
+  demo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Check clean source and prepare scoped edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status -sb
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python scripts/maintenance/prepare-v1.4.10.py
+          python -m py_compile docs/demos/full-flow/record.py docs/demos/full-flow/package.py
+          node --check docs/demos/full-flow/desktop.js
+          git diff --check
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:release-tools
+      - run: pnpm build
+      - name: Record source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/demos/full-flow/record.py docs/demos/full-flow/package.py docs/demos/full-flow/desktop.js package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock docs/releases/v1.4.10.md
+          git commit -m 'chore: prepare Kiri v1.4.10 and refine the main demo flow'
+          echo "KIRI_SOURCE_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "KIRI_SOURCE_TREE=$(git rev-parse HEAD^{tree})" >> "$GITHUB_ENV"
+          echo "KIRI_DEMO_DIST=$GITHUB_WORKSPACE/dist" >> "$GITHUB_ENV"
+          echo "KIRI_DEMO_OUT=$RUNNER_TEMP/kiri-demo-review" >> "$GITHUB_ENV"
+          echo "FULL_FLOW_REVIEW=$RUNNER_TEMP/kiri-demo-review" >> "$GITHUB_ENV"
+          echo "FULL_FLOW_DELIVERY=$RUNNER_TEMP/kiri-demo-delivery" >> "$GITHUB_ENV"
+      - name: Install recording-only tools
+        run: |
+          python -m pip install playwright==1.55.0 Pillow==11.3.0
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk
+      - name: Record the continuous complete demonstration
+        run: python docs/demos/full-flow/record.py
+      - name: Verify and package MP4, GIF and poster
+        run: python docs/demos/full-flow/package.py
+      - name: Install only verified media and review the diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,re,shutil
+          source=Path(os.environ['FULL_FLOW_DELIVERY']);target=Path('docs/demos')
+          data=json.loads((source/'provenance.json').read_text())
+          assert data['action_speed']==10 and data['scene_cuts']==0 and data['checks']['no_recording_cancel_demo']
+          assert data['checks']['ocr_lines']>=12 and data['ending_hold_seconds']>=5.9
+          for name,check in data['media'].items():
+              blob=(source/name).read_bytes()
+              assert len(blob)==check['bytes'] and hashlib.sha256(blob).hexdigest()==check['sha256']
+          for name in ['demo.mp4','preview.gif','poster.png','provenance.json','README.md']:
+              shutil.copyfile(source/name,target/name)
+          shutil.copyfile(source/'capture/record.py',target/'capture/record.py')
+          stamp=data['media']['preview.gif']['sha256'][:12]
+          for path in [Path('README.md'),Path('README_ZH.md'),Path('README_EN.md'),Path('README_JA.md')]:
+              if path.exists():
+                  text=path.read_text();new=re.sub(r'docs/demos/preview\.gif(?:\?v=[a-f0-9]+)?','docs/demos/preview.gif?v='+stamp,text)
+                  path.write_text(new)
+          assert not any(p.suffix.lower() in ['.pem','.key'] for p in target.rglob('*'))
+          PY
+          rm scripts/maintenance/prepare-v1.4.10.py .github/workflows/prepare-v1.4.10-demo.yml
+          git add docs/demos README.md README_EN.md README_ZH.md README_JA.md scripts/maintenance/prepare-v1.4.10.py .github/workflows/prepare-v1.4.10-demo.yml
+          git diff --cached --check
+          git diff --cached --stat
+          node scripts/release-version.mjs v1.4.10
+          git commit -m 'docs: refresh Kiri demo with full-note OCR and a longer ending'
+          git diff --check
+          git fetch origin release/v1.4.10-demo-polish
+          test "$(git rev-parse origin/release/v1.4.10-demo-polish)" = "$GITHUB_SHA"
+          git push origin HEAD:refs/heads/release/v1.4.10-demo-polish
+          echo "CANDIDATE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Assemble review-only artifacts
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/kiri-review-package"
+          cp -r "$RUNNER_TEMP/kiri-demo-delivery/." "$RUNNER_TEMP/kiri-review-package/" 2>/dev/null || true
+          cp "$RUNNER_TEMP/kiri-demo-review/report.json" "$RUNNER_TEMP/kiri-review-package/record-report.json" 2>/dev/null || true
+          cp "$RUNNER_TEMP/kiri-demo-review/failure.png" "$RUNNER_TEMP/kiri-review-package/" 2>/dev/null || true
+          git log -3 --format='%H %s' > "$RUNNER_TEMP/kiri-review-package/commits.txt"
+          git diff 239afb392666f707501e34920ac76fd0dadb766d --stat > "$RUNNER_TEMP/kiri-review-package/diff-stat.txt"
+          git archive HEAD -o "$RUNNER_TEMP/kiri-review-package/source.tar"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: kiri-v1.4.10-demo-review
+          path: ${{ runner.temp }}/kiri-review-package/
+          retention-days: 5
+          if-no-files-found: error
