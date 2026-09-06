@@ -27,9 +27,11 @@ def exists(name):
  except RuntimeError:return False
 def begin():
  keyboard.send_keys('^+a');find('Record').click_input()
- mouse.press(coords=(int(width*.2),int(height*.2)))
- mouse.move(coords=(int(width*.8),int(height*.65)),duration=.7)
- mouse.release(coords=(int(width*.8),int(height*.65)))
+ x1,y1=int(width*.2),int(height*.2);x2,y2=int(width*.8),int(height*.65)
+ mouse.press(coords=(x1,y1))
+ for step in range(1,21):
+  ctypes.windll.user32.SetCursorPos(round(x1+(x2-x1)*step/20),round(y1+(y2-y1)*step/20));time.sleep(.035)
+ mouse.release(coords=(x2,y2))
  find('Start Recording').click_input()
  return find('Cancel Countdown',timeout=12)
 def no_recording():
@@ -56,7 +58,8 @@ try:
   try:
    for t in cancel.top_level_parent().descendants(control_type='Text'):
     text=t.window_text()
-    if text in ['1','2','3']:seen.add(text)
+    match=re.fullmatch(r'(?:Recording starts in )?([123])',text)
+    if match:seen.add(match.group(1))
   except Exception:pass
   time.sleep(.12)
  report['observed_digits']=sorted(seen)
