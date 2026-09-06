@@ -29,7 +29,7 @@ window.invoke=async(kind,c,a={})=>{
   S.calls.push({c,a:c==='confirm_capture'?'PNG bytes':a,at:performance.now()});
   if(c==='get_language'||c==='get_locale')return 'zh-Hans';
   if(c==='log_frontend_error'){console.error('App error:',a.message);return null;}
-  if(c==='plugin:app|version')return '1.4.9';
+  if(c==='plugin:app|version')return '1.4.10';
   if(c==='plugin:app|name')return 'Kiri';
   if(c==='get_annotation_appearance')return S.appearance;
   if(c==='set_annotation_appearance'){S.appearance=a.appearance;return null;}
@@ -55,7 +55,7 @@ window.invoke=async(kind,c,a={})=>{
   }
   if(c==='get_ocr_provider_settings')return {schemaVersion:1,activeEngine:{kind:'local'},profiles:[]};
   if(c==='prepare_ocr_request')return {requestId:'original-page-text',engine:{kind:'local'},imageWidth:Math.round(a.selection.width*1.5),imageHeight:Math.round(a.selection.height*1.5),byteLength:2048};
-  if(c==='recognize_prepared_ocr_local'){await new Promise(r=>setTimeout(r,650));return '把有用的细节，留在眼前。\n圈出重点，复制文字，再用一段录屏说明过程。';}
+  if(c==='recognize_prepared_ocr_local'){await new Promise(r=>setTimeout(r,650));return '把有用的细节，留在眼前。\n圈出重点，复制文字，再用一段录屏说明过程。\n今天的小目标\n整理界面里的关键内容\n用标注说明一个想法\n录下完整的操作过程\n一段值得留下的话\n不需要把所有事情一次做完。\n先完成眼前这一件，再开始下一件。\n完成整理\n慢慢来，也很好。\n随手记下，随时回看。';}
   if(c==='cancel_prepared_ocr')return null;
   if(c==='copy_text'){S.copiedText=a.text;hideWindow('overlay');return null;}
   if(c==='start_recording_flow'){

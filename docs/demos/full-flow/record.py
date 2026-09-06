@@ -112,14 +112,12 @@ async def run(args):
    await click(o.get_by_role('button',name=re.compile('完成.*Return')))
    await page.wait_for_function("state.assets.some(a=>a.kind==='image')")
    report['checks']['screenshot_saved']=True;await mark('截图完成与本地素材',4)
-   o=await capture('文字');await drag(210,150,1015,292);await o.get_by_text('识别结果',exact=True).wait_for();await mark('文字识别结果')
+   o=await capture('文字');await drag(194,104,1090,641);await o.get_by_text('识别结果',exact=True).wait_for();await mark('整页文字识别：标题、清单和段落',12)
    await click(o.get_by_role('button',name='复制',exact=True));await wait(2)
+   copied=await page.evaluate('state.copiedText');report['checks']['ocr_lines']=len(copied.splitlines());assert report['checks']['ocr_lines']>=12
+   report['checks']['ocr_selection']={'x':194,'y':104,'width':896,'height':537}
    o=await capture('录屏');await drag(180,115,1110,566);await mark('区域录屏选区与选项')
    await click(o.get_by_role('button',name='开始录制',exact=True),pause=0)
-   c=page.frame_locator('#countdown');await c.get_by_role('button',name='取消倒计时').wait_for();await page.wait_for_timeout(250)
-   await pixels(path=str(OUT/'countdown-cancel.png'));await c.locator('.kiri-countdown').press('Escape')
-   report['checks']['countdown_cancelled']=await page.locator('#countdown').count()==0;await mark('按 Esc 取消倒计时',4)
-   o=await capture('录屏');await drag(180,115,1110,566);await click(o.get_by_role('button',name='开始录制',exact=True),pause=0)
    c=page.frame_locator('#countdown');await c.get_by_role('button',name='取消倒计时').wait_for();seen=[]
    await page.mouse.move(1180,630,steps=12)
    size=await c.locator('.kiri-countdown-ring').evaluate('(e)=>({width:e.offsetWidth,height:e.offsetHeight})')
@@ -141,7 +139,9 @@ async def run(args):
    t=page.frame_locator('#toast');await click(t.get_by_role('button',name='打开录屏预览',exact=True))
    viewer=page.frame_locator('#viewer');await viewer.locator('video').wait_for();await viewer.locator('video').evaluate('(v)=>v.play()');await mark('回放刚保存的录制',10)
    report['checks']['video_playback_ready']=await viewer.locator('video').evaluate('(v)=>v.readyState>=2&&!v.error')
-   await page.evaluate('openLibrary()');await mark('截图和录屏都在素材库')
+   await page.evaluate('openLibrary()');await page.frame_locator('#library').get_by_role('button',name='设置',exact=True).wait_for();await wait(1)
+   report['ending_start']=time.monotonic()-start;await mark('截图和录屏都在素材库',6)
+   report['checks']['no_recording_cancel_demo']=await page.evaluate("!state.calls.some(x=>x.c==='cancel_recording_flow')");assert report['checks']['no_recording_cancel_demo']
    report['checks']['saved_assets']=await page.evaluate('state.assets.map(x=>x.kind)');report['success']=not report['errors']
   except Exception as e:
    report['failure']=str(e);print('FAIL',str(e),flush=True);await pixels(path=str(OUT/'failure.png'))
