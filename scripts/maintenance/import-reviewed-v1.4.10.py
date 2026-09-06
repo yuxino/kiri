@@ -26,15 +26,16 @@ plain=[
 ]
 for name in plain:
  destination=ROOT/name;destination.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source/name,destination)
-for name in ['docs/demos/full-flow/__pycache__/package.cpython-312.pyc','docs/demos/full-flow/__pycache__/record.cpython-312.pyc','docs/demos/capture/record.py','scripts/maintenance/finish-v1.4.10-ocr.py']:
- (ROOT/name).unlink(missing_ok=True)
+deletions=['docs/demos/full-flow/__pycache__/package.cpython-312.pyc','docs/demos/full-flow/__pycache__/record.cpython-312.pyc','docs/demos/capture/record.py','scripts/maintenance/finish-v1.4.10-ocr.py']
+for name in deletions:(ROOT/name).unlink(missing_ok=True)
 # Check every application/build input, not just modified code, against the recording.
 inputs=[p for folder in ['src','src-tauri','public'] for p in (source/folder).rglob('*') if p.is_file()]
 inputs += [source/n for n in ['package.json','pnpm-lock.yaml','tsconfig.json','vite.config.ts','index.html'] if (source/n).is_file()]
 for file in inputs:
  assert (ROOT/file.relative_to(source)).read_bytes()==file.read_bytes(),str(file)
 subprocess.run(['node','scripts/release-version.mjs','v1.4.10'],check=True)
-subprocess.run(['git','add','--',*plain,'docs/demos/full-flow/__pycache__','docs/demos/capture/record.py','scripts/maintenance/finish-v1.4.10-ocr.py'],check=True)
+subprocess.run(['git','add','--',*plain],check=True)
+subprocess.run(['git','add','-u','--',*deletions],check=True)
 subprocess.run(['git','diff','--cached','--check'],check=True)
 assert '.github/workflows/' not in subprocess.check_output(['git','diff','--cached','--name-only'],text=True)
 subprocess.run(['git','commit','-m','fix: commit OCR only on release and preserve full selection bounds'],check=True)
