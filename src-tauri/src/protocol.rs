@@ -3,7 +3,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
@@ -284,51 +284,21 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
         return not_found();
     }
 
-    // Downsampled previews for the library grid. Generation is serialized so
-    // several newly visible 4K captures cannot all allocate decoder surfaces
-    // at once; encoded results live in the bounded LRU above.
-    if route == "thumbnail" {
-        if let Ok(id) = uuid::Uuid::parse_str(&path) {
-            let (kind, file_path) = {
-                let mut context = state.library.lock().unwrap();
-                let Ok(library) = context.library() else {
-                    return not_found();
-                };
-                match library.asset_by_id(&id).cloned() {
-                    Some(asset) => match library.readable_asset_url(&asset) {
-                        Ok(path) => (asset.kind, path),
-                        Err(_) => return not_found(),
-                    },
-                    None => return not_found(),
-                }
-            };
-            let cache_key = id.to_string();
-            if let Some(bytes) = store.thumbnails.lock().unwrap().get(&cache_key) {
-                return respond(bytes, "image/png");
-            }
-
-            let _generation = store.thumbnail_generation.lock().unwrap();
-            // Another request may have populated the same key while this one
-            // was waiting for the single thumbnail worker.
-            if let Some(bytes) = store.thumbnails.lock().unwrap().get(&cache_key) {
-                return respond(bytes, "image/png");
-            }
-            let thumbnail = match kind {
-                CaptureKind::Image | CaptureKind::Gif => {
-                    crate::thumbnail::image_thumbnail(&file_path)
-                }
-                CaptureKind::Video => crate::thumbnail::video_first_frame(&file_path),
-            };
-            if let Some(thumbnail) = thumbnail {
-                store
-                    .thumbnails
-                    .lock()
-                    .unwrap()
-                    .insert(cache_key, thumbnail.clone());
-                return respond(thumbnail, "image/png");
-            }
-        }
-        return not_found();
+    // Both preview routes share resolution, decoding, and cache invalidation.
+    // The legacy asset route keeps full-resolution PNGs for image viewers.
+    if route == "thumbnail" || route == "asset" {
+        return uuid::Uuid::parse_str(&path)
+            .ok()
+            .and_then(|id| {
+                asset_preview_bytes(&store, id, route == "asset", || {
+                    let mut context = state.library.lock().unwrap();
+                    let library = context.library().ok()?;
+                    let asset = library.asset_by_id(&id)?;
+                    Some((asset.kind, library.readable_asset_url(asset).ok()?))
+                })
+            })
+            .map(respond_png)
+            .unwrap_or_else(not_found);
     }
 
     // Immutable clean source for a validated editable screenshot project.
@@ -347,58 +317,6 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
             };
             if let Some(source) = source {
                 return respond_png(source);
-            }
-        }
-        return not_found();
-    }
-
-    // Library assets by id: kiri://asset/<id>
-    if route == "asset" {
-        let rest = &path;
-        if let Ok(id) = uuid::Uuid::parse_str(rest) {
-            // Resolve the file path while holding the lock, then drop it
-            // before native thumbnail generation (decoding can take ~100ms).
-            let (kind, file_path) = {
-                let mut context = state.library.lock().unwrap();
-                let Ok(library) = context.library() else {
-                    return not_found();
-                };
-                match library.asset_by_id(&id).cloned() {
-                    Some(asset) => match library.readable_asset_url(&asset) {
-                        Ok(path) => (asset.kind, path),
-                        Err(_) => return not_found(),
-                    },
-                    None => return not_found(),
-                }
-            };
-            if kind == CaptureKind::Image {
-                if let Ok(bytes) = std::fs::read(&file_path) {
-                    return respond(bytes, "image/png");
-                }
-            }
-            // Video / GIF: serve a first-frame thumbnail (cached in memory).
-            let cache_key = id.to_string();
-            if let Some(bytes) = store.thumbnails.lock().unwrap().get(&cache_key) {
-                return respond(bytes, "image/png");
-            }
-            if kind == CaptureKind::Gif {
-                if let Some(thumbnail) = crate::thumbnail::image_thumbnail(&file_path) {
-                    store
-                        .thumbnails
-                        .lock()
-                        .unwrap()
-                        .insert(cache_key, thumbnail.clone());
-                    return respond(thumbnail, "image/png");
-                }
-                return not_found();
-            }
-            if let Some(thumbnail) = crate::thumbnail::video_first_frame(&file_path) {
-                store
-                    .thumbnails
-                    .lock()
-                    .unwrap()
-                    .insert(cache_key, thumbnail.clone());
-                return respond(thumbnail, "image/png");
             }
         }
         return not_found();
@@ -434,6 +352,37 @@ pub fn handle(app: &tauri::AppHandle, request: &Request<Vec<u8>>) -> Response<Ve
     }
 
     not_found()
+}
+
+/// Resolve the current library path *after* acquiring the mutation barrier.
+/// Resolving first can retain a pre-migration path while invalidation completes,
+/// then repopulate the cache from the obsolete copy. Even hits must resolve the
+/// asset so an offline library or missing file cannot expose a stale preview.
+fn asset_preview_bytes(
+    store: &ProtocolStore,
+    id: uuid::Uuid,
+    full_image: bool,
+    resolve: impl FnOnce() -> Option<(CaptureKind, PathBuf)>,
+) -> Option<Vec<u8>> {
+    let _generation = store.thumbnail_generation.lock().unwrap();
+    let (kind, path) = resolve()?;
+    if full_image && kind == CaptureKind::Image {
+        return std::fs::read(path).ok();
+    }
+    let key = id.to_string();
+    if let Some(bytes) = store.thumbnails.lock().unwrap().get(&key) {
+        return Some(bytes);
+    }
+    let thumbnail = match kind {
+        CaptureKind::Image | CaptureKind::Gif => crate::thumbnail::image_thumbnail(&path),
+        CaptureKind::Video => crate::thumbnail::video_first_frame(&path),
+    }?;
+    store
+        .thumbnails
+        .lock()
+        .unwrap()
+        .insert(key, thumbnail.clone());
+    Some(thumbnail)
 }
 
 fn frozen_png_for_path(store: &ProtocolStore, path: &str) -> Option<Vec<u8>> {
@@ -666,6 +615,81 @@ fn not_found() -> Response<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_resolution_and_cache_hits_hold_the_mutation_barrier() {
+        let store = ProtocolStore::new();
+        let id = uuid::Uuid::new_v4();
+        store
+            .thumbnails
+            .lock()
+            .unwrap()
+            .insert(id.to_string(), vec![7]);
+        // Video/GIF previews served through either URL must use the same cache
+        // and barrier, including the legacy asset route.
+        for full_image in [false, true] {
+            let bytes = asset_preview_bytes(&store, id, full_image, || {
+                assert!(store.thumbnail_generation.try_lock().is_err());
+                Some((CaptureKind::Video, PathBuf::from("unused-cached-video.mp4")))
+            });
+            assert_eq!(bytes, Some(vec![7]));
+            assert!(asset_preview_bytes(&store, id, full_image, || None).is_none());
+        }
+    }
+
+    #[test]
+    fn preview_invalidation_waits_for_in_flight_generation_and_removes_its_result() {
+        let store = ProtocolStore::new();
+        let id = uuid::Uuid::new_v4();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("preview.png");
+        image::RgbaImage::new(8, 8).save(&path).unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let generation_store = &store;
+            let generation_path = path.clone();
+            let generation = scope.spawn(move || {
+                asset_preview_bytes(generation_store, id, false, || {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                    Some((CaptureKind::Image, generation_path))
+                })
+            });
+            started_rx.recv().unwrap();
+            let invalidation = scope.spawn(|| {
+                with_thumbnail_invalidation(&store, id, || std::fs::remove_file(&path)).unwrap();
+            });
+            release_tx.send(()).unwrap();
+            assert!(generation.join().unwrap().is_some());
+            invalidation.join().unwrap();
+        });
+        assert!(store
+            .thumbnails
+            .lock()
+            .unwrap()
+            .get(&id.to_string())
+            .is_none());
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn full_image_previews_keep_original_pixels_without_polluting_thumbnail_cache() {
+        let store = ProtocolStore::new();
+        let id = uuid::Uuid::new_v4();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("original.png");
+        image::RgbaImage::new(1280, 320).save(&path).unwrap();
+        let resolve = || Some((CaptureKind::Image, path.clone()));
+        let thumbnail = asset_preview_bytes(&store, id, false, resolve).unwrap();
+        let full_image = asset_preview_bytes(&store, id, true, resolve).unwrap();
+        assert_eq!(full_image, std::fs::read(&path).unwrap());
+        assert_eq!(image::load_from_memory(&thumbnail).unwrap().width(), 640);
+        assert_eq!(
+            asset_preview_bytes(&store, id, false, resolve),
+            Some(thumbnail)
+        );
+    }
 
     fn parsed_route(uri: &str) -> Option<ProtocolRoute> {
         let request = Request::builder().uri(uri).body(Vec::<u8>::new()).unwrap();

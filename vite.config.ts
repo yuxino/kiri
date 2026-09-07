@@ -1,11 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { compactTranslationsPlugin } from "./scripts/compact-translations.mjs";
 
 // Tauri expects a fixed port in dev; production builds are static files.
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [compactTranslationsPlugin(import.meta.dirname), react()],
   clearScreen: false,
   server: {
     port: 1420,

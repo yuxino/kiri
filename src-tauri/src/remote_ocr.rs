@@ -75,18 +75,17 @@ impl RemoteOcrClient {
             EndpointRoute::LoopbackNoProxy => &self.loopback_client,
         };
 
-        let mut response = client
+        let request = client
             .post(endpoint.clone())
             .bearer_auth(api_key.expose_secret())
-            .json(&body)
+            .json(&body);
+        // json() already serialized into the request's owned bytes. Release
+        // the Base64-bearing DTO before waiting up to 45 seconds for headers.
+        drop(body);
+        let mut response = request
             .send()
             .await
             .map_err(|_| RemoteOcrError::RequestFailed)?;
-        // `json` serializes into reqwest's owned request bytes before the
-        // request is sent. Release the additional Base64-bearing DTO as soon
-        // as the response arrives instead of retaining a second copy while
-        // the response body is read and parsed.
-        drop(body);
 
         let status = response.status();
         if !status.is_success() {

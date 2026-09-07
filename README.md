@@ -13,13 +13,13 @@
 Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Windows），选择窗口或区域，即可截图、标注、识别文字或录屏。截图会复制到剪贴板；截图、MP4 和 GIF 保存在本地素材库。
 
 <!-- project-demo-v1 -->
-## 演示
+<h2 align="center">演示</h2>
 
-[![Kiri](docs/demos/preview.gif?v=a8016aa24b88)](docs/demos/demo.mp4)
-
-[观看视频](docs/demos/demo.mp4)
-
-截图、标注、识别文字和录屏，在素材库里统一查看。
+<p align="center">
+  <a href="docs/demos/demo.mp4"><img src="docs/demos/preview.gif?v=a8016aa24b88" alt="Kiri"></a>
+</p>
+<p align="center">截图、标注、识别文字和录屏，在素材库里统一查看。</p>
+<p align="center"><a href="docs/demos/demo.mp4">观看视频</a></p>
 <!-- /project-demo-v1 -->
 
 ## 功能

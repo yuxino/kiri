@@ -34,7 +34,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 arboard = "3"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }
+image = { version = "0.25", default-features = false, features = ["png", "gif"] }
 sys-locale = "0.3"
 dirs = "6"
 log = "0.4"

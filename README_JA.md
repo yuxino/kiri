@@ -13,13 +13,13 @@
 Kiri は macOS と Windows に対応しています。macOS では `⇧⌘A`、Windows では `Shift+Ctrl+A` を押し、ウインドウまたは範囲を選択して、キャプチャ、注釈、文字認識、録画を行えます。スクリーンショットはクリップボードへコピーされ、画像、MP4、GIF はローカルライブラリに保存されます。
 
 <!-- project-demo-v1 -->
-## デモ
+<h2 align="center">デモ</h2>
 
-[![Kiri](docs/demos/preview.gif?v=a8016aa24b88)](docs/demos/demo.mp4)
-
-[動画を見る](docs/demos/demo.mp4)
-
-スクリーンショット・注釈・文字認識・画面録画を、ライブラリでまとめて管理。
+<p align="center">
+  <a href="docs/demos/demo.mp4"><img src="docs/demos/preview.gif?v=a8016aa24b88" alt="Kiri"></a>
+</p>
+<p align="center">スクリーンショット・注釈・文字認識・画面録画を、ライブラリでまとめて管理。</p>
+<p align="center"><a href="docs/demos/demo.mp4">動画を見る</a></p>
 <!-- /project-demo-v1 -->
 
 ## 機能
