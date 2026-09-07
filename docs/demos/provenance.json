@@ -116,7 +116,8 @@
   "media": {
     "demo.mp4": {
       "bytes": 980432,
-      "sha256": "f6f0d2f79880c0ae2990221f708940aadd70dd0365a0ca4ccc5abf9de01df5ab"
+      "sha256": "f6f0d2f79880c0ae2990221f708940aadd70dd0365a0ca4ccc5abf9de01df5ab",
+      "url": "https://github.com/yuxino/kiri/releases/download/v1.4.11/kiri-demo.mp4"
     },
     "preview.gif": {
       "bytes": 2150027,

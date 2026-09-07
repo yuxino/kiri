@@ -9,3 +9,5 @@ Run `python docs/demos/full-flow/record.py` from the repository root, then set `
 `--fast` checks the interactions but is not a publishable recording. The packager rejects incomplete flows, bad dimensions, missing countdown or pause/playback checks, renderer errors and mismatched timing. All network requests except local fixture resources are blocked. Never use personal files or credentials in the sample.
 
 The published main MP4 includes the countdown and controls directly in its captured frames, not as separately rendered material pasted into an older video.
+
+Publish the reviewed MP4 as a Release asset, record its URL in `provenance.json`, and point the root README video links to it. Keep the preview and poster in Git; do not add the generated MP4 to the repository.

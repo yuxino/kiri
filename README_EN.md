@@ -15,10 +15,10 @@ Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on W
 <h2 align="center">Demo</h2>
 
 <p align="center">
-  <a href="docs/demos/demo.mp4"><img src="docs/demos/preview.gif?v=a8016aa24b88" alt="Kiri"></a>
+  <a href="https://github.com/yuxino/kiri/releases/download/v1.4.11/kiri-demo.mp4"><img src="docs/demos/preview.gif?v=a8016aa24b88" alt="Kiri"></a>
 </p>
 <p align="center">Capture, annotate, recognize text, and record your screen. Keep everything together in the library.</p>
-<p align="center"><a href="docs/demos/demo.mp4">Watch video</a></p>
+<p align="center"><a href="https://github.com/yuxino/kiri/releases/download/v1.4.11/kiri-demo.mp4">Watch video</a></p>
 <!-- /project-demo-v1 -->
 
 ## Features

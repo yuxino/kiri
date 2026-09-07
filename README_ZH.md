@@ -15,10 +15,10 @@ Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Win
 <h2 align="center">演示</h2>
 
 <p align="center">
-  <a href="docs/demos/demo.mp4"><img src="docs/demos/preview.gif?v=a8016aa24b88" alt="Kiri"></a>
+  <a href="https://github.com/yuxino/kiri/releases/download/v1.4.11/kiri-demo.mp4"><img src="docs/demos/preview.gif?v=a8016aa24b88" alt="Kiri"></a>
 </p>
 <p align="center">截图、标注、识别文字和录屏，在素材库里统一查看。</p>
-<p align="center"><a href="docs/demos/demo.mp4">观看视频</a></p>
+<p align="center"><a href="https://github.com/yuxino/kiri/releases/download/v1.4.11/kiri-demo.mp4">观看视频</a></p>
 <!-- /project-demo-v1 -->
 
 ## 功能

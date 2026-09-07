@@ -28,3 +28,6 @@ src-tauri/binaries/ffmpeg-current/*
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+
+# Full demo video is distributed through GitHub Releases.
+/docs/demos/demo.mp4
