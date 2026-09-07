@@ -4,8 +4,8 @@
   <p>A local-first tool for screenshots, annotation, OCR, and region recording.</p>
   <p>
     <a href="https://kiri.yuxino.cn">Website</a>
-    · <a href="README.md">简体中文</a>
-    · <strong>English</strong>
+    · <a href="README_ZH.md">简体中文</a>
+    · <a href="README.md">English</a>
   </p>
 </div>
 
@@ -25,7 +25,7 @@ Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on W
 
 - **Screenshots and annotation**: click a window or drag a region, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Annotations created by current releases can be reopened from the completion card or library.
 - **OCR**: recognize text locally with macOS Vision or Windows.Media.Ocr by default; optional remote OCR asks before every upload.
-- **Recording and GIF**: record a region with optional system audio, microphone, pointer, and click highlights; save as MP4 or GIF.
+- **Recording and GIF**: record a region with optional system audio, microphone, pointer, and click highlights. A compact ring counts down before recording; click the ring or press Esc to cancel. Save as MP4 or GIF.
 - **Local library**: search, favorite, tag, rename, and move captures to recoverable Trash. Settings can use another local directory or external disk for the library.
 
 ## Download and install

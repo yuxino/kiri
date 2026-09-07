@@ -5,7 +5,7 @@
   <p>
     <a href="https://kiri.yuxino.cn">官网</a>
     · <strong>简体中文</strong>
-    · <a href="README_EN.md">English</a>
+    · <a href="README.md">English</a>
   </p>
 </div>
 
