@@ -14,6 +14,8 @@ application or a durable product decision.
   network, credential, and local-data boundaries.
 - [`windows-capture-incident.md`](windows-capture-incident.md) — current
   Windows screenshot lifecycle failure, diagnostics, and native retest gate.
+- [`releases/v1.4.11.md`](releases/v1.4.11.md) — capture reliability, preview
+  synchronization, and smaller application resources.
 - [`releases/v1.4.9.md`](releases/v1.4.9.md) — first signed-updater release
   notes and one-time bootstrap instructions.
 
