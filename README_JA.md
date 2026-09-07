@@ -3,7 +3,8 @@
   <h1>Kiri</h1>
   <p>ローカル優先のスクリーンショット、注釈、OCR、範囲録画ツール。</p>
   <p>
-    <a href="README.md">简体中文</a>
+    <a href="https://kiri.yuxino.cn">公式サイト</a>
+    · <a href="README.md">简体中文</a>
     · <a href="README_EN.md">English</a>
     · <strong>日本語</strong>
   </p>

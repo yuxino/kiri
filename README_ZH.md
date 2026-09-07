@@ -3,7 +3,8 @@
   <h1>Kiri</h1>
   <p>本地优先的截图、标注、OCR 与区域录屏工具。</p>
   <p>
-    <strong>简体中文</strong>
+    <a href="https://kiri.yuxino.cn">官网</a>
+    · <strong>简体中文</strong>
     · <a href="README_EN.md">English</a>
     · <a href="README_JA.md">日本語</a>
   </p>
