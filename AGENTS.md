@@ -147,7 +147,6 @@ through GitHub Actions (`.github/workflows/build.yml`).
   string is the key (matching the Swift L10n behavior).
 - Keep the English, zh-Hans, and Japanese dictionaries identical in key set.
 - Update `README.md` and `README_ZH.md` together for user-visible behavior.
-  `README_JA.md` is not synchronized; do not claim it is.
 - Record durable interaction changes as a new ADR instead of rewriting old
   history without explanation.
 

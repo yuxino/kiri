@@ -6,7 +6,6 @@
     <a href="https://kiri.yuxino.cn">Website</a>
     · <a href="README.md">简体中文</a>
     · <strong>English</strong>
-    · <a href="README_JA.md">日本語</a>
   </p>
 </div>
 
