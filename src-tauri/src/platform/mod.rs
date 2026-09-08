@@ -212,7 +212,8 @@ pub fn window_capture_id(_app: &tauri::AppHandle, _label: &str) -> Option<u32> {
     None
 }
 
-/// Brings the app itself to the foreground (so overlay webviews get keys).
+/// Windows-only activation hook for the capture overlay.
+#[cfg(windows)]
 pub fn activate_self() {
     current::activate_self();
 }

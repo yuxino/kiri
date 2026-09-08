@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  createLibraryHarness,
+  deferred,
+  nodes,
+  settleRequests,
+  testAsset,
+} from "./helpers/library-render-harness.mjs";
 
 import {
   getAvailableShortcutLabel,
@@ -136,3 +143,154 @@ test("empty library advertises only an available global shortcut", () => {
   );
   assert.equal(getAvailableShortcutLabel(null), null);
 });
+
+function cardProps(overrides = {}) {
+  return {
+    asset: testAsset,
+    thumbnailRevision: 0,
+    menuOpen: false,
+    menu: null,
+    selected: false,
+    selectionActive: false,
+    onMenu() {},
+    onOpen() {},
+    registerRef() {},
+    onAvailability() {},
+    async onRestoreMissing() {},
+    ...overrides,
+  };
+}
+
+function preview(tree) {
+  return nodes(tree).find((node) => node?.type === "img" || node?.type === "video");
+}
+
+for (const kind of ["image", "video", "gif"]) {
+  test(`${kind} preview failure clears when updated content arrives without resetting card editing`, async () => {
+    const harness = createLibraryHarness();
+    const props = cardProps({ asset: { ...testAsset, kind } });
+    const card = harness.mount("AssetCard", props);
+    preview(card.render()).props.onError();
+    await settleRequests();
+    assert.ok(nodes(card.render()).includes("Preview unavailable"));
+
+    harness.window.dispatchEvent({ type: `kiri-rename:${testAsset.id}` });
+    assert.ok(nodes(card.render()).some((node) => node?.type === "input"));
+    const updated = card.render({ ...props, thumbnailRevision: 1, availability: "ready" });
+    assert.ok(preview(updated), "updated content must remount the preview");
+    assert.ok(!nodes(updated).includes("Preview unavailable"));
+    assert.ok(nodes(updated).some((node) => node?.type === "input"), "rename state must survive");
+    card.unmount();
+  });
+}
+
+for (const result of ["missing", "rejected"]) {
+  test(`an old ${result} availability response cannot overwrite updated content`, async () => {
+    const request = deferred();
+    const reports = [];
+    const harness = createLibraryHarness({ getAssetAvailability: () => request.promise });
+    const props = cardProps({ onAvailability: (status) => reports.push(status) });
+    const card = harness.mount("AssetCard", props);
+    preview(card.render()).props.onError();
+    card.render({ ...props, thumbnailRevision: 1, availability: "ready" });
+    if (result === "rejected") request.reject(new Error("old request failed"));
+    else request.resolve({ status: result });
+    await settleRequests();
+    assert.deepEqual(reports, []);
+    assert.ok(preview(card.render()));
+    card.unmount();
+  });
+}
+
+test("only the newest availability request can publish a result", async () => {
+  const oldRequest = deferred();
+  const newRequest = deferred();
+  const requests = [oldRequest, newRequest];
+  const reports = [];
+  const harness = createLibraryHarness({ getAssetAvailability: () => requests.shift().promise });
+  const card = harness.mount("AssetCard", cardProps({ onAvailability: (status) => reports.push(status) }));
+  const onError = preview(card.render()).props.onError;
+  onError();
+  onError();
+  newRequest.resolve({ status: "missing" });
+  await settleRequests();
+  oldRequest.resolve({ status: "ready" });
+  await settleRequests();
+  assert.deepEqual(reports, ["missing"]);
+  assert.ok(!nodes(card.render()).includes("Preview unavailable"));
+  card.unmount();
+});
+
+test("removed cards cannot publish a pending availability result", async () => {
+  const request = deferred();
+  const reports = [];
+  const harness = createLibraryHarness({ getAssetAvailability: () => request.promise });
+  const card = harness.mount("AssetCard", cardProps({ onAvailability: (status) => reports.push(status) }));
+  preview(card.render()).props.onError();
+  card.unmount();
+  request.resolve({ status: "missing" });
+  await settleRequests();
+  assert.deepEqual(reports, []);
+});
+
+test("content events reject old card reports even before the next render", async () => {
+  const harness = createLibraryHarness();
+  const library = harness.mount("LibraryWindow", {});
+  library.render();
+  await settleRequests();
+  const card = nodes(library.render()).find((node) => node?.type?.name === "AssetCard");
+  assert.ok(card);
+  harness.emit("assetContentChanged", testAsset.id);
+  card.props.onAvailability("missing");
+  const updated = nodes(library.render()).find((node) => node?.type?.name === "AssetCard");
+  assert.equal(updated.props.thumbnailRevision, 1);
+  assert.equal(updated.props.availability, "ready");
+  library.unmount();
+});
+
+test("a detached preview error cannot start a check for the new revision", async () => {
+  let requests = 0;
+  const harness = createLibraryHarness({
+    getAssetAvailability: async () => { requests++; return { status: "missing" }; },
+  });
+  const props = cardProps();
+  const card = harness.mount("AssetCard", props);
+  const oldError = preview(card.render()).props.onError;
+  card.render({ ...props, thumbnailRevision: 1, availability: "ready" });
+  oldError();
+  await settleRequests();
+  assert.equal(requests, 0);
+  assert.ok(preview(card.render()));
+  card.unmount();
+});
+
+for (const outcome of ["ready", "rejected"]) {
+  test(`preview retry settles its busy state when the check is ${outcome}`, async () => {
+    const retry = deferred();
+    let calls = 0;
+    const harness = createLibraryHarness({
+      getAssetAvailability: () => ++calls === 1 ? Promise.resolve({ status: "ready" }) : retry.promise,
+    });
+    const card = harness.mount("AssetCard", cardProps());
+    const firstKey = preview(card.render()).props.key;
+    preview(card.render()).props.onError();
+    await settleRequests();
+    const retryButton = (tree) => nodes(tree).find((node) =>
+      node?.type === "button" && nodes(node).includes("Retry"));
+    retryButton(card.render()).props.onClick({ stopPropagation() {} });
+    assert.equal(retryButton(card.render()).props.disabled, true);
+    if (outcome === "ready") retry.resolve({ status: "ready" });
+    else retry.reject(new Error("availability unavailable"));
+    await settleRequests();
+    const tree = card.render();
+    if (outcome === "ready") {
+      const retriedPreview = preview(tree);
+      assert.ok(retriedPreview);
+      assert.notEqual(retriedPreview.props.key, firstKey);
+    } else {
+      assert.ok(nodes(tree).includes("Preview unavailable"));
+      assert.equal(retryButton(tree).props.disabled, false);
+    }
+    card.unmount();
+  });
+}

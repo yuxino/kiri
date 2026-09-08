@@ -87,6 +87,7 @@ export function LibraryWindow() {
   const [pendingRetryBusy, setPendingRetryBusy] = useState(false);
   const [assetAvailability, setAssetAvailability] = useState<Record<string, AssetAvailability>>({});
   const [thumbnailRevisions, setThumbnailRevisions] = useState<Record<string, number>>({});
+  const thumbnailRevisionsRef = useRef<Record<string, number>>({});
   const [notice, setNotice] = useState<NoticeDto | null>(null);
   const [error, setError] = useState<ErrorDto | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -311,6 +312,18 @@ export function LibraryWindow() {
   const showingTrashRef = useRef(showingTrash);
   showingTrashRef.current = showingTrash;
 
+  const refreshAssetContent = useCallback((assetId: string) => {
+    // Advance synchronously: an old card's IPC reply can arrive after the
+    // content event but before React has rendered the new thumbnail revision.
+    const revisions = {
+      ...thumbnailRevisionsRef.current,
+      [assetId]: (thumbnailRevisionsRef.current[assetId] ?? 0) + 1,
+    };
+    thumbnailRevisionsRef.current = revisions;
+    setThumbnailRevisions(revisions);
+    setAssetAvailability((current) => ({ ...current, [assetId]: "ready" }));
+  }, []);
+
   const refresh = useCallback(async () => {
     const generation = ++refreshGenerationRef.current;
     try {
@@ -352,13 +365,7 @@ export function LibraryWindow() {
       onLibraryChanged(() => {
         void refresh().catch(() => {});
       }),
-      onAssetContentChanged((assetId) => {
-        setThumbnailRevisions((revisions) => ({
-          ...revisions,
-          [assetId]: (revisions[assetId] ?? 0) + 1,
-        }));
-        setAssetAvailability((current) => ({ ...current, [assetId]: "ready" }));
-      }),
+      onAssetContentChanged(refreshAssetContent),
       onGifConversionState(({ id, isConverting }) => {
         setGifConversionIds((current) => {
           const next = new Set(current);
@@ -380,7 +387,7 @@ export function LibraryWindow() {
         void subscription.then((dispose) => dispose()).catch(() => {});
       });
     };
-  }, [refresh]);
+  }, [refresh, refreshAssetContent]);
 
   // ⌘/Ctrl+F focuses search. Batch selection is intentionally pointer-only
   // so selection chrome appears only after a visible rubber-band gesture.
@@ -494,16 +501,12 @@ export function LibraryWindow() {
     try {
       const restored = await api.restoreMissingAsset(id);
       if (!restored) return;
-      setAssetAvailability((current) => ({ ...current, [id]: "ready" }));
-      setThumbnailRevisions((revisions) => ({
-        ...revisions,
-        [id]: (revisions[id] ?? 0) + 1,
-      }));
+      refreshAssetContent(id);
       await refresh();
     } catch {
       setError({ message: "Couldn't restore this file", recovery: null });
     }
-  }, [refresh]);
+  }, [refresh, refreshAssetContent]);
 
   const runLibraryRecovery = useCallback(async (action: () => Promise<unknown>) => {
     if (libraryRecoveryBusy) return;
@@ -1017,6 +1020,8 @@ export function LibraryWindow() {
                       else cardElsRef.current.delete(asset.id);
                     }}
                     onAvailability={(availability) => {
+                      if ((thumbnailRevisionsRef.current[asset.id] ?? 0) !==
+                          (thumbnailRevisions[asset.id] ?? 0)) return;
                       setAssetAvailability((current) => ({
                         ...current,
                         [asset.id]: availability,
@@ -1278,31 +1283,44 @@ function AssetCard(props: {
   const [previewFailed, setPreviewFailed] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  const previewKey = `${asset.id}:${thumbnailRevision}`;
+  const previewKeyRef = useRef<string | null>(previewKey);
+  const previewRequestRef = useRef(0);
+  previewKeyRef.current = previewKey;
+
+  useEffect(() => {
+    previewKeyRef.current = previewKey;
+    setPreviewFailed(false);
+    setPreviewBusy(false);
+    return () => {
+      previewKeyRef.current = null;
+      previewRequestRef.current += 1;
+    };
+  }, [previewKey]);
 
   const checkAvailability = async (mediaFailed = false) => {
+    if (previewKeyRef.current !== previewKey) return;
+    const request = ++previewRequestRef.current;
+    const isCurrent = () => previewKeyRef.current === previewKey &&
+      previewRequestRef.current === request;
+    if (!mediaFailed) setPreviewBusy(true);
     try {
       const next = (await api.getAssetAvailability(asset.id)).status;
+      if (!isCurrent()) return;
       onAvailability(next);
       setPreviewFailed(mediaFailed && next === "ready");
-      return next;
+      if (!mediaFailed && next === "ready") {
+        setPreviewRetry((revision) => revision + 1);
+      }
     } catch {
-      setPreviewFailed(true);
-      return null;
+      if (isCurrent()) setPreviewFailed(true);
+    } finally {
+      if (isCurrent()) setPreviewBusy(false);
     }
   };
 
-  const retryPreview = async () => {
-    if (previewBusy) return;
-    setPreviewBusy(true);
-    try {
-      const next = await checkAvailability();
-      if (next === "ready") {
-        setPreviewFailed(false);
-        setPreviewRetry((revision) => revision + 1);
-      }
-    } finally {
-      setPreviewBusy(false);
-    }
+  const retryPreview = () => {
+    if (!previewBusy) void checkAvailability();
   };
 
   const restoreAsset = async () => {

@@ -147,13 +147,6 @@ pub fn frontmost_application() -> Option<(u32, Option<String>)> {
     Some((pid, name))
 }
 
-pub fn activate_self() {
-    use objc2_app_kit::NSApplication;
-    let mtm = objc2::MainThreadMarker::new().unwrap();
-    let application = NSApplication::sharedApplication(mtm);
-    application.activate();
-}
-
 pub fn mic_supported() -> bool {
     use objc2_foundation::NSProcessInfo;
     let version = NSProcessInfo::processInfo().operatingSystemVersion();

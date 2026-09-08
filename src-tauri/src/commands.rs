@@ -228,6 +228,25 @@ pub fn restore_asset(app: AppHandle, window: WebviewWindow, id: String) -> Resul
     Ok(())
 }
 
+fn complete_library_deletion(
+    result: Result<(), LibraryLocationError>,
+    notify_committed: impl FnOnce(),
+) -> Result<(), String> {
+    // Cleanup can fail after the durable index update. Refresh every caller's
+    // history in that case, while preserving the cleanup error for the user.
+    if result.is_ok()
+        || matches!(
+            &result,
+            Err(LibraryLocationError::Library(
+                AssetLibraryError::CleanupFailed { .. }
+            ))
+        )
+    {
+        notify_committed();
+    }
+    result.map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn permanently_delete(app: AppHandle, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|e| e.to_string())?;
@@ -239,17 +258,7 @@ pub fn permanently_delete(app: AppHandle, id: String) -> Result<(), String> {
             context.library_mut()?.permanently_delete(&parsed)?;
             Ok(())
         });
-    if result.is_ok()
-        || matches!(
-            &result,
-            Err(LibraryLocationError::Library(
-                AssetLibraryError::CleanupFailed { .. }
-            ))
-        )
-    {
-        emit_library_changed(&app);
-    }
-    result.map_err(|error| error.to_string())?;
+    complete_library_deletion(result, || emit_library_changed(&app))?;
     emit_notice_local(&app, "Deleted Permanently".into(), "trash.fill".into());
     Ok(())
 }
@@ -274,17 +283,7 @@ pub fn empty_trash(app: AppHandle) -> Result<(), String> {
             context.library_mut()?.empty_trash()?;
             Ok(())
         });
-    if result.is_ok()
-        || matches!(
-            &result,
-            Err(LibraryLocationError::Library(
-                AssetLibraryError::CleanupFailed { .. }
-            ))
-        )
-    {
-        emit_library_changed(&app);
-    }
-    result.map_err(|error| error.to_string())?;
+    complete_library_deletion(result, || emit_library_changed(&app))?;
     emit_notice_local(&app, "Trash Emptied".into(), "trash.slash".into());
     Ok(())
 }
@@ -339,17 +338,7 @@ pub fn batch_permanently_delete(app: AppHandle, ids: Vec<String>) -> Result<(), 
             context.library_mut()?.batch_permanently_delete(&parsed)?;
             Ok(())
         });
-    if result.is_ok()
-        || matches!(
-            &result,
-            Err(LibraryLocationError::Library(
-                AssetLibraryError::CleanupFailed { .. }
-            ))
-        )
-    {
-        emit_library_changed(&app);
-    }
-    result.map_err(|error| error.to_string())
+    complete_library_deletion(result, || emit_library_changed(&app))
 }
 
 #[tauri::command]
@@ -941,16 +930,12 @@ pub fn remove_missing_asset(app: AppHandle, id: String) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(&id).map_err(|error| error.to_string())?;
     let state = app.state::<AppState>();
     let store = app.state::<crate::protocol::ProtocolStore>();
-    crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
+    let result = crate::protocol::with_thumbnail_invalidation(&store, parsed, || {
         let mut context = state.library.lock().unwrap();
-        context
-            .library_mut()
-            .map_err(|error| error.to_string())?
-            .remove_missing_asset(&parsed)
-            .map_err(|error| error.to_string())
-    })?;
-    emit_library_changed(&app);
-    Ok(())
+        context.library_mut()?.remove_missing_asset(&parsed)?;
+        Ok(())
+    });
+    complete_library_deletion(result, || emit_library_changed(&app))
 }
 
 #[tauri::command]
@@ -4465,8 +4450,8 @@ pub fn quit_app(app: AppHandle) -> Result<(), String> {
 mod command_security_tests {
     use super::{
         capture_failure_requires_global_error, cleanup_finalization_files, commit_editor_update,
-        crop_annotation_source, crop_editor_source, editor_save_destination,
-        parse_editor_save_action, recording_channels, sanitize_frontend_log, validate_capture_png,
+        complete_library_deletion, crop_annotation_source, crop_editor_source,
+        editor_save_destination, parse_editor_save_action, recording_channels, sanitize_frontend_log, validate_capture_png,
         validate_editor_annotation_document, validate_replacement_metadata,
         validate_staged_capture_annotation, write_editor_save, EditorCropPixels, EditorSaveAction,
         ShortcutRegistrationStatus, EDITOR_ACTION_INVALID_ERROR, EDITOR_SAVE_ERROR,
@@ -4474,6 +4459,8 @@ mod command_security_tests {
     use crate::core::annotation::AnnotationDocument;
     use crate::core::asset::{CaptureAsset, CaptureKind};
     use crate::core::geometry::Rect;
+    use crate::core::library::{AssetLibrary, AssetLibraryError};
+    use crate::core::library_location::LibraryLocationError;
     use crate::core::policy::RecordingOptions;
     use crate::state::ApprovedEditorSave;
     use std::cell::Cell;
@@ -4481,6 +4468,73 @@ mod command_security_tests {
     use std::io::Cursor;
     use std::path::PathBuf;
     use std::sync::mpsc::TrySendError;
+
+    #[test]
+    fn removing_missing_record_notifies_after_commit_even_when_cleanup_fails() {
+        for blocked_cleanup in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let root = directory.path().to_path_buf();
+            let mut library = AssetLibrary::open(root.clone()).unwrap();
+            let asset = library
+                .import_data(b"flat", CaptureKind::Image, "png", 1, 1, None, None, None)
+                .unwrap();
+            std::fs::remove_file(library.asset_url(&asset)).unwrap();
+            let source = root
+                .join("Annotations")
+                .join(format!("{}.source.png", asset.id));
+            if blocked_cleanup {
+                std::fs::create_dir(&source).unwrap();
+            }
+
+            let deletion = library
+                .remove_missing_asset(&asset.id)
+                .map_err(LibraryLocationError::from);
+            if blocked_cleanup {
+                assert!(matches!(
+                    &deletion,
+                    Err(LibraryLocationError::Library(
+                        AssetLibraryError::CleanupFailed { failed_files: 1 }
+                    ))
+                ));
+            }
+            let notifications = Cell::new(0);
+            let result = complete_library_deletion(deletion, || {
+                notifications.set(notifications.get() + 1);
+                assert!(library.asset_by_id(&asset.id).is_none());
+                assert!(AssetLibrary::open(root.clone())
+                    .unwrap()
+                    .asset_by_id(&asset.id)
+                    .is_none());
+            });
+            assert_eq!(notifications.get(), 1);
+            assert_eq!(result.is_err(), blocked_cleanup);
+            if blocked_cleanup {
+                assert!(result.unwrap_err().contains("file(s) could not be removed"));
+                assert!(source.is_dir());
+            }
+        }
+    }
+
+    #[test]
+    fn rejected_missing_record_removal_does_not_notify_or_delete() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut library = AssetLibrary::open(directory.path().to_path_buf()).unwrap();
+        let asset = library
+            .import_data(b"flat", CaptureKind::Image, "png", 1, 1, None, None, None)
+            .unwrap();
+        let deletion = library
+            .remove_missing_asset(&asset.id)
+            .map_err(LibraryLocationError::from);
+        assert!(matches!(
+            &deletion,
+            Err(LibraryLocationError::Library(
+                AssetLibraryError::AssetFileStillPresent
+            ))
+        ));
+        assert!(complete_library_deletion(deletion, || panic!("deletion did not commit")).is_err());
+        assert!(library.asset_by_id(&asset.id).is_some());
+        assert_eq!(std::fs::read(library.asset_url(&asset)).unwrap(), b"flat");
+    }
 
     #[test]
     fn frontend_error_log_is_single_line_and_bounded() {
