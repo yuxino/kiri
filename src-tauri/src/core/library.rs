@@ -19,6 +19,8 @@ use crate::core::asset::{CaptureAsset, CaptureKind};
 pub enum AssetLibraryError {
     #[error("asset not found")]
     AssetNotFound,
+    #[error("OCR text is empty or exceeds the size limit")]
+    InvalidOcrText,
     #[error("invalid filename")]
     InvalidFilename,
     #[error("library index contains duplicate asset ids or filenames")]
@@ -314,6 +316,33 @@ impl AssetLibrary {
             source_application,
             created_at,
             None,
+            None,
+        )
+    }
+
+    /// One index commit owns both text and source; failure removes the new PNG.
+    pub fn import_ocr(
+        &mut self,
+        png: &[u8],
+        width: i64,
+        height: i64,
+        text: String,
+        source_application: Option<String>,
+    ) -> Result<CaptureAsset> {
+        if text.trim().is_empty() || text.len() > 1024 * 1024 {
+            return Err(AssetLibraryError::InvalidOcrText);
+        }
+        self.import_data_inner(
+            png,
+            CaptureKind::Image,
+            "png",
+            width,
+            height,
+            None,
+            source_application,
+            None,
+            None,
+            Some(text),
         )
     }
 
@@ -344,6 +373,7 @@ impl AssetLibrary {
             source_application,
             created_at,
             Some((clean_source, document)),
+            None,
         )
     }
 
@@ -359,6 +389,7 @@ impl AssetLibrary {
         source_application: Option<String>,
         created_at: Option<f64>,
         annotation_project: Option<(&[u8], &serde_json::Value)>,
+        ocr_text: Option<String>,
     ) -> Result<CaptureAsset> {
         self.validate_storage_layout()?;
         if annotation_project.is_some() && kind != CaptureKind::Image {
@@ -366,7 +397,7 @@ impl AssetLibrary {
         }
         let safe_extension = Self::validated_extension(file_extension)?;
         let persisted_created_at = Self::normalized_date(created_at.unwrap_or_else(now_ms));
-        let asset = Self::make_asset(
+        let mut asset = Self::make_asset(
             kind,
             &safe_extension,
             pixel_width,
@@ -375,6 +406,7 @@ impl AssetLibrary {
             source_application,
             persisted_created_at,
         );
+        asset.ocr_text = ocr_text;
         let file_url = self.asset_url(&asset);
         atomic_write(&file_url, data)?;
 
@@ -905,7 +937,7 @@ impl AssetLibrary {
             .asset_by_id(id)
             .cloned()
             .ok_or(AssetLibraryError::AssetNotFound)?;
-        if asset.kind != CaptureKind::Image {
+        if asset.kind != CaptureKind::Image || asset.ocr_text.is_some() {
             return Err(AssetLibraryError::UnsupportedAnnotationAsset);
         }
         Ok(asset)
@@ -1193,6 +1225,7 @@ impl AssetLibrary {
             created_at,
             filename,
             title: None,
+            ocr_text: None,
             tags: Vec::new(),
             pixel_width,
             pixel_height,
@@ -1220,6 +1253,7 @@ impl AssetLibrary {
             created_at,
             filename: format!("{}.{file_extension}", id.simple()),
             title: None,
+            ocr_text: None,
             tags: Vec::new(),
             pixel_width,
             pixel_height,
@@ -1627,6 +1661,97 @@ fn sync_directory_after_commit(path: &Path, operation: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ocr_history_round_trip_search_and_recoverable_trash() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let record = library
+            .import_ocr(
+                b"snapshot",
+                120,
+                80,
+                "第一行\nSecond line".into(),
+                Some("TextEdit".into()),
+            )
+            .unwrap();
+        let mut reopened = AssetLibrary::open_existing(root).unwrap();
+        assert_eq!(
+            reopened.search("SECOND", false)[0].ocr_text.as_deref(),
+            Some("第一行\nSecond line")
+        );
+        assert_eq!(reopened.search("第一行", false)[0].id, record.id);
+        reopened.move_to_trash(&record.id).unwrap();
+        assert!(reopened.search("SECOND", false).is_empty());
+        assert_eq!(reopened.search("SECOND", true)[0].id, record.id);
+        reopened.restore(&record.id).unwrap();
+        assert_eq!(reopened.search("SECOND", false)[0].id, record.id);
+        assert_eq!(
+            std::fs::read(reopened.asset_url(&record)).unwrap(),
+            b"snapshot"
+        );
+        reopened.permanently_delete(&record.id).unwrap();
+        assert!(!reopened.asset_url(&record).exists());
+        assert!(reopened.all_assets(true).is_empty());
+    }
+
+    #[test]
+    fn ocr_history_import_failure_leaves_no_orphan_image_or_index_entry() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        library.persist_fail.set(true);
+        assert!(library
+            .import_ocr(b"snapshot", 120, 80, "text".into(), None)
+            .is_err());
+        assert!(library.index.is_empty());
+        assert_eq!(std::fs::read_dir(root.join("Assets")).unwrap().count(), 0);
+        assert!(AssetLibrary::open_existing(root).unwrap().index.is_empty());
+    }
+
+    #[test]
+    fn ocr_history_rejects_empty_and_oversized_text_before_writing() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        for text in [" \n ".into(), "x".repeat(1024 * 1024 + 1)] {
+            assert!(matches!(
+                library.import_ocr(b"snapshot", 120, 80, text, None),
+                Err(AssetLibraryError::InvalidOcrText)
+            ));
+        }
+        assert!(library.index.is_empty());
+        assert_eq!(std::fs::read_dir(root.join("Assets")).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn ocr_source_snapshot_survives_original_edit_and_delete() {
+        let (_dir, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let original = library
+            .import_data(
+                b"original",
+                CaptureKind::Image,
+                "png",
+                120,
+                80,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let record = library
+            .import_ocr(b"original", 120, 80, "text".into(), None)
+            .unwrap();
+        std::fs::write(library.asset_url(&original), b"edited").unwrap();
+        library.permanently_delete(&original.id).unwrap();
+        assert_eq!(
+            std::fs::read(library.asset_url(&record)).unwrap(),
+            b"original"
+        );
+        assert!(matches!(
+            library.annotation_asset(&record.id),
+            Err(AssetLibraryError::UnsupportedAnnotationAsset)
+        ));
+    }
 
     fn temp_root() -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().unwrap();

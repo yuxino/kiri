@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, mediaUrl, onAssetContentChanged, type AssetAvailability } from "../lib/ipc";
+import { OcrDialog } from "../ocr/TextHistory";
 import { t } from "../i18n";
 import { KiriIcon } from "../components/KiriIcons";
 import {
@@ -17,6 +18,7 @@ import {
 export function ViewerWindow(props: { id: string }) {
   const [state, setState] = useState<ViewerState>(createViewerLoadingState());
   const [mediaRevision, setMediaRevision] = useState(0);
+  const [ocrOpen, setOcrOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
@@ -262,6 +264,12 @@ export function ViewerWindow(props: { id: string }) {
         />
       ) : null}
 
+      {state.kind === "ready" && state.asset.kind === "image" && !state.asset.trashedAt && <>
+        <button type="button" className="kiri-button kiri-button--secondary" style={{ position: "absolute", top: 12, left: 12 }} onClick={() => setOcrOpen(true)}>
+          <KiriIcon name="text.viewfinder" size={14} />{t(state.asset.ocrText != null ? "Read Text" : "Recognize Text Locally")}
+        </button>
+        {ocrOpen && <OcrDialog asset={state.asset} onClose={() => setOcrOpen(false)} />}
+      </>}
       <button
         type="button"
         className="kiri-icon-button kiri-icon-button--hud"

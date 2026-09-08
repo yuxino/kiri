@@ -19,6 +19,7 @@ import {
   type ShortcutStatusDto,
 } from "../lib/ipc";
 import { t, fmt } from "../i18n";
+import { TextHistory, OcrDialog } from "../ocr/TextHistory";
 import brandIcon from "../../src-tauri/icons/128x128.png";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 import { kiriResourceUrl } from "../lib/kiri-resource-url.js";
@@ -36,7 +37,7 @@ const SettingsView = React.lazy(() =>
 );
 
 type Section = "library" | "trash";
-type Destination = "captures" | "settings";
+type Destination = "captures" | "text" | "settings";
 
 function thumbnailUrl(id: string, revision: number): string {
   return kiriResourceUrl("thumbnail", [id], { v: revision });
@@ -75,6 +76,7 @@ function groupByDay(assets: AssetDto[]): { key: string; label: string; assets: A
 }
 
 export function LibraryWindow() {
+  const [ocrAsset, setOcrAsset] = useState<AssetDto | null>(null);
   const [assets, setAssets] = useState<AssetDto[]>([]);
   const [section, setSection] = useState<Section>("library");
   const [destination, setDestination] = useState<Destination>("captures");
@@ -592,6 +594,12 @@ export function LibraryWindow() {
             onClick={run(() => void api.copyAsset(asset.id).catch(() => {}))}
           />
         )}
+        {asset.kind === "image" && (!showingTrash || asset.ocrText != null) && <MenuRow
+          icon="text.viewfinder"
+          label={t(asset.ocrText != null ? "Read Text" : "Recognize Text Locally")}
+          disabled={asset.ocrText == null && assetAvailability[asset.id] !== undefined && assetAvailability[asset.id] !== "ready"}
+          onClick={run(() => setOcrAsset(asset))}
+        />}
         <MenuRow
           icon="character.textbox"
           label={t("Rename")}
@@ -608,11 +616,11 @@ export function LibraryWindow() {
         />
         <MenuRow
           icon={asset.kind === "image" ? "pencil.tip" : "photo.on.rectangle"}
-          label={t(asset.kind === "image" ? "Edit" : "Open")}
+          label={t(asset.kind === "image" && asset.ocrText == null ? "Edit" : "Open")}
           disabled={assetAvailability[asset.id] !== undefined && assetAvailability[asset.id] !== "ready"}
           onClick={run(() =>
             void (asset.kind === "image"
-              ? api.openEditor(asset.id)
+              ? (asset.ocrText != null ? api.openAsset(asset.id) : api.openEditor(asset.id))
               : api.openAsset(asset.id)
             ).catch(() => {}),
           )}
@@ -716,6 +724,7 @@ export function LibraryWindow() {
               <span className="library-control-panel__title">
                 {destination === "settings"
                   ? t("Settings")
+                  : destination === "text" ? t("Text History")
                   : showingTrash
                     ? t("Trash")
                     : t("Library")}
@@ -723,6 +732,7 @@ export function LibraryWindow() {
               <span className="library-control-panel__subtitle">
                 {destination === "settings"
                   ? t("Language, storage, and text recognition")
+                  : destination === "text" ? t("Read, copy, and revisit recognized text")
                   : libraryUnavailable
                     ? t("Unavailable")
                     : libraryMigrating
@@ -772,17 +782,19 @@ export function LibraryWindow() {
             <SegmentedPicker
               options={[
                 { label: t("Library"), icon: "square.grid.3x3.fill" },
+                { label: t("Text History"), icon: "text.viewfinder" },
                 { label: t("Trash"), icon: "trash" },
                 { label: t("Settings"), icon: "slider.horizontal.3" },
               ]}
-              value={destination === "settings" ? 2 : section === "library" ? 0 : 1}
+              value={destination === "settings" ? 3 : destination === "text" ? 1 : section === "library" ? 0 : 2}
               onChange={(index) => {
                 clearSelection();
                 setMenuFor(null);
-                if (index === 2) {
+                if (index === 3) {
                   setDestination("settings");
                   return;
                 }
+                if (index === 1) { setDestination("text"); return; }
                 setDestination("captures");
                 setSection(index === 0 ? "library" : "trash");
                 setKindFilter("all");
@@ -1035,7 +1047,7 @@ export function LibraryWindow() {
                       assetAvailability[asset.id] === undefined ||
                       assetAvailability[asset.id] === "ready"
                         ? void (asset.kind === "image"
-                            ? api.openEditor(asset.id)
+                            ? (asset.ocrText != null ? api.openAsset(asset.id) : api.openEditor(asset.id))
                             : api.openAsset(asset.id)
                           ).catch(() => {})
                         : undefined
@@ -1050,6 +1062,8 @@ export function LibraryWindow() {
         </>
       )}
         </>
+      ) : destination === "text" ? (
+        <TextHistory />
       ) : (
         <React.Suspense
           fallback={
@@ -1070,6 +1084,8 @@ export function LibraryWindow() {
           <SettingsView />
         </React.Suspense>
       )}
+
+      {ocrAsset && <OcrDialog key={ocrAsset.id} asset={ocrAsset} onClose={() => setOcrAsset(null)} />}
 
       {/* Window-level progress and local notices stay in one predictable
           place below the header. Global capture/recording completions use the
@@ -1358,7 +1374,9 @@ function AssetCard(props: {
     editingTitle,
     highlighted,
   });
-  const primaryAction = getLibraryCardPrimaryAction(asset.kind);
+  const primaryAction = asset.ocrText != null
+    ? { icon: "eye" as const, title: "View", opensEditor: false }
+    : getLibraryCardPrimaryAction(asset.kind);
   const openCard = () => {
     if (!interaction.opensOnClick) return;
     const now = Date.now();
@@ -1683,7 +1701,7 @@ function AssetCard(props: {
               e.stopPropagation();
               if (contentAvailable) {
                 void (primaryAction.opensEditor
-                  ? api.openEditor(asset.id)
+                  ? (asset.ocrText != null ? api.openAsset(asset.id) : api.openEditor(asset.id))
                   : api.openAsset(asset.id)
                 ).catch(() => {});
               }
@@ -1692,7 +1710,7 @@ function AssetCard(props: {
               e.stopPropagation();
               if (contentAvailable) {
                 void (primaryAction.opensEditor
-                  ? api.openEditor(asset.id)
+                  ? (asset.ocrText != null ? api.openAsset(asset.id) : api.openEditor(asset.id))
                   : api.openAsset(asset.id)
                 ).catch(() => {});
               }

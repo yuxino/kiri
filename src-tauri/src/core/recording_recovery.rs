@@ -517,6 +517,7 @@ mod tests {
             created_at: pending.created_at,
             filename: format!("{}.mp4", pending.id.simple()),
             title: None,
+            ocr_text: None,
             tags: Vec::new(),
             pixel_width: 1920,
             pixel_height: 1080,

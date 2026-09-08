@@ -30,6 +30,7 @@ async def main():
    await page.mouse.move(1090,641,steps=32);await page.wait_for_timeout(180)
    assert await calls()==[],'OCR fired while extending the selection'
    await page.mouse.up();await f.get_by_text('识别结果',exact=True).wait_for();await page.wait_for_timeout(200)
+   await f.get_by_text('已保存到「文字」',exact=True).wait_for()
    first=await calls();assert len(first)==1,first
    assert first[0]['a']['selection']=={'x':194,'y':104,'width':896,'height':537},first
    await f.get_by_role('button',name='复制',exact=True).click()

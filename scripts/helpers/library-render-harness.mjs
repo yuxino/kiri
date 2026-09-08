@@ -28,7 +28,7 @@ export const testAsset = {
   duration: null,
 };
 
-export function createLibraryHarness(apiOverrides = {}) {
+export function createLibraryHarness(apiOverrides = {}, componentSource = null) {
   let active;
   const listeners = new Map();
   const events = new Map();
@@ -87,6 +87,8 @@ export function createLibraryHarness(apiOverrides = {}) {
   };
   const modules = {
     react: React,
+    "./text-history.css": {},
+    "../ocr/TextHistory": { TextHistory: "text-history", OcrDialog: "ocr-dialog" },
     "react-dom": { createPortal: (child) => child },
     "../lib/ipc": {
       api: {
@@ -113,7 +115,10 @@ export function createLibraryHarness(apiOverrides = {}) {
     "./library-card-interaction.js": cardInteraction,
   };
   const module = { exports: {} };
-  new Function("require", "module", "exports", "window", compiled)((name) => {
+  const componentCode = componentSource == null ? compiled : ts.transpileModule(componentSource, {
+    compilerOptions: { target: ts.ScriptTarget.ES2021, jsx: ts.JsxEmit.React, module: ts.ModuleKind.CommonJS, esModuleInterop: true },
+  }).outputText;
+  new Function("require", "module", "exports", "window", componentCode)((name) => {
     if (!(name in modules)) throw new Error(`Unexpected import: ${name}`);
     return modules[name];
   }, module, module.exports, window);

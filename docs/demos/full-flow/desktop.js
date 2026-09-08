@@ -55,7 +55,7 @@ window.invoke=async(kind,c,a={})=>{
   }
   if(c==='get_ocr_provider_settings')return {schemaVersion:1,activeEngine:{kind:'local'},profiles:[]};
   if(c==='prepare_ocr_request')return {requestId:'original-page-text',engine:{kind:'local'},imageWidth:Math.round(a.selection.width*1.5),imageHeight:Math.round(a.selection.height*1.5),byteLength:2048};
-  if(c==='recognize_prepared_ocr_local'){await new Promise(r=>setTimeout(r,650));return '把有用的细节，留在眼前。\n圈出重点，复制文字，再用一段录屏说明过程。\n今天的小目标\n整理界面里的关键内容\n用标注说明一个想法\n录下完整的操作过程\n一段值得留下的话\n不需要把所有事情一次做完。\n先完成眼前这一件，再开始下一件。\n完成整理\n慢慢来，也很好。\n随手记下，随时回看。';}
+  if(c==='recognize_prepared_ocr_local'){await new Promise(r=>setTimeout(r,650));return {saved:true,asset:null,text:'把有用的细节，留在眼前。\n圈出重点，复制文字，再用一段录屏说明过程。\n今天的小目标\n整理界面里的关键内容\n用标注说明一个想法\n录下完整的操作过程\n一段值得留下的话\n不需要把所有事情一次做完。\n先完成眼前这一件，再开始下一件。\n完成整理\n慢慢来，也很好。\n随手记下，随时回看。'};}
   if(c==='cancel_prepared_ocr')return null;
   if(c==='copy_text'){S.copiedText=a.text;hideWindow('overlay');return null;}
   if(c==='start_recording_flow'){

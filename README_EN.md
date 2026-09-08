@@ -24,7 +24,7 @@ Kiri supports macOS and Windows. Press `⇧⌘A` on macOS or `Shift+Ctrl+A` on W
 ## Features
 
 - **Screenshots and annotation**: click a window or drag a region, then use crop, pen, shapes, arrows, text, mosaic, undo, and redo. Annotations created by current releases can be reopened from the completion card or library.
-- **OCR**: recognize text locally with macOS Vision or Windows.Media.Ocr by default; optional remote OCR asks before every upload.
+- **OCR**: recognize text locally with macOS Vision or Windows.Media.Ocr by default; optional remote OCR asks before every upload. Text History saves successful results for searching, reading, copying, and viewing the source image. Saved screenshots also offer local text recognition.
 - **Recording and GIF**: record a region with optional system audio, microphone, pointer, and click highlights. A compact ring counts down before recording; click the ring or press Esc to cancel. Save as MP4 or GIF.
 - **Local library**: search, favorite, tag, rename, and move captures to recoverable Trash. Settings can use another local directory or external disk for the library.
 

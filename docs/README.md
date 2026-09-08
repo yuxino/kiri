@@ -82,3 +82,5 @@ development.
 - [ADR 0027: Compact countdown](adr/0027-compact-countdown.md)
 
 - [ADR 0028: Committed OCR selection](adr/0028-ocr-committed-selection.md)
+
+- [ADR 0030: Text history and saved screenshot OCR](adr/0030-ocr-history.md)

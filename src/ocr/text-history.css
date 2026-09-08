@@ -1,0 +1,34 @@
+.text-history { display: flex; flex: 1; min-height: 0; color: var(--kiri-label); }
+.text-history__sidebar { width: 272px; flex-shrink: 0; display: flex; flex-direction: column; border-right: 1px solid var(--kiri-surface-border); }
+.text-history__search { display: flex; align-items: center; gap: 9px; margin: 18px 16px 12px; padding: 9px 10px; border: 1px solid var(--kiri-surface-border); border-radius: 8px; color: var(--kiri-secondary-label); }
+.text-history__search:focus-within { outline: 2px solid var(--kiri-label); outline-offset: 2px; }
+.text-history__search input { background: transparent; color: var(--kiri-label); border: 0; outline: 0; width: 100%; min-width: 0; font: inherit; font-size: 12px; }
+.text-history__list { overflow: auto; flex: 1; min-height: 0; padding: 0 8px; }
+.ocr-history__item { display: flex; flex-direction: column; width: 100%; gap: 10px; border: 0; border-bottom: 1px solid var(--kiri-surface-border); background: transparent; color: var(--kiri-label); text-align: left; padding: 16px 12px; cursor: pointer; font: inherit; }
+.ocr-history__item:hover { background: var(--kiri-group-fill); }
+.ocr-history__item[aria-current] { background: var(--kiri-card); box-shadow: inset 3px 0 var(--kiri-label); }
+.text-history__excerpt { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 1.6; font-size: 13px; }
+.ocr-history__item time, .text-history__footnote, .text-history__record-header, .text-reader__caption { font-size: 11px; color: var(--kiri-secondary-label); }
+.text-history__footnote { margin: 0; padding: 14px 20px; border-top: 1px solid var(--kiri-surface-border); }
+.text-history__detail { flex: 1; min-width: 0; overflow: auto; padding: 22px 32px; background: var(--kiri-card); }
+.text-history__record-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 22px; }
+.text-reader { min-width: 0; }
+.text-reader__actions { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding-bottom: 20px; }
+.text-reader__caption { font-weight: 600; letter-spacing: .04em; }
+.text-reader__body { user-select: text; -webkit-user-select: text; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.85; font-size: 15px; padding: 2px 0 32px; color: var(--kiri-label); }
+.text-reader__source { border-top: 1px solid var(--kiri-surface-border); padding: 16px 0; color: var(--kiri-secondary-label); font-size: 12px; }
+.text-reader__source summary { cursor: pointer; display: flex; align-items: center; gap: 8px; width: fit-content; }
+.text-reader__source summary::before { content: '›'; font-size: 17px; }
+.text-reader__source[open] summary::before { transform: rotate(90deg); }
+.text-reader__source img { display: block; max-width: 100%; max-height: 360px; object-fit: contain; margin: 18px auto 0; border: 1px solid var(--kiri-surface-border); }
+.text-history__empty { min-height: 240px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 12px; color: var(--kiri-secondary-label); padding: 32px; }
+.text-history__empty h2 { color: var(--kiri-label); font-size: 19px; font-weight: 600; margin: 8px 0 0; }
+.text-history__empty p { font-size: 13px; line-height: 1.7; max-width: 340px; margin: 0; }
+.text-history__empty small { line-height: 1.6; max-width: 300px; }
+.text-history__error { color: var(--kiri-coral); font-size: 12px; line-height: 1.6; }
+.text-dialog { color: var(--kiri-label); background: var(--kiri-card); border: 1px solid var(--kiri-surface-border); border-radius: 14px; width: min(600px, calc(100vw - 72px)); max-height: calc(100vh - 80px); overflow: auto; padding: 24px 28px; }
+.text-dialog::backdrop { background: rgba(0,0,0,.42); }
+.text-dialog__header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 24px; }
+.text-dialog__header h2 { margin: 0; font-size: 18px; }
+.text-dialog__header p { margin: 7px 0 0; font-size: 11px; color: var(--kiri-secondary-label); }
+@media (max-width: 860px) { .text-history__sidebar { width: 235px; } .text-history__detail { padding: 20px 22px; } }

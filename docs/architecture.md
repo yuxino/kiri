@@ -193,6 +193,21 @@ Copying recognized text completes the capture session and closes its full-screen
 overlay before the global success notice is presented. The confirmation must
 never remain hidden behind the OCR result surface.
 
+Successful, nonempty local and remote OCR results persist as image assets with
+optional `ocrText` metadata and an independent PNG snapshot (ADR 0030). A single
+index commit records both, rolling back new files if persistence fails. The
+capture grid excludes these records; Text History searches their text and
+reads them without reopening the capture overlay. Trash and library migration
+use the existing asset lifecycle. Snapshots cannot enter the annotation editor.
+
+Historic screenshot OCR is an explicitly local command from the library,
+viewer, or editor. It reads bounded saved flattened PNG bytes and holds at most
+one background recognition operation. A library identity/generation check
+prevents a delayed result being saved into a different library. Overlay result
+persistence checks the active capture owner while holding the capture lock;
+canceled sessions cannot write late history. Clipboard copying from history is
+separate from overlay completion and does not cancel another capture session.
+
 ## Recording and GIF flow
 
 Platform capture produces BGRA video frames and optional PCM audio. macOS uses

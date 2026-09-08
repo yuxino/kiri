@@ -1098,6 +1098,33 @@ mod tests {
     }
 
     #[test]
+    fn migration_preserves_ocr_text_and_its_source_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let source_root = directory.path().join("source");
+        let target = directory.path().join("destination");
+        let id = uuid::Uuid::new_v4();
+        let mut library = create_library(&source_root, id);
+        let record = library
+            .import_ocr(
+                b"ocr-pixels",
+                120,
+                80,
+                "保留换行\nKeep this text".into(),
+                None,
+            )
+            .unwrap();
+        let prepared =
+            migrate_library(&migration_source(&source_root, id), &target, false).unwrap();
+        let migrated = prepared.library.asset_by_id(&record.id).unwrap();
+        assert_eq!(migrated.ocr_text, record.ocr_text);
+        assert_eq!(
+            std::fs::read(prepared.library.asset_url(migrated)).unwrap(),
+            b"ocr-pixels"
+        );
+        assert_eq!(prepared.library.search("换行", false)[0].id, record.id);
+    }
+
+    #[test]
     fn migration_copies_and_verifies_the_whole_library() {
         let directory = tempfile::tempdir().unwrap();
         let source_root = directory.path().join("source");

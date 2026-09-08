@@ -1,5 +1,10 @@
 use std::sync::Arc;
 
+use crate::commands::{asset_dto, AssetDto};
+use crate::core::asset::CaptureKind;
+use crate::state::emit_library_changed;
+use serde::Serialize;
+use std::io::Read;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 use crate::commands::RectDto;
@@ -9,6 +14,14 @@ use crate::ocr_controller::{
     SaveOcrProviderProfileRequest,
 };
 use crate::state::AppState;
+
+static HISTORY_OCR_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+struct HistoryOcrPermit;
+impl Drop for HistoryOcrPermit {
+    fn drop(&mut self) {
+        HISTORY_OCR_BUSY.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
 
 const MAX_PREPARED_PNG_BYTES: usize = 20 * 1024 * 1024;
 
@@ -147,7 +160,7 @@ pub async fn recognize_prepared_ocr_local(
     window: WebviewWindow,
     app: AppHandle,
     request_id: String,
-) -> Result<String, String> {
+) -> Result<OcrRecognitionDto, String> {
     let owner = require_active_overlay(&window, &app)?;
     let requests = app.state::<AppState>().ocr_requests.clone();
     let lease = requests
@@ -178,8 +191,9 @@ pub async fn recognize_prepared_ocr_local(
     }
     match result {
         Ok(Ok(text)) => {
+            let result = save_overlay_result(&app, &owner, &lease, text)?;
             requests.complete(&lease);
-            Ok(text)
+            Ok(result)
         }
         Ok(Err(error)) => {
             log::error!("local OCR recognition failed: {error:#}");
@@ -201,7 +215,7 @@ pub async fn recognize_prepared_ocr_remote(
     request_id: String,
     profile_id: String,
     profile_revision: u64,
-) -> Result<String, String> {
+) -> Result<OcrRecognitionDto, String> {
     let owner = require_active_overlay(&window, &app)?;
     let (requests, manager, client) = {
         let state = app.state::<AppState>();
@@ -275,8 +289,9 @@ pub async fn recognize_prepared_ocr_remote(
     };
     match result {
         Ok(text) => {
+            let result = save_overlay_result(&app, &owner, &lease, text)?;
             requests.complete(&lease);
-            Ok(text)
+            Ok(result)
         }
         Err(error) => {
             requests.restore_after_failure(&lease);
@@ -490,4 +505,193 @@ mod tests {
         assert_eq!(result, Ok("recognized"));
         assert_eq!(first_error, None);
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OcrRecognitionDto {
+    text: String,
+    saved: bool,
+    asset: Option<AssetDto>,
+}
+
+fn import_result(
+    app: &AppHandle,
+    png: &[u8],
+    text: String,
+    source: Option<String>,
+    identity: Option<(uuid::Uuid, uuid::Uuid)>,
+) -> OcrRecognitionDto {
+    let asset = if text.trim().is_empty() {
+        None
+    } else {
+        let save = || -> Result<AssetDto, String> {
+            let decoder = image::codecs::png::PngDecoder::new(std::io::Cursor::new(png))
+                .map_err(|_| "The OCR image could not be read.".to_string())?;
+            let (width, height) = image::ImageDecoder::dimensions(&decoder);
+            let state = app.state::<AppState>();
+            let mut context = state.library.lock().unwrap();
+            if identity.is_some_and(|expected| {
+                expected
+                    != (
+                        context.expected_library_id(),
+                        context.expected_library_generation(),
+                    )
+            }) {
+                return Err("The library changed during text recognition.".into());
+            }
+            let library = context.library_mut().map_err(|e| e.to_string())?;
+            library
+                .import_ocr(png, width as i64, height as i64, text.clone(), source)
+                .map(|asset| asset_dto(&asset))
+                .map_err(|e| e.to_string())
+        };
+        match save() {
+            Ok(asset) => {
+                emit_library_changed(app);
+                Some(asset)
+            }
+            Err(error) => {
+                log::warn!("OCR history could not be saved: {error}");
+                None
+            }
+        }
+    };
+    OcrRecognitionDto {
+        saved: asset.is_some(),
+        text,
+        asset,
+    }
+}
+
+fn save_overlay_result(
+    app: &AppHandle,
+    owner: &OcrRequestOwner,
+    lease: &crate::ocr_controller::OcrRequestLease,
+    text: String,
+) -> Result<OcrRecognitionDto, String> {
+    // Capture teardown and library moves cannot interleave this final check and save.
+    let state = app.state::<AppState>();
+    let capture = state.capture.lock().unwrap();
+    let session = capture
+        .session
+        .as_ref()
+        .filter(|session| {
+            session.capture_id == owner.capture_id && session.overlay_labels.contains(&owner.label)
+        })
+        .ok_or("The OCR request was canceled.")?;
+    if lease.cancellation.is_cancelled() {
+        return Err("The OCR request was canceled.".into());
+    }
+    Ok(import_result(
+        app,
+        &lease.png,
+        text,
+        session.source_application.clone(),
+        None,
+    ))
+}
+
+#[tauri::command]
+pub fn list_ocr_records(
+    window: WebviewWindow,
+    app: AppHandle,
+    query: String,
+) -> Result<Vec<AssetDto>, String> {
+    require_library_window(&window)?;
+    let state = app.state::<AppState>();
+    let mut context = state.library.lock().unwrap();
+    let library = context.library().map_err(|e| e.to_string())?;
+    Ok(library
+        .search(&query, false)
+        .iter()
+        .filter(|a| a.ocr_text.is_some())
+        .map(asset_dto)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn recognize_asset_local(
+    window: WebviewWindow,
+    app: AppHandle,
+    id: String,
+) -> Result<OcrRecognitionDto, String> {
+    let parsed = uuid::Uuid::parse_str(&id).map_err(|_| "Invalid image.".to_string())?;
+    if window.label() != "library"
+        && window.label() != format!("viewer-{id}")
+        && window.label() != format!("editor-{id}")
+    {
+        return Err("Text recognition is unavailable from this window.".into());
+    }
+    if HISTORY_OCR_BUSY
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::AcqRel,
+            std::sync::atomic::Ordering::Acquire,
+        )
+        .is_err()
+    {
+        return Err("Another image is being recognized. Try again shortly.".into());
+    }
+    let permit = HistoryOcrPermit;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
+        let (png, source, identity) = {
+            let state = app.state::<AppState>();
+            let mut context = state.library.lock().unwrap();
+            let identity = (
+                context.expected_library_id(),
+                context.expected_library_generation(),
+            );
+            let library = context.library().map_err(|e| e.to_string())?;
+            let asset = library.asset_by_id(&parsed).ok_or("Image not found.")?;
+            if asset.kind != CaptureKind::Image || asset.trashed_at.is_some() {
+                return Err("Choose a screenshot from the library.".into());
+            }
+            let path = library
+                .readable_asset_url(asset)
+                .map_err(|e| e.to_string())?;
+            let mut png = Vec::new();
+            std::fs::File::open(path)
+                .map_err(|_| "Can't read this file.")?
+                .take(MAX_PREPARED_PNG_BYTES as u64 + 1)
+                .read_to_end(&mut png)
+                .map_err(|_| "Can't read this file.")?;
+            if png.len() > MAX_PREPARED_PNG_BYTES {
+                return Err("The OCR image exceeds the size limit.".into());
+            }
+            // Validate dimensions before handing bytes to native image decoders.
+            let decoder = image::codecs::png::PngDecoder::new(std::io::Cursor::new(&png))
+                .map_err(|_| "Can't read this file.")?;
+            let (width, height) = image::ImageDecoder::dimensions(&decoder);
+            if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 64_000_000 {
+                return Err("The OCR image exceeds the size limit.".into());
+            }
+            (png, asset.source_application.clone(), identity)
+        };
+        #[cfg(windows)]
+        let text = run_with_one_retry(|| crate::ocr::recognize_text(&png)).0;
+        #[cfg(not(windows))]
+        let text = crate::ocr::recognize_text(&png);
+        let text = text.map_err(|_| "Local OCR failed.".to_string())?;
+        // This result owns a snapshot: editing the source does not change its pixels.
+        Ok(import_result(&app, &png, text, source, Some(identity)))
+    })
+    .await
+    .map_err(|_| "Local OCR failed.".to_string())?
+}
+
+#[tauri::command]
+pub fn copy_history_text(window: WebviewWindow, text: String) -> Result<(), String> {
+    if window.label() != "library"
+        && !window.label().starts_with("viewer-")
+        && !window.label().starts_with("editor-")
+    {
+        return Err("This command is unavailable from this window.".into());
+    }
+    if text.len() > 1024 * 1024 {
+        return Err("Text exceeds the size limit.".into());
+    }
+    crate::platform::write_text_to_clipboard(&text).map_err(|_| "Couldn't copy text.".into())
 }

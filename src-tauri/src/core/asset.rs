@@ -73,6 +73,9 @@ pub struct CaptureAsset {
     pub filename: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub title: Option<String>,
+    /// Recognized text; its image asset is an immutable OCR source snapshot.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ocr_text: Option<String>,
     /// User-assigned labels (metadata only, like the Swift roadmap's Tags).
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub tags: Vec<String>,
@@ -118,6 +121,9 @@ impl CaptureAsset {
         if let Some(title) = &self.title {
             parts.push(title.clone());
         }
+        if let Some(text) = &self.ocr_text {
+            parts.push(text.clone());
+        }
         parts.extend(self.tags.iter().cloned());
         parts.push(self.kind.as_str().to_string());
         parts.join(" ").to_lowercase()
@@ -136,6 +142,7 @@ mod tests {
             created_at: 1_700_000_000_000.0,
             filename: "20240101-120000-abc.png".into(),
             title: None,
+            ocr_text: None,
             tags: vec![],
             pixel_width: 100,
             pixel_height: 200,
@@ -158,6 +165,7 @@ mod tests {
             created_at: 1_700_000_000_123.0,
             filename: "20240101-120000-abc.mp4".into(),
             title: None,
+            ocr_text: None,
             tags: vec![],
             pixel_width: 1920,
             pixel_height: 1080,
@@ -170,6 +178,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["createdAt"], serde_json::json!(1_700_000_000_123.0));
         assert!(parsed.get("sourceApplication").is_none(), "{json}");
+        assert!(parsed.get("ocrText").is_none(), "{json}");
         assert!(parsed["id"]
             .as_str()
             .unwrap()
@@ -187,6 +196,7 @@ mod tests {
             created_at: 1_700_000_000_000.0,
             filename: "legacy.png".into(),
             title: None,
+            ocr_text: None,
             tags: vec![],
             pixel_width: 10,
             pixel_height: 10,

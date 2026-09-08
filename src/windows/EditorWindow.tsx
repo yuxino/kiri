@@ -1,6 +1,8 @@
 // EditorWindow — annotation editor for saved captures
 // Dark screenshot editor with one compact toolbar and an aspect-fit canvas.
 
+import { OcrDialog } from "../ocr/TextHistory";
+import type { AssetDto } from "../lib/ipc";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, isEditorRevisionMismatch } from "../lib/ipc";
@@ -57,6 +59,7 @@ export function EditorWindow(props: { id: string }) {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [hasMarks, setHasMarks] = useState(false);
+  const [ocrAsset, setOcrAsset] = useState<AssetDto | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const canvasRef = useRef<AnnotationCanvasHandle>(null);
@@ -475,6 +478,8 @@ export function EditorWindow(props: { id: string }) {
         />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+        <EditorToolButton icon="text.viewfinder" title={t("Recognize Saved Image Locally")} disabled={!image || completing}
+          onClick={() => { void api.getAsset(props.id).then(setOcrAsset).catch(() => setActionError(t("Can't read this file."))); }} />
         <button
           type="button"
           className="kiri-button kiri-button--secondary"
@@ -508,6 +513,8 @@ export function EditorWindow(props: { id: string }) {
         </button>
         </div>
       </div>
+
+      {ocrAsset && <OcrDialog asset={ocrAsset} onClose={() => setOcrAsset(null)} />}
 
       {actionError && (
         <div

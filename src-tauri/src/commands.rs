@@ -83,6 +83,7 @@ pub struct AssetDto {
     pub created_at: f64,
     pub filename: String,
     pub title: Option<String>,
+    pub ocr_text: Option<String>,
     pub tags: Vec<String>,
     pub pixel_width: i64,
     pub pixel_height: i64,
@@ -124,13 +125,14 @@ pub struct PendingRecordingDto {
     created_at: f64,
 }
 
-fn asset_dto(asset: &CaptureAsset) -> AssetDto {
+pub(crate) fn asset_dto(asset: &CaptureAsset) -> AssetDto {
     AssetDto {
         id: asset.id.to_string(),
         kind: asset.kind.as_str().to_string(),
         created_at: asset.created_at,
         filename: asset.filename.clone(),
         title: asset.title.clone(),
+        ocr_text: asset.ocr_text.clone(),
         tags: asset.tags.clone(),
         pixel_width: asset.pixel_width,
         pixel_height: asset.pixel_height,
@@ -175,7 +177,7 @@ pub fn list_assets(
     let mut context = state.library.lock().unwrap();
     let library = context.library().map_err(|error| error.to_string())?;
     let assets = library.search(&query, showing_trash);
-    Ok(assets.iter().map(asset_dto).collect())
+    Ok(assets.iter().filter(|asset| showing_trash || asset.ocr_text.is_none()).map(asset_dto).collect())
 }
 
 fn with_asset_mutation(
@@ -4581,6 +4583,7 @@ mod command_security_tests {
             created_at: 1.0,
             filename: "missing.png".into(),
             title: None,
+            ocr_text: None,
             tags: Vec::new(),
             pixel_width: 10,
             pixel_height: 20,

@@ -123,6 +123,7 @@ export function OverlayWindow() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [ocrText, setOcrText] = useState("");
+  const [ocrSaved, setOcrSaved] = useState(false);
   const [ocrFailed, setOcrFailed] = useState(false);
   const [preparedOcr, setPreparedOcr] = useState<PreparedOcrRequestDto | null>(null);
   const [remoteOcrFailed, setRemoteOcrFailed] = useState(false);
@@ -359,7 +360,8 @@ export function OverlayWindow() {
       preparedOcrRef.current = null;
       setPreparedOcr(null);
       setOcrFailed(false);
-      setOcrText(text);
+      setOcrText(text.text);
+      setOcrSaved(text.saved);
       setPhase("ocr-result");
     } catch (error) {
       if (generation !== ocrGenerationRef.current) return;
@@ -390,7 +392,8 @@ export function OverlayWindow() {
       preparedOcrRef.current = null;
       setPreparedOcr(null);
       setOcrFailed(false);
-      setOcrText(text);
+      setOcrText(text.text);
+      setOcrSaved(text.saved);
       setPhase("ocr-result");
     } catch {
       if (generation !== ocrGenerationRef.current) return;
@@ -1076,6 +1079,7 @@ export function OverlayWindow() {
       {phase === "ocr-result" && (
         <OcrPanel
           text={ocrText}
+          saved={ocrSaved}
           failed={ocrFailed}
           anchor={selection ?? { x: 0, y: 0, width: bounds.width, height: 0 }}
           bounds={bounds}
@@ -1307,6 +1311,7 @@ function SizeBadge(props: { rect: Rect; bounds: Rect; pixelScale: number }) {
 }
 
 function OcrPanel(props: {
+  saved: boolean;
   text: string;
   failed: boolean;
   anchor: Rect;
@@ -1356,6 +1361,9 @@ function OcrPanel(props: {
         boxShadow: "0 16px 42px rgba(0,0,0,0.22)",
       }}
     >
+      {!failed && text.trim() && <div role="status" style={{ fontSize: 11, color: "var(--kiri-secondary-label)" }}>
+        {t(props.saved ? "Saved to Text History" : "History wasn't saved. Copy the text before closing.")}
+      </div>}
       {/* Tail pointing at the recognized region. */}
       <div
         style={{

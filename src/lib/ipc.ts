@@ -25,12 +25,19 @@ export interface CaptureContextDto {
   sourceApplication: string | null;
 }
 
+export interface OcrRecognitionDto {
+  text: string;
+  saved: boolean;
+  asset: AssetDto | null;
+}
+
 export interface AssetDto {
   id: string;
   kind: "image" | "video" | "gif";
   createdAt: number;
   filename: string;
   title: string | null;
+  ocrText: string | null;
   tags: string[];
   pixelWidth: number;
   pixelHeight: number;
@@ -189,6 +196,9 @@ export function isEditorRevisionMismatch(error: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 export const api = {
+  listOcrRecords: (query: string) => invoke<AssetDto[]>("list_ocr_records", { query }),
+  recognizeAssetLocal: (id: string) => invoke<OcrRecognitionDto>("recognize_asset_local", { id }),
+  copyHistoryText: (text: string) => invoke<void>("copy_history_text", { text }),
   listAssets: (query: string, showingTrash: boolean) =>
     invoke<AssetDto[]>("list_assets", { query, showingTrash }),
   getAsset: (id: string) => invoke<AssetDto>("get_asset", { id }),
@@ -270,13 +280,13 @@ export const api = {
   prepareOcrRequest: (selection: RectDto) =>
     invoke<PreparedOcrRequestDto>("prepare_ocr_request", { selection }),
   recognizePreparedOcrLocal: (requestId: string) =>
-    invoke<string>("recognize_prepared_ocr_local", { requestId }),
+    invoke<OcrRecognitionDto>("recognize_prepared_ocr_local", { requestId }),
   recognizePreparedOcrRemote: (
     requestId: string,
     profileId: string,
     profileRevision: number,
   ) =>
-    invoke<string>("recognize_prepared_ocr_remote", {
+    invoke<OcrRecognitionDto>("recognize_prepared_ocr_remote", {
       requestId,
       profileId,
       profileRevision,
