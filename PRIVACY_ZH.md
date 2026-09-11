@@ -14,7 +14,7 @@ Kiri 默认在系统应用数据目录中维护一个素材库。设置可以把
 
 ## 本地媒体处理
 
-Kiri 使用操作系统媒体框架完成录屏、暂停分段合并、视频缩略图和 MP4 转 GIF。macOS 使用 AVFoundation 与 ImageIO，Windows 使用 Media Foundation 与系统图像组件。Kiri 不会下载或执行 FFmpeg 等第三方媒体程序；这些操作中的截屏、录屏、文件名、素材库信息、凭据和媒体内容始终留在设备上。
+Kiri 使用操作系统媒体框架完成录屏、暂停分段合并、视频缩略图和 MP4 转 GIF。macOS 使用 AVFoundation 与 ImageIO，Windows 使用 Media Foundation 与系统图像组件，Linux 使用系统已安装的 GStreamer 插件。Kiri 不会下载或执行 FFmpeg 等第三方媒体程序；这些操作中的截屏、录屏、文件名、素材库信息、凭据和媒体内容始终留在设备上。
 
 ## 手动检查更新
 
@@ -40,6 +40,6 @@ Kiri 默认使用 macOS Vision 或 Windows.Media.Ocr 进行本地文字识别。
 
 ## 密钥与配置
 
-API Key 只在 Kiri 内输入，并保存到 macOS 钥匙串或 Windows 凭据管理器。配置 JSON 只记录名称、Base URL、模型等非敏感信息。Kiri 不会把 API Key 回传给界面、写入日志或明文配置，也不会从环境变量读取密钥。
+API Key 只在 Kiri 内输入，并保存到 macOS 钥匙串、Windows 凭据管理器或 Linux Secret Service。配置 JSON 只记录名称、Base URL、模型等非敏感信息。Kiri 不会把 API Key 回传给界面、写入日志或明文配置，也不会从环境变量读取密钥。
 
 删除配置会同时删除对应的系统凭据。你可以随时重新选择「本地 OCR」并删除远程配置，恢复为完全本地的使用方式。

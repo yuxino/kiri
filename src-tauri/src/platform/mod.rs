@@ -7,16 +7,24 @@ pub mod macos;
 #[cfg(windows)]
 pub mod windows;
 
+#[cfg(target_os = "linux")]
+pub mod linux;
+
 #[cfg(target_os = "macos")]
 pub use macos as current;
 
 #[cfg(windows)]
 pub use windows as current;
 
+#[cfg(target_os = "linux")]
+pub use linux as current;
+
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
+#[cfg(target_os = "linux")]
+use tauri::Manager;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MicrophoneAccess {
@@ -166,6 +174,14 @@ pub fn show_window_without_activation(
         let _ = role;
         current::show_window_without_activation(app, label);
     }
+
+    #[cfg(target_os = "linux")]
+    {
+        let _ = role;
+        if let Some(window) = app.get_webview_window(label) {
+            let _ = window.show();
+        }
+    }
 }
 
 /// Activate the application with the given PID (focus restoration).
@@ -207,7 +223,7 @@ pub fn window_capture_id(app: &tauri::AppHandle, label: &str) -> Option<u32> {
     macos::window_capture_id(app, label)
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 pub fn window_capture_id(_app: &tauri::AppHandle, _label: &str) -> Option<u32> {
     None
 }

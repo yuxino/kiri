@@ -118,6 +118,14 @@ export interface ShortcutStatusDto {
   status: "enabled" | "occupied";
 }
 
+export interface PlatformCapabilitiesDto {
+  recording: boolean;
+  localOcr: boolean;
+  systemAudio: boolean;
+  microphone: boolean;
+  clickHighlights: boolean;
+}
+
 export type OcrProviderPreset = "aliyunBailian" | "openAi" | "customOpenAi";
 
 type OcrProtocol = "openAiChatCompletions";
@@ -305,6 +313,7 @@ export const api = {
   stopRecording: () => invoke<void>("stop_recording"),
 
   micSupported: () => invoke<boolean>("mic_supported"),
+  platformCapabilities: () => invoke<PlatformCapabilitiesDto>("platform_capabilities"),
   getShortcutStatus: () => invoke<ShortcutStatusDto>("get_shortcut_status"),
   retryShortcut: () => invoke<ShortcutStatusDto>("retry_shortcut"),
   openReleasePage: () => invoke<void>("open_release_page"),

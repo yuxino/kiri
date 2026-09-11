@@ -163,6 +163,20 @@ windows = { version = "0.62", features = [
 windows-capture = "2.0"
 keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.11", default-features = false, features = [
+    "tokio",
+    "wayland",
+] }
+keyring = { version = "3.6.3", default-features = false, features = [
+    "sync-secret-service",
+    "crypto-rust",
+] }
+glib = "0.20"
+gstreamer = "0.23"
+gstreamer-app = "0.23"
+gstreamer-pbutils = "0.23"
+
 # Keep the shipped Tauri crate self-contained when a contributor has an
 # unrelated Cargo workspace in a parent directory.
 [workspace]

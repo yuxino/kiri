@@ -17,17 +17,18 @@ Read it before editing, then read `docs/architecture.md`.
 
 ## Product contract
 
-Kiri is a local-first capture utility for macOS and Windows. Preserve these
-decisions:
+Kiri is a local-first capture utility for macOS, Windows, and experimental
+Linux. Preserve these decisions:
 
-- The global capture shortcut is `⇧⌘A` on macOS and `Shift+Ctrl+A` on Windows.
-  Both use the platform's native global-hotkey registration; the shortcut does
-  not require Input Monitoring permission.
+- The global capture shortcut is `⇧⌘A` on macOS and `Shift+Ctrl+A` on Windows
+  and Linux. Both use the platform's native global-hotkey registration; the
+  shortcut does not require Input Monitoring permission.
 - The initial overlay offers Screenshot, Record, and OCR.
 - Window hover shows exactly one restrained monochrome outline without handles,
   dimensions, stacked borders, or a following tooltip. A click selects that
   window; a drag creates a custom region. Both selections remain movable and
-  resizable with eight handles.
+  resizable with eight handles. On Linux, window bounds may be unavailable and
+  region drag remains the supported path.
 - Screenshot completion is clipboard-first and returns focus to the original
   application. Do not open the Kiri library after every capture.
 - Escape cancels capture and countdown; Return confirms a screenshot.
@@ -45,11 +46,13 @@ decisions:
 - Captures stay local. Never add uploads, analytics, accounts, or network
   behavior without an explicit product decision and privacy documentation.
   Recording, merging, thumbnails, and GIF conversion use platform media APIs
-  and must not download or launch a third-party media executable.
+  and must not download or launch a third-party media executable. On Linux that
+  means system GStreamer plugins, not a downloaded FFmpeg binary.
 - Application updates are manual and signed. Check, download, install, and the
   macOS relaunch are separate user actions; Windows explicitly offers Install
   and Restart, then exits into its passive NSIS installer and reopens afterward.
   GitHub Releases is an error-recovery link, not the normal updater.
+  Linux AppImage updates remain a follow-up.
 
 ## Repository map
 
@@ -59,11 +62,13 @@ decisions:
   policy, shortcut model, asset library (byte-compatible with the Swift
   version's `library.json`).
 - `src-tauri/src/capture/` — per-platform capture backends (macOS:
-  ScreenCaptureKit via objc2; Windows: xcap WGC + windows-capture + cpal).
+  ScreenCaptureKit via objc2; Windows: xcap WGC + windows-capture + cpal;
+  Linux: xdg-desktop-portal Screenshot/ScreenCast + PipeWire).
 - `src-tauri/src/platform/` — per-platform helpers: global shortcut, focus
   restoration, file reveal, click monitoring, capture exclusion.
 - `src-tauri/src/record.rs` — platform-native encoding coordination (H.264 +
-  AAC → MP4); macOS bridging lives in `src-tauri/src/macos_media.{rs,m}`.
+  AAC → MP4); macOS bridging lives in `src-tauri/src/macos_media.{rs,m}`;
+  Linux bridging lives in `src-tauri/src/linux_media.rs`.
 - `src-tauri/src/commands.rs` — the AppModel-equivalent command surface.
 - `src-tauri/src/{ocr,gif,thumbnail,protocol,state}.rs` — OCR, GIF export,
   thumbnails, `kiri://` protocol, shared state.

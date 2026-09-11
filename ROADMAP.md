@@ -60,6 +60,19 @@ Release validation still open:
 - [ ] The maintainer-packaged Universal macOS DMG retains one stable local signing identity and passes manual Gatekeeper install/launch acceptance
 - [ ] Verify each release's final arm64 and x86_64 slices plus the Windows installer
 
+## v1.6 — Linux capture workspace
+
+- [x] Linux compiles with `capture/linux` and `platform/linux` backends
+- [x] Wayland-first frozen capture via xdg-desktop-portal Screenshot
+- [x] Region recording via ScreenCast + system GStreamer (no FFmpeg download)
+- [x] Secret Service credentials for remote OCR profiles
+- [x] AppImage bundle target and Ubuntu `cargo check`/`test` CI
+- [ ] Packaged AppImage acceptance on GNOME and KDE Wayland
+- [ ] Window hover outlines where the compositor exposes bounds
+- [ ] Local on-device OCR
+- [ ] System audio, microphone, and click-highlight parity
+- [ ] Signed Linux updater artifacts
+
 ## Later
 
 - [ ] Blur annotation
@@ -69,3 +82,4 @@ Release validation still open:
 - [ ] Recording duration and file-size safeguards
 - [ ] Smart collections
 - [ ] Adopt an existing managed library after local settings are reset
+- [ ] Flatpak packaging for Linux

@@ -2,10 +2,10 @@
 
 Status: current for the Tauri 2 application.
 
-Kiri is a local-first desktop capture workspace for macOS and Windows. React
-renders the application windows, Rust owns capture, persistence, credentials,
-network access, and platform integration, and Tauri provides the window and IPC
-boundary.
+Kiri is a local-first desktop capture workspace for macOS, Windows, and
+experimental Linux. React renders the application windows, Rust owns capture,
+persistence, credentials, network access, and platform integration, and Tauri
+provides the window and IPC boundary.
 
 ## Canonical project layout
 
@@ -58,13 +58,17 @@ unrestricted filesystem path.
    a slow or timed-out native freeze. Windows runs the complete startup on a
    dedicated thread: desktop capture and creation of a second WebView2
    controller never occupy or re-enter Tauri's main event-loop callback.
+   Linux freezes the active display through the xdg-desktop-portal Screenshot
+   API on a worker thread.
 2. macOS freezes the active display with ScreenCaptureKit. Windows frozen
    stills use the GDI path exposed through `xcap`; Windows Graphics Capture
-   remains the recording backend. Capture startup is single-flight, so a
-   repeated shortcut cannot enter a second native freeze. Windows gives the
-   desktop frame eight seconds to arrive, then uses fast lossless PNG encoding
-   and a direct `EnumWindows`/DWM collector for window hit-test bounds. The
-   collector excludes Kiri's own process before querying window metadata.
+   remains the recording backend. Linux stills use the Screenshot portal and
+   may return empty `window_rects` when the compositor does not expose bounds.
+   Capture startup is single-flight, so a repeated shortcut cannot enter a
+   second native freeze. Windows gives the desktop frame eight seconds to
+   arrive, then uses fast lossless PNG encoding and a direct
+   `EnumWindows`/DWM collector for window hit-test bounds. The collector
+   excludes Kiri's own process before querying window metadata.
    Post-processing logs a warning after thirty seconds without abandoning an
    already captured frame. Stage-specific failures remain visible, and Kiri
    will not accumulate replacement workers while the original worker is still
@@ -273,8 +277,10 @@ loading the window cannot lose the starting state or its cancel action.
 Windows uses Media Foundation plus the bundled Rust GIF encoder for MP4
 recording, recovery validation, thumbnails, and MP4-to-GIF conversion. macOS
 uses AVFoundation and ImageIO for the same boundary, including pause-segment
-merging. Neither platform downloads or executes FFmpeg; library browsing and
-thumbnail generation are local and offline.
+merging. Linux uses system GStreamer plugins for PipeWire ScreenCast capture,
+H.264 MP4 encoding, thumbnails, and GIF export. Neither platform downloads or
+executes FFmpeg; library browsing and thumbnail generation are local and
+offline.
 
 ## Signed update flow
 

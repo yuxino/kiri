@@ -33,3 +33,12 @@ fn open_external_url(url: &str) -> Result<(), String> {
         .map(|_| ())
         .map_err(|error| error.to_string())
 }
+
+#[cfg(target_os = "linux")]
+fn open_external_url(url: &str) -> Result<(), String> {
+    std::process::Command::new("xdg-open")
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}

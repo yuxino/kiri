@@ -3,8 +3,10 @@
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+#[cfg(any(windows, target_os = "macos"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
+#[cfg(any(windows, target_os = "macos"))]
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -441,9 +443,19 @@ pub fn probe_video_native(video: &Path) -> Option<(i64, i64, Option<f64>)> {
     crate::macos_media::probe_media(video).ok()
 }
 
+#[cfg(target_os = "linux")]
+pub fn probe_video_native(video: &Path) -> Option<(i64, i64, Option<f64>)> {
+    crate::linux_media::probe_video(video)
+}
+
 #[cfg(target_os = "macos")]
 pub fn merge_segments_native(segments: &[PathBuf], out_path: &Path) -> Result<()> {
     crate::macos_media::merge_segments(segments, out_path)
+}
+
+#[cfg(target_os = "linux")]
+pub fn merge_segments_native(segments: &[PathBuf], out_path: &Path) -> Result<()> {
+    crate::linux_media::merge_segments(segments, out_path)
 }
 
 // ---------------------------------------------------------------------------
@@ -460,6 +472,8 @@ enum SegmentEncoderInner {
     MacosNative(MacosNativeSegmentEncoder),
     #[cfg(windows)]
     WindowsNative(WindowsNativeSegmentEncoder),
+    #[cfg(target_os = "linux")]
+    LinuxNative(crate::linux_media::LinuxNativeSegmentEncoder),
 }
 
 const ENCODER_INPUT_POLL_INTERVAL: Duration = Duration::from_millis(25);
@@ -1040,6 +1054,23 @@ impl SegmentEncoder {
         })
     }
 
+    #[cfg(target_os = "linux")]
+    pub fn start_linux_native(
+        config: &EncoderConfig,
+        out_path: PathBuf,
+        video_rx: mpsc::Receiver<Vec<u8>>,
+        audio_rx: Option<AudioChunkReceiver>,
+        mic_rx: Option<AudioChunkReceiver>,
+    ) -> Result<Self> {
+        Ok(Self {
+            inner: SegmentEncoderInner::LinuxNative(
+                crate::linux_media::LinuxNativeSegmentEncoder::start(
+                    config, out_path, video_rx, audio_rx, mic_rx,
+                )?,
+            ),
+        })
+    }
+
     pub fn is_windows_native(&self) -> bool {
         #[cfg(windows)]
         {
@@ -1057,6 +1088,8 @@ impl SegmentEncoder {
             SegmentEncoderInner::MacosNative(encoder) => encoder.finish(),
             #[cfg(windows)]
             SegmentEncoderInner::WindowsNative(encoder) => encoder.finish(),
+            #[cfg(target_os = "linux")]
+            SegmentEncoderInner::LinuxNative(encoder) => encoder.finish(),
         }
     }
 
@@ -1066,6 +1099,8 @@ impl SegmentEncoder {
             SegmentEncoderInner::MacosNative(encoder) => encoder.cancel(),
             #[cfg(windows)]
             SegmentEncoderInner::WindowsNative(encoder) => encoder.cancel(),
+            #[cfg(target_os = "linux")]
+            SegmentEncoderInner::LinuxNative(encoder) => encoder.cancel(),
         }
     }
 }

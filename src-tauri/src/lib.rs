@@ -10,6 +10,8 @@ mod diagnostics;
 mod gif;
 #[cfg(target_os = "macos")]
 mod macos_media;
+#[cfg(target_os = "linux")]
+mod linux_media;
 mod ocr;
 mod ocr_commands;
 mod ocr_controller;
@@ -209,6 +211,7 @@ pub fn run() {
             commands::stop_recording,
             commands::show_confirm_dialog,
             commands::mic_supported,
+            commands::platform_capabilities,
             commands::log_frontend_error,
             commands::get_locale,
             commands::get_language,
@@ -366,10 +369,10 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
                 _ => return,
             };
             // Platform callbacks deliver platform-native global coordinates:
-            // macOS Quartz bottom-left points; Windows physical pixels.
+            // macOS Quartz bottom-left points; Windows/Linux physical pixels.
             #[cfg(target_os = "macos")]
             let (gx, gy) = (x, main_height - y);
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             let (gx, gy) = (x / scale, y / scale);
             #[cfg(target_os = "macos")]
             let _ = scale;

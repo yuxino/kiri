@@ -89,3 +89,4 @@ development.
 
 - [ADR 0032: Localized Kiri installer](adr/0032-localized-kiri-installer.md)
 - [ADR 0033: Shared installer source](adr/0033-shared-installer-source.md)
+- [ADR 0034: Linux screenshot MVP and staged recording](adr/0034-linux-screenshot-mvp.md)
