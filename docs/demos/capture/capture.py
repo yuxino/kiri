@@ -12,17 +12,16 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 ROOT = Path(__file__).resolve().parent
-PROJECTS = ['kiri', 'mimi', 'satori', 'viva', 'tick', 'wnacg']
+PROJECTS = ['kiri', 'mimi', 'satori', 'viva', 'tick']
 OUT = ROOT / 'recordings'
 OUT.mkdir(exist_ok=True)
-TITLES = {'kiri':'Kiri', 'mimi':'Mimi', 'satori':'Satori', 'viva':'Viva', 'tick':'Tick', 'wnacg':'WNACG'}
+TITLES = {'kiri':'Kiri', 'mimi':'Mimi', 'satori':'Satori', 'viva':'Viva', 'tick':'Tick'}
 LIMITS = {
  'kiri':'Annotation UI · original sample image · no OS screen capture',
  'mimi':'Settings UI · built-in browser preview · no live transcription',
  'satori':'PDF reading UI · original local sample · no AI answers',
  'viva':'Markdown UI · in-memory sample files · no native file access',
  'tick':'Task configuration UI · no task saved or executed',
- 'wnacg':'Reading UI · original local pages · no upstream content or AI',
 }
 CAPTIONS = {
  'kiri':('圈出重点，加一句说明。','Mark what matters. Add a little context.'),
@@ -30,7 +29,6 @@ CAPTIONS = {
  'satori':('从眼前这一页，慢慢读下去。','Turn a page. Find your own pace.'),
  'viva':('写下来，再换个角度看看。','Write a note. See it another way.'),
  'tick':('设定时间，整理一件重复的小事。','Give a recurring task a place in your day.'),
- 'wnacg':('按习惯翻页，按心情换布局。','A reading layout that follows your pace.'),
 }
 
 class Handler(SimpleHTTPRequestHandler):
@@ -38,7 +36,7 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/demo.html':
             repo=PROJECTS[self.server.server_port-8730]
-            q='?window=editor&id=demo' if repo=='kiri' else '#aid=1001' if repo=='wnacg' else ''
+            q='?window=editor&id=demo' if repo=='kiri' else ''
             cn,en=CAPTIONS[repo]
             text=f'''<!doctype html><meta charset="utf-8"><title>{TITLES[repo]} interface demo</title>
 <style>*{{box-sizing:border-box}}body{{margin:0;background:#f5f4f8;color:#342f40;font-family:Arial,"Noto Sans CJK SC",sans-serif}}header{{height:64px;margin:0 32px;display:flex;align-items:center;justify-content:space-between}}b{{font-size:25px;letter-spacing:-.5px}}.badge{{font-size:12px;background:#ece7f4;padding:8px 13px;border:1px solid #dfd6eb;border-radius:20px;color:#776585}}iframe{{display:block;margin:0 32px;width:1216px;height:748px;border:1px solid #ddd9e4;border-radius:10px;background:white;box-shadow:0 8px 22px #36304410}}footer{{margin:18px 34px 0;display:flex;align-items:center;justify-content:space-between}}#cn{{font-size:17px;font-weight:600}}#en{{font-size:12px;color:#88818f;margin-top:5px}}.limit{{font-size:10px;color:#8e8696;max-width:370px;text-align:right;line-height:1.6}}</style>
@@ -65,8 +63,6 @@ async def record(repo,browser):
         url=request.request.url
         if url.startswith(f'http://127.0.0.1:{port}/'):
             await request.continue_()
-        elif re.fullmatch(r'https://img\.qy0\.ru/demo/page-[123]\.png',url):
-            await request.fulfill(path=str(ROOT/'fixtures'/url.rsplit('/',1)[-1]),content_type='image/png')
         else:await request.abort()
     await ctx.route('**/*',route)
     bridge=(ROOT/'bridge.js').read_text().replace('__PROJECT__',repo)
@@ -164,16 +160,7 @@ async def record(repo,browser):
             await caption('演示到这里，不创建系统任务。','Cancel the example without creating a system task.')
             await click(frame.get_by_role('button',name=re.compile(r'^取\s*消$')).last);await shot('02')
         else:
-            await frame.locator('.reader-page img').first.wait_for(state='visible')
-            await caption('先按连续模式慢慢读。','Read original sample pages in continuous mode.')
-            await page.mouse.move(790,520);await page.mouse.wheel(0,530);await page.wait_for_timeout(1700);await shot('01')
-            await caption('打开阅读设置，换成单页。','Choose a single-page layout.')
-            await click(frame.get_by_label('阅读设置',exact=True).first)
-            await click(frame.get_by_role('button',name='单页',exact=True));await page.keyboard.press('Escape');await page.wait_for_timeout(1200);await shot('02')
-            await caption('再试试双页，像翻开一本书。','Try a two-page spread.')
-            await click(frame.get_by_label('阅读设置',exact=True).first)
-            await click(frame.get_by_role('button',name=re.compile('^双页')));await page.keyboard.press('Escape');await page.wait_for_timeout(1500);await shot('poster')
-            await page.mouse.click(600,600);await page.keyboard.press('ArrowRight');await page.wait_for_timeout(1600);await shot('03')
+            raise ValueError('Unknown public demo project')
         await page.wait_for_timeout(1700)
         state['success']=True
     except Exception as error:
