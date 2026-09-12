@@ -1,7 +1,7 @@
 # Kiri installer
 
 Presentation source: [yuxino/desktop-installer](https://github.com/yuxino/desktop-installer).
-Pinned version: **2.1.1**. This directory is generated; edit the shared repository.
+Pinned version: **2.1.2**. This directory is generated; edit the shared repository.
 
 Build offline from the application root:
 

@@ -2,9 +2,9 @@ name: Installer theme
 on:
   push:
     branches: [main]
-    paths: ['src-tauri/installer-theme/**', 'src-tauri/tauri.windows.conf.json', '.github/workflows/installer-theme.yml']
+    paths: ['src-tauri/installer-theme/**', 'src-tauri/icons/**', 'src-tauri/tauri.windows.conf.json', '.github/workflows/installer-theme.yml']
   pull_request:
-    paths: ['src-tauri/installer-theme/**', 'src-tauri/tauri.windows.conf.json', '.github/workflows/installer-theme.yml']
+    paths: ['src-tauri/installer-theme/**', 'src-tauri/icons/**', 'src-tauri/tauri.windows.conf.json', '.github/workflows/installer-theme.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -31,9 +31,14 @@ jobs:
             choco install nsis --version=3.11 --yes --no-progress
             if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
           }
+          $tauriDirectory = (Resolve-Path -LiteralPath "src-tauri").Path
+          $windowsConfig = Get-Content -LiteralPath (Join-Path $tauriDirectory "tauri.windows.conf.json") -Raw | ConvertFrom-Json
+          $iconPath = $windowsConfig.bundle.windows.nsis.installerIcon
+          if ([string]::IsNullOrWhiteSpace($iconPath)) { throw "Configure installerIcon before compiling the preview" }
+          $previewIcon = (Resolve-Path -LiteralPath (Join-Path $tauriDirectory $iconPath)).Path
           Push-Location src-tauri/installer-theme/generated
           try {
-            & $compiler /V3 preview.nsi
+            & $compiler /V3 "/DPREVIEW_ICON=$previewIcon" preview.nsi
             if ($LASTEXITCODE -ne 0) { throw 'NSIS preview compilation failed' }
           } finally { Pop-Location }
       - uses: actions/upload-artifact@v7
