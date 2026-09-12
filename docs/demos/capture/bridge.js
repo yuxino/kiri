@@ -13,8 +13,6 @@
   const root = '/demo/Weekend notes';
   const documents = {'Weekend.md':doc,'Ideas.md':'# Little ideas\n\nA useful tool starts with a small, ordinary need.\n\n## Next up\n\n- Keep the interface quiet\n- Keep the files local\n- Make the first step obvious\n'};
   const snapshot = p => ({relativePath:p,name:p.split('/').pop(),content:documents[p] || doc,lineEnding:'lf',revision:{modifiedAtMs:1788652800000,sizeBytes:(documents[p] || doc).length,contentSha256:'1'.repeat(64)}});
-  const books = [{aid:'1001',title:'Small moments — original sample',url:'https://wnacg.com/photos-index-aid-1001.html',cover:'https://img.qy0.ru/demo/page-1.png',meta:'3 pages · local demo fixture'}];
-  const photos = [1,2,3].map(i => ({id:String(i),url:`https://wnacg.com/photos-view-id-${i}.html`,title:`Original sample — ${i}`}));
   window.__demoEmit = (event,payload) => {for (const {handler} of (listeners.get(event) || [])) callbacks.get(handler)?.({event,id:handler,payload});};
   async function invoke(command,args = {}) {
     window.__demoCalls.push({command,args});
@@ -28,7 +26,7 @@
     if (command === 'plugin:window|outer_position' || command === 'plugin:window|inner_position') return {x:0,y:0};
     if (command.startsWith('plugin:window|is_')) return false;
     if (command.startsWith('plugin:window|') || command.startsWith('plugin:webview|') || command.startsWith('plugin:menu|')) return null;
-    if (command === 'plugin:app|version') return {kiri:'1.4.9',mimi:'1.3.8',satori:'3.4.4',viva:'2.0.6',tick:'0.1.4',wnacg:'0.1.11'}[repo];
+    if (command === 'plugin:app|version') return {kiri:'1.4.9',mimi:'1.3.8',satori:'3.4.4',viva:'2.0.6',tick:'0.1.4'}[repo];
     if (command === 'plugin:app|name') return repo;
     if (command === 'plugin:dialog|open') return repo === 'satori' ? '/demo/sample.pdf' : root;
     if (command.startsWith('plugin:updater|')) throw new Error('Updates are not part of the documentation demo.');
@@ -66,21 +64,6 @@
       if (command === 'get_node_runtime_status') return {available:true,version:'Documentation preview',executablePath:'node'};
       if (command === 'list_scheduled_jobs') return [];
       if (command.includes('run_') || command === 'save_scheduled_job') throw new Error('Scheduling and execution are not part of this interface demo.');
-    }
-    if (repo === 'wnacg') {
-      if (command === 'fetch_albums' || command === 'search_albums') return books;
-      if (command === 'fetch_album_photos') return {photos,title:books[0].title,tags:[{name:'Original sample',path:'/demo'}],categories:[],author:'Local demo'};
-      if (command === 'fetch_photo_image') {const i=String(args.pageUrl||'').match(/id-(\d+)/)?.[1]||'1'; return {url:`https://img.qy0.ru/demo/page-${i}.png`};}
-      if (command === 'fetch_image_data_url' || command === 'fetch_image_data_url_progress') {
-        const i=String(args.url||'').match(/page-(\d+)/)?.[1]||'1';
-        const blob=await (await fetch(`/__demo__/page-${i}.png`)).blob();
-        return await new Promise(resolve => {const fr=new FileReader(); fr.onload=()=>resolve({dataUrl:fr.result}); fr.readAsDataURL(blob);});
-      }
-      if (command === 'ocr_capabilities') return {vision:false,manga:false};
-      if (command === 'is_window_fullscreen') return false;
-      if (command === 'set_window_title') return null;
-      if (command === 'ocr_engine_status' || command === 'translate_engine_status') return 'not_configured';
-      if (command.includes('ocr') || command.includes('translate')) throw new Error('OCR and translation are not included in this demo.');
     }
     throw new Error(`Unimplemented documentation boundary: ${command}`);
   }
