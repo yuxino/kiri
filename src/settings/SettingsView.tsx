@@ -194,6 +194,7 @@ type UpdateState =
   | { kind: "upToDate" }
   | ({ kind: "available" } & UpdateDetails)
   | ({ kind: "downloading"; downloaded: number; total?: number } & UpdateDetails)
+  | ({ kind: "verifying" } & UpdateDetails)
   | ({ kind: "downloaded" } & UpdateDetails)
   | ({ kind: "installing"; isWindows: boolean } & UpdateDetails)
   | ({ kind: "readyToRestart" } & UpdateDetails)
@@ -286,6 +287,9 @@ function AboutSettingsSection() {
           total = event.data.contentLength;
         } else if (event.event === "Progress") {
           downloaded += event.data.chunkLength;
+        } else if (event.event === "Finished") {
+          setUpdateState({ kind: "verifying", ...details });
+          return;
         }
         setUpdateState({ kind: "downloading", downloaded, total, ...details });
       }, { timeout: 120_000 });
@@ -308,7 +312,7 @@ function AboutSettingsSection() {
     const details = updateDetails(update);
     setUpdateState({ kind: "installing", isWindows, ...details });
     try {
-      await update.install({ restartAfterInstall: false });
+      await update.install({ restartAfterInstall: true });
       if (!isWindows) setUpdateState({ kind: "readyToRestart", ...details });
     } catch {
       setUpdateState({ kind: "error", action: "install", details });
@@ -353,15 +357,18 @@ function AboutSettingsSection() {
   } else if (updateState.kind === "available") {
     status = fmt("Kiri %@ is available.", `v${updateState.version}`);
   } else if (updateState.kind === "downloading") {
+    const size = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
     status = updateState.total
-      ? fmt("Downloading… %@", `${Math.min(100, Math.round((updateState.downloaded / updateState.total) * 100))}%`)
-      : t("Downloading…");
+      ? fmt("Downloading… %@", `${Math.min(100, Math.round((updateState.downloaded / updateState.total) * 100))}% · ${size(Math.min(updateState.downloaded, updateState.total))} / ${size(updateState.total)}`)
+      : fmt("Downloading… %@", size(updateState.downloaded));
+  } else if (updateState.kind === "verifying") {
+    status = t("Verifying update signature…");
   } else if (updateState.kind === "downloaded") {
     status = t("Download and signature verification complete. Ready to install.");
   } else if (updateState.kind === "installing") {
     status = t(
       updateState.isWindows
-        ? "Kiri will close while Windows completes the installation."
+        ? "Kiri will close briefly and reopen after the update."
         : "Installing the signed update…",
     );
   } else if (updateState.kind === "readyToRestart") {
@@ -380,7 +387,7 @@ function AboutSettingsSection() {
   }
 
   const details = stateDetails(updateState);
-  const busy = ["checking", "downloading", "installing", "relaunching"].includes(updateState.kind);
+  const busy = ["checking", "downloading", "verifying", "installing", "relaunching"].includes(updateState.kind);
 
   const runPrimaryAction = () => {
     if (busy) return;
@@ -398,10 +405,10 @@ function AboutSettingsSection() {
 
   const buttonLabel = updateState.kind === "checking"
     ? t("Checking…")
-    : updateState.kind === "downloading"
-      ? t("Downloading…")
+    : updateState.kind === "downloading" || updateState.kind === "verifying"
+      ? t(updateState.kind === "verifying" ? "Verifying update signature…" : "Downloading…")
       : updateState.kind === "downloaded"
-        ? t("Install Update")
+        ? t(isWindows ? "Install and Restart" : "Install Update")
         : updateState.kind === "installing"
           ? t("Installing…")
           : updateState.kind === "readyToRestart" || updateState.kind === "relaunching"
@@ -483,6 +490,7 @@ function stateDetails(state: UpdateState): UpdateDetails | null {
   switch (state.kind) {
     case "available":
     case "downloading":
+    case "verifying":
     case "downloaded":
     case "installing":
     case "readyToRestart":

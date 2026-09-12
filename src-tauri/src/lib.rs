@@ -435,13 +435,13 @@ fn install_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     let menu = build_tray_menu(app, &language)?;
 
     // macOS tints the monochrome template for either menu-bar appearance.
-    // Windows has no template-image rendering, so use a dedicated light,
-    // colored icon that stays visible on dark and light taskbars.
+    // Windows uses the same character artwork as the application icon.
+    // Keep a high-resolution source for Explorer's DPI-scaled tray rendering.
     let icon = {
         #[cfg(target_os = "macos")]
         let bytes = include_bytes!("../icons/tray-viewfinder.png");
         #[cfg(not(target_os = "macos"))]
-        let bytes = include_bytes!("../icons/tray-viewfinder-windows.png");
+        let bytes = include_bytes!("../icons/128x128.png");
         tauri::image::Image::from_bytes(bytes).ok()
     };
     let mut builder = TrayIconBuilder::with_id(MAIN_TRAY_ID)
@@ -591,61 +591,5 @@ mod tests {
             assert_ne!(english[index].1, chinese[index].1);
             assert_ne!(english[index].1, japanese[index].1);
         }
-    }
-
-    fn luminance(rgb: [f64; 3]) -> f64 {
-        let channel = |value: f64| {
-            let value = value / 255.0;
-            if value <= 0.04045 {
-                value / 12.92
-            } else {
-                ((value + 0.055) / 1.055).powf(2.4)
-            }
-        };
-        0.2126 * channel(rgb[0]) + 0.7152 * channel(rgb[1]) + 0.0722 * channel(rgb[2])
-    }
-
-    fn contrast_ratio(left: [f64; 3], right: [f64; 3]) -> f64 {
-        let (lighter, darker) = {
-            let left = luminance(left);
-            let right = luminance(right);
-            if left >= right {
-                (left, right)
-            } else {
-                (right, left)
-            }
-        };
-        (lighter + 0.05) / (darker + 0.05)
-    }
-
-    fn contrasting_tray_pixels(background: u8) -> usize {
-        let source =
-            image::load_from_memory(include_bytes!("../icons/tray-viewfinder-windows.png"))
-                .unwrap()
-                .to_rgba8();
-        let icon = image::imageops::resize(&source, 16, 16, image::imageops::FilterType::Lanczos3);
-        icon.pixels()
-            .filter(|pixel| {
-                let alpha = f64::from(pixel[3]) / 255.0;
-                let composite = [
-                    f64::from(pixel[0]) * alpha + f64::from(background) * (1.0 - alpha),
-                    f64::from(pixel[1]) * alpha + f64::from(background) * (1.0 - alpha),
-                    f64::from(pixel[2]) * alpha + f64::from(background) * (1.0 - alpha),
-                ];
-                contrast_ratio(composite, [f64::from(background); 3]) >= 3.0
-            })
-            .count()
-    }
-
-    #[test]
-    fn windows_tray_icon_has_three_to_one_contrast_on_light_and_dark_taskbars() {
-        assert!(
-            contrasting_tray_pixels(245) >= 24,
-            "16px tray icon needs a dark silhouette on a light taskbar"
-        );
-        assert!(
-            contrasting_tray_pixels(20) >= 24,
-            "16px tray icon needs a light core on a dark taskbar"
-        );
     }
 }

@@ -1,0 +1,10 @@
+{
+  "format": "yuxino-installer-lock-v2",
+  "source": "yuxino/desktop-installer",
+  "version": "2.1.1",
+  "product": "kiri",
+  "repository": "https://github.com/yuxino/kiri",
+  "size": 916318,
+  "unpackedSize": 3327472,
+  "sha256": "fc8ba38ef5626332a7cd4d7ddfed66e66d60ad42f3ff43dd231a12424f84c8f4"
+}

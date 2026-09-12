@@ -84,3 +84,8 @@ development.
 - [ADR 0028: Committed OCR selection](adr/0028-ocr-committed-selection.md)
 
 - [ADR 0030: Text history and saved screenshot OCR](adr/0030-ocr-history.md)
+
+- [ADR 0031: Windows update completion](adr/0031-windows-update-relaunch.md)
+
+- [ADR 0032: Localized Kiri installer](adr/0032-localized-kiri-installer.md)
+- [ADR 0033: Shared installer source](adr/0033-shared-installer-source.md)

@@ -214,7 +214,6 @@
   "Install Update": "アップデートをインストール",
   "Installing…": "インストール中…",
   "Installing the signed update…": "署名済みアップデートをインストール中…",
-  "Kiri will close while Windows completes the installation.": "Kiri を終了し、Windows がインストールを完了します。",
   "Update installed. Restart Kiri when you're ready.": "アップデートをインストールしました。準備ができたら Kiri を再起動してください。",
   "Restart and Finish Update": "再起動して更新を完了",
   "Restarting…": "再起動中…",
@@ -362,5 +361,8 @@
   "Can't read this file.": "このファイルを読み取れません。",
   "Choose a screenshot from the library.": "ライブラリからスクリーンショットを選んでください。",
   "Image not found.": "画像が見つかりません。",
-  "Recognize Saved Image Locally": "保存済み画像をローカルで文字認識"
+  "Recognize Saved Image Locally": "保存済み画像をローカルで文字認識",
+  "Verifying update signature…": "更新の署名を検証中…",
+  "Install and Restart": "インストールして再起動",
+  "Kiri will close briefly and reopen after the update.": "Kiri は一時的に終了し、更新後に自動で開きます。"
 }

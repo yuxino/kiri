@@ -214,7 +214,6 @@
   "Install Update": "安装更新",
   "Installing…": "正在安装…",
   "Installing the signed update…": "正在安装已签名的更新…",
-  "Kiri will close while Windows completes the installation.": "Kiri 将关闭，由 Windows 完成安装。",
   "Update installed. Restart Kiri when you're ready.": "更新已安装，准备好后重启 Kiri。",
   "Restart and Finish Update": "重启并完成更新",
   "Restarting…": "正在重启…",
@@ -362,5 +361,8 @@
   "Can't read this file.": "无法读取此文件。",
   "Choose a screenshot from the library.": "请从资料库中选择一张截图。",
   "Image not found.": "图片不存在。",
-  "Recognize Saved Image Locally": "本地识别已保存的截图"
+  "Recognize Saved Image Locally": "本地识别已保存的截图",
+  "Verifying update signature…": "正在验证更新签名…",
+  "Install and Restart": "安装并重启",
+  "Kiri will close briefly and reopen after the update.": "Kiri 将短暂关闭，更新完成后自动重新打开。"
 }

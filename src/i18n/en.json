@@ -214,7 +214,6 @@
   "Install Update": "Install Update",
   "Installing…": "Installing…",
   "Installing the signed update…": "Installing the signed update…",
-  "Kiri will close while Windows completes the installation.": "Kiri will close while Windows completes the installation.",
   "Update installed. Restart Kiri when you're ready.": "Update installed. Restart Kiri when you're ready.",
   "Restart and Finish Update": "Restart and Finish Update",
   "Restarting…": "Restarting…",
@@ -362,5 +361,8 @@
   "Can't read this file.": "Can't read this file.",
   "Choose a screenshot from the library.": "Choose a screenshot from the library.",
   "Image not found.": "Image not found.",
-  "Recognize Saved Image Locally": "Recognize Saved Image Locally"
+  "Recognize Saved Image Locally": "Recognize Saved Image Locally",
+  "Verifying update signature…": "Verifying update signature…",
+  "Install and Restart": "Install and Restart",
+  "Kiri will close briefly and reopen after the update.": "Kiri will close briefly and reopen after the update."
 }

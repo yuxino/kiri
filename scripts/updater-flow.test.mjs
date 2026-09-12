@@ -17,7 +17,7 @@ test("the app uses Tauri's signed updater as a manual staged flow", () => {
   assert.match(settings, /await check\(/);
   assert.match(settings, /await update\.download\(/);
   assert.match(settings, /event\.event === "Progress"/);
-  assert.match(settings, /await update\.install\(\{ restartAfterInstall: false \}\)/);
+  assert.match(settings, /await update\.install\(\{ restartAfterInstall: true \}\)/);
   assert.match(settings, /await relaunch\(\)/);
   assert.match(settings, /update\.body/);
   assert.doesNotMatch(settings, /downloadAndInstall/);
@@ -36,6 +36,7 @@ test("updater configuration is fixed, HTTPS-only, and least-privileged", () => {
   const decodedPublicKey = Buffer.from(config.plugins.updater.pubkey, "base64").toString("utf8");
 
   assert.equal(config.bundle.createUpdaterArtifacts, true);
+  assert.equal(config.plugins.updater.windows.installMode, "passive");
   assert.deepEqual(config.plugins.updater.endpoints, [
     "https://github.com/yuxino/kiri/releases/latest/download/latest.json",
   ]);
@@ -68,4 +69,78 @@ test("CI signs updater artifacts without exposing a private key", () => {
   assert.match(packager, /security find-generic-password/);
   assert.match(packager, /kiri\.app\.tar\.gz/);
   assert.match(packager, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD/);
+});
+
+// Run the actual update component's handlers with isolated IPC and hook state.
+// No network, installer or user library is touched by these regressions.
+const { createLibraryHarness, nodes, deferred, settleRequests } = await import('./helpers/library-render-harness.mjs');
+function updaterHarness(windows = true) {
+  const pending = deferred();
+  const installs = [];
+  let progress;
+  let restarts = 0;
+  const update = { version: '9.9.9', currentVersion: '1.5.0', body: 'Release notes',
+    close: async () => {},
+    download: callback => { progress = callback; return pending.promise; },
+    install: async options => { installs.push(options); },
+  };
+  const settings = read('src/settings/SettingsView.tsx');
+  const source = `import React, { useState, useRef, useEffect } from 'react';
+    import { api } from '../lib/ipc';
+    const navigator = { userAgent: '${windows ? 'Windows' : 'Macintosh'}' };
+    const check = api.check, getVersion = api.getVersion, relaunch = api.relaunch;
+    const t = value => value, fmt = (value, arg) => value.replace('%@', arg);
+    ${settings.slice(settings.indexOf('type UpdateDetails ='), settings.indexOf('function GeneralSettingsSection'))}
+    export { AboutSettingsSection };`;
+  const harness = createLibraryHarness({ check: async () => update, getVersion: async () => '1.5.0',
+    relaunch: async () => { restarts++; } }, source);
+  const component = harness.mount('AboutSettingsSection');
+  const render = () => component.render();
+  const button = () => nodes(render()).find(node => node?.type === 'button');
+  return { pending, installs, render, button, progress: event => progress(event), restarts: () => restarts };
+}
+
+test('Windows download reports bytes and cannot install until verification succeeds', async () => {
+  const h = updaterHarness();
+  h.button().props.onClick(); await settleRequests();
+  h.button().props.onClick();
+  h.progress({ event: 'Started', data: { contentLength: 4 * 1024 * 1024 } });
+  h.progress({ event: 'Progress', data: { chunkLength: 1024 * 1024 } });
+  assert.ok(nodes(h.render()).includes('Downloading… 25% · 1.0 MB / 4.0 MB'));
+  const progress = nodes(h.render()).find(node => node?.type === 'progress');
+  assert.equal(progress.props.value, 1024 * 1024);
+  h.progress({ event: 'Finished' });
+  assert.ok(nodes(h.render()).includes('Verifying update signature…'));
+  assert.equal(h.button().props.disabled, true);
+  h.button().props.onClick(); assert.deepEqual(h.installs, []);
+  h.pending.resolve(); await settleRequests();
+  assert.ok(nodes(h.button()).includes('Install and Restart'));
+  h.button().props.onClick(); await settleRequests();
+  assert.deepEqual(h.installs, [{ restartAfterInstall: true }]);
+  assert.equal(h.restarts(), 0, 'Windows installer owns the restart');
+});
+
+test('unknown download size stays indeterminate and failed verification never enables installation', async () => {
+  const h = updaterHarness();
+  h.button().props.onClick(); await settleRequests(); h.button().props.onClick();
+  h.progress({ event: 'Started', data: {} });
+  h.progress({ event: 'Progress', data: { chunkLength: 1024 * 1024 } });
+  assert.ok(nodes(h.render()).includes('Downloading… 1.0 MB'));
+  assert.equal(nodes(h.render()).find(node => node?.type === 'progress').props.value, undefined);
+  h.progress({ event: 'Finished' });
+  h.pending.reject(new Error('invalid signature')); await settleRequests();
+  assert.ok(nodes(h.render()).includes("Couldn't download the update. Try again."));
+  assert.deepEqual(h.installs, []);
+});
+
+test('macOS installation still waits for its explicit restart action', async () => {
+  const h = updaterHarness(false);
+  h.button().props.onClick(); await settleRequests(); h.button().props.onClick();
+  h.pending.resolve(); await settleRequests();
+  assert.ok(nodes(h.button()).includes('Install Update'));
+  h.button().props.onClick(); await settleRequests();
+  assert.equal(h.restarts(), 0);
+  assert.ok(nodes(h.button()).includes('Restart and Finish Update'));
+  h.button().props.onClick(); await settleRequests();
+  assert.equal(h.restarts(), 1);
 });

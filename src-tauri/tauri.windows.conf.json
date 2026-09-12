@@ -9,9 +9,17 @@
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "sidebarImage": "installer-theme/generated/sidebar.bmp",
-        "headerImage": "installer-theme/generated/header.bmp",
-        "installerHooks": "installer-theme/theme.nsh",
-        "languages": ["English", "SimpChinese", "Japanese"],
+        "installerHooks": "installer-theme/generated/theme.nsh",
+        "languages": [
+          "English",
+          "SimpChinese",
+          "Japanese"
+        ],
+        "customLanguageFiles": {
+          "English": "installer-theme/generated/English.nsh",
+          "SimpChinese": "installer-theme/generated/SimpChinese.nsh",
+          "Japanese": "installer-theme/generated/Japanese.nsh"
+        },
         "displayLanguageSelector": false
       }
     }

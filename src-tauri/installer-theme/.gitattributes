@@ -1,2 +1,3 @@
-# Artwork hashes describe exact Git blob bytes, including on Windows checkouts.
-artwork/* -text
+* text=auto eol=lf
+*.br binary
+*.bmp binary

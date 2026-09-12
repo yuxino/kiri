@@ -1,3 +1,5 @@
 /generated/
 /artwork/
-/preview-only-setup.exe
+/.cache/
+*.exe
+*.tmp

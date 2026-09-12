@@ -34,8 +34,12 @@ Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Win
 
 从 v1.4.9 起，设置页支持手动检查、下载并安装经过签名验证的更新；每一步都需要你明确点击，Kiri 不会后台检查或静默安装。v1.4.8 及更早版本需要先从 Releases 手动安装一次 v1.4.9 或更新版本，之后才能使用应用内更新。
 
+日常更新请用**设置 → 关于 → 检查更新**。下载时显示已下载大小和可用的百分比，随后验证签名。Windows 点击「安装并重启」后，Kiri 会短暂关闭，更新完成自动重新打开，无需手动卸载现有 NSIS 版本；macOS 安装后再点击重启。手动运行下载的安装包则可能出现卸载／重装选项。
+
 - **macOS 14+**：下载 Universal `.dmg`（Apple 芯片与 Intel），把 `Kiri.app` 拖入“应用程序”。截图与录屏需要“屏幕与系统音频录制”权限；点击高亮才需要“输入监控”。麦克风录制需要 macOS 15+。
 - **Windows 11（x64）**：提供 x64 安装包，完整捕获流程的真机验收进度见[路线图](ROADMAP.md)。运行 `.exe` 安装程序；屏幕捕获不需要额外系统授权，麦克风权限由 Windows 隐私设置控制。安装程序未经过 Authenticode 签名，SmartScreen 可能提示警告。
+
+Windows 安装器跟随系统语言，支持简体中文、英文和日文，安装、更新与卸载提示均已翻译；应用内语言可在设置中单独选择。Kiri 的半身立绘与公共安装样式统一在 [desktop-installer](https://github.com/yuxino/desktop-installer) 维护。
 
 macOS 发布包使用项目维护的本地自签名身份，未使用 Developer ID 签名或 Apple 公证。首次启动若被拦截，请按住 Control 点按 `Kiri.app` 并选择“打开”，或在“系统设置 → 隐私与安全性”中选择“仍要打开”。
 

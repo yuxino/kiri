@@ -1,7 +1,7 @@
 name: Installer theme
 on:
   push:
-    branches: [feat/yuxino-installer-theme-v1]
+    branches: [main]
     paths: ['src-tauri/installer-theme/**', 'src-tauri/tauri.windows.conf.json', '.github/workflows/installer-theme.yml']
   pull_request:
     paths: ['src-tauri/installer-theme/**', 'src-tauri/tauri.windows.conf.json', '.github/workflows/installer-theme.yml']
@@ -31,7 +31,7 @@ jobs:
             choco install nsis --version=3.11 --yes --no-progress
             if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed' }
           }
-          Push-Location src-tauri/installer-theme
+          Push-Location src-tauri/installer-theme/generated
           try {
             & $compiler /V3 preview.nsi
             if ($LASTEXITCODE -ne 0) { throw 'NSIS preview compilation failed' }
@@ -39,6 +39,6 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: installer-theme-preview-only
-          path: src-tauri/installer-theme/preview-only-setup.exe
+          path: src-tauri/installer-theme/generated/preview-only-setup.exe
           if-no-files-found: error
           retention-days: 7

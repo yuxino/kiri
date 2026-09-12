@@ -34,8 +34,12 @@ Published macOS Universal and Windows x64 installers are listed on [GitHub Relea
 
 Starting with v1.4.9, Settings can manually check, download, and install signature-verified updates. Every step requires an explicit click; Kiri does not check in the background or install silently. v1.4.8 and older builds need one manual installation of v1.4.9 or newer from Releases before in-app updates become available.
 
+Use **Settings → About → Check for Updates** for routine updates. Download progress shows bytes and, when available, a percentage, followed by signature verification. On Windows, **Install and Restart** closes Kiri briefly and reopens it after the passive update; you do not need to uninstall the existing NSIS version. On macOS, choose restart after installation. Running a downloaded installer manually may instead show maintenance options.
+
 - **macOS 14+**: download the Universal `.dmg` for Apple silicon and Intel, then drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording**; **Input Monitoring** is needed only for click highlights. Microphone recording requires macOS 15+.
 - **Windows 11 (x64)**: an x64 installer is available. See the [roadmap](ROADMAP.md) for the remaining full capture-flow device acceptance. Run the `.exe` installer; screen capture needs no extra system permission, and microphone access follows Windows privacy settings. The installer is not Authenticode-signed, so SmartScreen may warn.
+
+The Windows installer follows your system language (English, Simplified Chinese or Japanese). Installation, update and uninstall messages are localized; you can choose Kiri's interface language separately in Settings. Its half-body Kiri artwork and shared presentation are maintained in [desktop-installer](https://github.com/yuxino/desktop-installer).
 
 macOS releases use the project's maintained local self-signed identity, not Developer ID signing or Apple notarization. If the first launch is blocked, Control-click `Kiri.app` and choose **Open**, or select **Open Anyway** in System Settings → Privacy & Security.
 

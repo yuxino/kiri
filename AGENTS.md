@@ -47,8 +47,9 @@ decisions:
   Recording, merging, thumbnails, and GIF conversion use platform media APIs
   and must not download or launch a third-party media executable.
 - Application updates are manual and signed. Check, download, install, and the
-  macOS relaunch are separate user actions; Windows exits into its passive NSIS
-  installer. GitHub Releases is an error-recovery link, not the normal updater.
+  macOS relaunch are separate user actions; Windows explicitly offers Install
+  and Restart, then exits into its passive NSIS installer and reopens afterward.
+  GitHub Releases is an error-recovery link, not the normal updater.
 
 ## Repository map
 
