@@ -7,7 +7,7 @@ import subprocess
 
 root=Path(__file__).resolve().parent
 out=root/'deliverables'
-projects=['kiri','mimi','satori','viva','tick','wnacg']
+projects=['kiri','mimi','satori','viva','tick']
 for repo in projects:
     src=root/'recordings'/repo
     state=json.loads((src/'provenance.json').read_text())
@@ -54,26 +54,8 @@ The shared documentation-only recorder and original fixture generators live in `
 
 capture=out/'kiri/docs/demos/capture'
 capture.mkdir(exist_ok=True)
-for name in ['bridge.js','capture.py','fixtures.py','package.py']:
+for name in ['bridge.js','capture.py','fixtures.py','package.py','README.md']:
     shutil.copyfile(root/name,capture/name)
-(capture/'README.md').write_text('''# Documentation-only recorder
-
-This records real built frontends with explicit sample data. It is never imported by application code. The native integration layer is replaced only inside disposable browser contexts, with all external requests blocked except exact local fixture routes. Mimi uses its existing browser-preview mode.
-
-To reproduce a scene, build each project at the source commit recorded in its `docs/demos/provenance.json`, then place its `dist` output in `dist/demo-frontend-<project>/` next to these scripts and write that commit to `source-commit.txt`. Projects: kiri, mimi, satori, viva, tick, wnacg.
-
-Use Python 3.12, Playwright 1.55.0, Pillow 11.3.0, ReportLab 4.4.3, ffmpeg, current stable Google Chrome, DejaVu Sans and Noto CJK fonts. Install Playwright's ffmpeg helper with `python -m playwright install ffmpeg`. Run from this directory:
-
-```sh
-python -I fixtures.py
-python -I capture.py
-python -I package.py
-```
-
-The recorder binds only localhost. It captures genuine clicks, typing, canvas drawing and reader navigation; the surrounding project title, bilingual step caption, pointer indicator and fixture disclosure are documentation overlays. It does not access a real desktop, native filesystem, task scheduler, microphone, provider account or upstream comic site. Do not remove those disclosures or present these recordings as native end-to-end acceptance.
-
-Review every resulting poster and the full videos before updating media. Failed scenes are not packaged. The capture scripts do not push commits, publish releases or change project versions.
-''')
-# Bundle-level manifest covers every file before another repository imports it.
-manifest={str(p.relative_to(out)):{'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted(out.rglob('*')) if p.is_file()}
+# Bundle-level manifest covers public projects only, even in a reused output directory.
+manifest={str(p.relative_to(out)):{'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for repo in projects for p in sorted((out/repo).rglob('*')) if p.is_file()}
 (out/'manifest.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
