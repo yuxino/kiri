@@ -18,6 +18,7 @@ test('pinned offline bundle matches this application and all three installer lan
   assert.equal(nsis.uninstallerHeaderImage, undefined);
   for (const language of nsis.languages) {
     assert.equal(nsis.customLanguageFiles[language], `installer-theme/generated/${language}.nsh`);
+    assert.doesNotMatch(files[`${language}.nsh`].toString(), /^\ufeff/, 'Tauri adds the custom-language BOM');
     assert.equal((files[`${language}.nsh`].toString().match(/^LangString /gm) || []).length, 27);
   }
   const theme = files['theme.nsh'].toString();
