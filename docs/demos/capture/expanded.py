@@ -25,7 +25,7 @@ class Handler(base.Handler):
     def do_GET(self):
         if self.path!='/demo.html':return super().do_GET()
         repo=PROJECTS[self.server.server_port-8730]
-        query='?window=editor&id=demo' if repo=='kiri' else '#aid=1001' if repo=='wnacg' else ''
+        query='?window=editor&id=demo' if repo=='kiri' else ''
         data=f'''<!doctype html><meta charset="utf-8"><title>{repo} feature tour</title>
 <style>*{{box-sizing:border-box}}body{{margin:0;background:#f5f4f8;color:#342f40;font-family:Arial,"Noto Sans CJK SC",sans-serif}}header{{height:64px;margin:0 32px;display:flex;align-items:center;justify-content:space-between}}b{{font-size:25px}}.badge{{font-size:12px;background:#ece7f4;padding:8px 13px;border:1px solid #dfd6eb;border-radius:20px;color:#776585}}iframe{{display:block;margin:0 32px;width:1216px;height:748px;border:1px solid #ddd9e4;border-radius:10px;background:white;box-shadow:0 8px 22px #36304410}}footer{{margin:17px 34px 0;display:flex;align-items:center;justify-content:space-between}}#cn{{font-size:18px;font-weight:600}}#en{{font-size:12px;color:#88818f;margin-top:5px}}.limit{{font-size:10px;color:#8e8696;max-width:370px;text-align:right;line-height:1.6}}</style>
 <header><b>{base.TITLES[repo]}</b><span class="badge">10× ACTIONS · RESULT HOLDS / 操作快放 · 示例数据</span></header>
@@ -38,7 +38,6 @@ async def record(repo,browser):
     context=await browser.new_context(viewport={'width':1280,'height':900},locale='en-US',color_scheme='light',record_video_dir=str(folder/'raw'),record_video_size={'width':1280,'height':900})
     async def route(rt):
         if rt.request.url.startswith(f'http://127.0.0.1:{port}/'):await rt.continue_()
-        elif re.fullmatch(r'https://img\.qy0\.ru/demo/page-[123]\.png',rt.request.url):await rt.fulfill(path=str(ROOT/'fixtures'/rt.request.url.rsplit('/',1)[-1]),content_type='image/png')
         else:await rt.abort()
     await context.route('**/*',route)
     await context.add_init_script(script=(ROOT/'bridge.js').read_text().replace('__PROJECT__',repo).replace("localStorage.setItem('mimi-ui-language', 'en');", "if (!localStorage.getItem('mimi-ui-language')) localStorage.setItem('mimi-ui-language', 'en');")+"\nif (window.__TAURI_INTERNALS__) globalThis.isTauri=true;")
@@ -129,20 +128,7 @@ async def record(repo,browser):
             await click(f.get_by_role('button',name=re.compile('添加变量')));await type_in(f.get_by_placeholder('变量名'),'DEMO_MODE');await type_in(f.get_by_placeholder('变量值'),'preview');await mark('给脚本配置自己的环境变量','09 / Configure non-secret example variables')
             await click(f.get_by_role('button',name=re.compile(r'^取\s*消$')).last);await click(f.get_by_role('button',name='日程',exact=True));await mark('日程视图，集中查看安排','10 / Calendar view; no system task was created')
         else:
-            await f.locator('.reader-page img').first.wait_for(state='visible');await page.mouse.move(850,540);await page.mouse.wheel(0,470);await mark('连续阅读，顺着往下看','01 / Continuous reading')
-            async def setting(text):
-                panel=f.get_by_role('button',name=text,exact=True)
-                if not await panel.is_visible():await click(f.get_by_label('阅读设置',exact=True).first)
-                await click(panel)
-            await setting('宽屏');await page.keyboard.press('Escape');await mark('宽屏阅读，多留一点空间','02 / Wide reading layout')
-            await click(f.get_by_label('阅读设置',exact=True).first);await click(f.get_by_role('button',name=re.compile('^贴边')));await page.keyboard.press('Escape');await mark('贴边模式，把页面铺开','03 / Edge-to-edge layout')
-            await click(f.get_by_label('阅读设置',exact=True).first);await click(f.get_by_role('button',name=re.compile('^紧凑')));await page.keyboard.press('Escape');await mark('收紧图片间距，阅读更连贯','04 / Compact page spacing')
-            await click(f.get_by_label('阅读设置',exact=True).first);await click(f.get_by_role('button',name='单页',exact=True));await page.keyboard.press('Escape');await mark('切成单页，专注眼前这一张','05 / Single-page reading')
-            await click(f.get_by_label('下一页',exact=True).first);await mark('用按钮翻到下一页','06 / Page navigation')
-            await click(f.get_by_label('阅读设置',exact=True).first);await click(f.get_by_role('button',name='连续',exact=True));await page.keyboard.press('Escape');await click(f.get_by_label('放大阅读页面',exact=True));await click(f.get_by_label('放大阅读页面',exact=True));await mark('放大局部，细节看得更清楚','07 / Zoom into the artwork')
-            await click(f.get_by_role('button',name=re.compile('^当前阅读缩放')));await mark('一键恢复原始比例','08 / Reset the reading zoom')
-            await click(f.get_by_label('阅读设置',exact=True).first);await click(f.get_by_role('button',name=re.compile('^双页')));await page.keyboard.press('Escape');await mark('双页并排，换一种阅读节奏','09 / Two-page spread')
-            await click(f.get_by_label('阅读设置',exact=True).first);await click(f.get_by_role('button',name='适中',exact=True));await click(f.get_by_role('button',name='留白',exact=True));await page.keyboard.press('Escape');await mark('宽度与留白，各自按习惯来','10 / Restore a comfortable reading layout')
+            raise ValueError('Unknown public demo project')
         state['success']=True
     except Exception as e:
         state['failure']=str(e);await page.screenshot(path=str(folder/'failure.png'))
