@@ -8,7 +8,7 @@ from PIL import Image
 
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'expanded-deliverables'
-PROJECTS=['kiri','mimi','satori','viva','tick','wnacg']
+PROJECTS=['kiri','mimi','satori','viva','tick']
 for repo in PROJECTS:
     source=ROOT/'expanded'/repo
     state=json.loads((source/'provenance.json').read_text())
@@ -43,7 +43,7 @@ This replaces the earlier three-to-four-scene, 2x demo with **{len(state['scenes
 
 **Pacing:** every source action interval is played at **10x**, followed by a **0.8-second result hold**. The final clip lasts {state['duration']:.2f} seconds; it is not a uniformly accelerated full video. The GIF and MP4 share the same timing. The fast-forward and sample-data labels remain visible.
 
-**Scope:** {state['limitations']}. The browser harness substitutes native API boundaries with original local examples; this is not native macOS/Windows end-to-end validation. No user credentials, personal files, live provider output or upstream comic content are included. Satori question composition is shown without submitting an AI request; no answer is fabricated.
+**Scope:** {state['limitations']}. The browser harness substitutes native API boundaries with original local examples; this is not native macOS/Windows end-to-end validation. No user credentials, personal files, live provider output or upstream content are included. Satori question composition is shown without submitting an AI request; no answer is fabricated.
 
 ## Scenes
 
@@ -61,6 +61,7 @@ capture=OUT/'kiri/docs/demos/capture'
 capture.mkdir(parents=True,exist_ok=True)
 for name in ['expanded.py','package-expanded.py']:
     shutil.copyfile(ROOT/name,capture/name)
-manifest={str(p.relative_to(OUT)):{'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in sorted(OUT.rglob('*')) if p.is_file()}
+# Reused output directories must not add unlisted projects to the public manifest.
+manifest={str(p.relative_to(OUT)):{'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for repo in PROJECTS for p in sorted((OUT/repo).rglob('*')) if p.is_file()}
 (OUT/'manifest.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
 print('Manifest SHA256:',hashlib.sha256((OUT/'manifest.json').read_bytes()).hexdigest())
