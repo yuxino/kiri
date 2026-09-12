@@ -42,6 +42,22 @@ jobs:
           node-version: 22
       - run: pnpm install --frozen-lockfile
       - run: pnpm test:release-tools
+      - name: Read reviewed bilingual release notes
+        id: release-notes
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { randomUUID } from 'node:crypto';
+          const path = `docs/releases/${process.env.GITHUB_REF_NAME}.md`;
+          const notes = fs.readFileSync(path, 'utf8').trim();
+          if (!/^## English$/m.test(notes) || !/^## 中文$/m.test(notes) ||
+              notes.indexOf('## English') > notes.indexOf('## 中文')) {
+            throw new Error(`${path} must contain reviewed English-first bilingual release notes`);
+          }
+          const delimiter = randomUUID();
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `body<<${delimiter}\n${notes}\n${delimiter}\n`);
+          NODE
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -50,6 +66,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Kiri ${{ github.ref_name }}
+          releaseBody: ${{ steps.release-notes.outputs.body }}
           releaseDraft: true
           updaterJsonPreferNsis: true
           uploadUpdaterJson: true
