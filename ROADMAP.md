@@ -63,7 +63,8 @@ Release validation still open:
 ## v1.6 — Linux capture workspace
 
 - [x] Linux compiles with `capture/linux` and `platform/linux` backends
-- [x] Wayland-first frozen capture via xdg-desktop-portal Screenshot
+- [x] Wayland-first frozen capture (`grim` preferred; Screenshot portal fallback)
+- [x] Hyprland `Shift+Ctrl+A` via compositor bind + fullscreen overlay geometry
 - [x] Region recording via ScreenCast + system GStreamer (no FFmpeg download)
 - [x] Secret Service credentials for remote OCR profiles
 - [x] AppImage bundle target and Ubuntu `cargo check`/`test` CI

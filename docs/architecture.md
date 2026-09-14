@@ -58,12 +58,17 @@ unrestricted filesystem path.
    a slow or timed-out native freeze. Windows runs the complete startup on a
    dedicated thread: desktop capture and creation of a second WebView2
    controller never occupy or re-enter Tauri's main event-loop callback.
-   Linux freezes the active display through the xdg-desktop-portal Screenshot
-   API on a worker thread.
+   Linux freezes the active display on a worker thread (preferring system
+   `grim` on Wayland, with xdg-desktop-portal Screenshot as fallback), then
+   creates the overlay on the GTK main thread. On Hyprland, `Shift+Ctrl+A` is
+   installed through the compositor (`hyprctl eval` / `hl.bind`) into a FIFO
+   listener rather than the X11-only global-hotkey plugin.
 2. macOS freezes the active display with ScreenCaptureKit. Windows frozen
    stills use the GDI path exposed through `xcap`; Windows Graphics Capture
-   remains the recording backend. Linux stills use the Screenshot portal and
-   may return empty `window_rects` when the compositor does not expose bounds.
+   remains the recording backend. Linux stills prefer `grim` (focused output
+   on Hyprland) and fall back to the Screenshot portal; `window_rects` may be
+   empty when the compositor does not expose bounds. Overlay geometry covers
+   the active display even when GTK/`GDK_SCALE` sizes disagree with the PNG.
    Capture startup is single-flight, so a repeated shortcut cannot enter a
    second native freeze. Windows gives the desktop frame eight seconds to
    arrive, then uses fast lossless PNG encoding and a direct

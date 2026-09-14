@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/13742f07-1845-4201-9295-39f83515547f
 
 - **macOS 14+**：下载 Universal `.dmg`（Apple 芯片与 Intel），把 `Kiri.app` 拖入“应用程序”。截图与录屏需要“屏幕与系统音频录制”权限；点击高亮才需要“输入监控”。麦克风录制需要 macOS 15+。
 - **Windows 11（x64）**：提供 x64 安装包，完整捕获流程的真机验收进度见[路线图](ROADMAP.md)。运行 `.exe` 安装程序；屏幕捕获不需要额外系统授权，麦克风权限由 Windows 隐私设置控制。安装程序未经过 Authenticode 签名，SmartScreen 可能提示警告。
-- **Linux（实验性）**：目前以源码构建为主（启用 Linux 打包目标时可生成 AppImage）。捕获通过 xdg-desktop-portal 的截图与录屏对话框完成。窗口悬停轮廓、本地 OCR、系统声音、麦克风和点击高亮可能受合成器限制或暂不可用。录屏使用系统已安装的 GStreamer 插件编码，不会下载 FFmpeg。
+- **Linux（实验性）**：目前以源码构建为主（启用 Linux 打包目标时可生成 AppImage）。Wayland 静态截图优先使用系统自带的 `grim`（Hyprland / Sway 推荐安装），否则回退到 xdg-desktop-portal Screenshot；录屏走 ScreenCast → PipeWire，并用系统 GStreamer 编码，不会下载 FFmpeg。在 Hyprland 上，`Shift+Ctrl+A` 通过合成器注册。窗口悬停轮廓、本地 OCR、系统声音、麦克风和点击高亮可能受合成器限制或暂不可用。
 
 Windows 安装器跟随系统语言，支持简体中文、英文和日文，安装、更新与卸载提示均已翻译；应用内语言可在设置中单独选择。Kiri 的半身立绘与公共安装样式统一在 [desktop-installer](https://github.com/yuxino/desktop-installer) 维护。
 

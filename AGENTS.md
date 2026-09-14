@@ -21,8 +21,9 @@ Kiri is a local-first capture utility for macOS, Windows, and experimental
 Linux. Preserve these decisions:
 
 - The global capture shortcut is `⇧⌘A` on macOS and `Shift+Ctrl+A` on Windows
-  and Linux. Both use the platform's native global-hotkey registration; the
-  shortcut does not require Input Monitoring permission.
+  and Linux. macOS and Windows use native global-hotkey registration; Linux
+  X11 uses the same plugin, while Hyprland installs the bind through the
+  compositor. The shortcut does not require Input Monitoring permission.
 - The initial overlay offers Screenshot, Record, and OCR.
 - Window hover shows exactly one restrained monochrome outline without handles,
   dimensions, stacked borders, or a following tooltip. A click selects that
@@ -63,7 +64,7 @@ Linux. Preserve these decisions:
   version's `library.json`).
 - `src-tauri/src/capture/` — per-platform capture backends (macOS:
   ScreenCaptureKit via objc2; Windows: xcap WGC + windows-capture + cpal;
-  Linux: xdg-desktop-portal Screenshot/ScreenCast + PipeWire).
+  Linux: `grim` or xdg-desktop-portal Screenshot; ScreenCast + PipeWire).
 - `src-tauri/src/platform/` — per-platform helpers: global shortcut, focus
   restoration, file reveal, click monitoring, capture exclusion.
 - `src-tauri/src/record.rs` — platform-native encoding coordination (H.264 +

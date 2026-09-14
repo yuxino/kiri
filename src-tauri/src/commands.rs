@@ -1425,6 +1425,200 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
         display.backing_scale
     );
 
+    finish_frozen_capture(
+        &app,
+        display,
+        pid,
+        name,
+        was_kiri_frontmost,
+        hidden_windows,
+    )
+}
+
+#[cfg(target_os = "linux")]
+struct LinuxCapturePrep {
+    pid: Option<u32>,
+    name: Option<String>,
+    was_kiri_frontmost: bool,
+    hidden_windows: Vec<String>,
+}
+
+/// Freeze the display on a worker thread, then create GTK windows on the
+/// main thread. Running `start_capture` entirely off-thread panics tao.
+#[cfg(target_os = "linux")]
+pub(crate) fn start_linux_capture_from_shortcut(app: AppHandle) -> Result<CaptureContextDto, String> {
+    log::info!("start_linux_capture_from_shortcut: beginning capture flow");
+    let prep = linux_run_on_main(&app, {
+        let app = app.clone();
+        move || linux_capture_preflight(&app)
+    })?;
+    let display = match capture_backend::capture_active_display() {
+        Ok(display) => display,
+        Err(error) => {
+            let message = format!("Screen capture could not start: {error}");
+            log::error!("start_capture: display capture failed: {error}");
+            let _ = linux_run_on_main(&app, {
+                let app = app.clone();
+                let message = message.clone();
+                move || {
+                    restore_capture_origin(
+                        &app,
+                        &prep.hidden_windows,
+                        prep.was_kiri_frontmost,
+                        prep.pid,
+                    );
+                    emit_error(&app, message, None);
+                    Ok(())
+                }
+            });
+            return Err(message);
+        }
+    };
+    linux_run_on_main(&app, {
+        let app = app.clone();
+        move || linux_capture_commit(&app, prep, display)
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_run_on_main<T, F>(app: &AppHandle, task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    let (sender, receiver) = mpsc::channel();
+    app.run_on_main_thread(move || {
+        let _ = sender.send(task());
+    })
+    .map_err(|error| error.to_string())?;
+    receiver
+        .recv()
+        .map_err(|_| "The Linux UI thread stopped before capture could continue.".to_string())?
+}
+
+#[cfg(target_os = "linux")]
+fn linux_capture_preflight(app: &AppHandle) -> Result<LinuxCapturePrep, String> {
+    let state = app.state::<AppState>();
+    {
+        let capture = state.capture.lock().unwrap();
+        if capture.session.is_some() {
+            return Err("Screen capture is already starting.".into());
+        }
+        let recording = state.recording.lock().unwrap();
+        if recording.is_recording
+            || recording.is_paused
+            || recording.is_transitioning
+            || recording.is_finalizing
+            || recording.is_starting
+        {
+            return Err("A recording session is active.".into());
+        }
+    }
+    {
+        let mut context = state.library.lock().unwrap();
+        context.library().map_err(|error| error.to_string())?;
+    }
+    let (pid, name) = platform::frontmost_application()
+        .map(|(pid, name)| (Some(pid), name))
+        .unwrap_or((None, None));
+    let was_kiri_frontmost = pid == Some(std::process::id());
+    let hidden_windows = hide_library_windows(app);
+    Ok(LinuxCapturePrep {
+        pid,
+        name,
+        was_kiri_frontmost,
+        hidden_windows,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_capture_commit(
+    app: &AppHandle,
+    prep: LinuxCapturePrep,
+    display: crate::capture::CapturedDisplay,
+) -> Result<CaptureContextDto, String> {
+    let state = app.state::<AppState>();
+    let _start_permit = match state.capture_start.try_begin() {
+        Some(permit) => permit,
+        None => {
+            restore_capture_origin(
+                app,
+                &prep.hidden_windows,
+                prep.was_kiri_frontmost,
+                prep.pid,
+            );
+            return Err("Screen capture is already starting.".into());
+        }
+    };
+    let _transition = state.library_transition.lock().unwrap();
+    if state.capture.lock().unwrap().session.is_some() {
+        restore_capture_origin(
+            app,
+            &prep.hidden_windows,
+            prep.was_kiri_frontmost,
+            prep.pid,
+        );
+        return Err("Screen capture is already starting.".into());
+    }
+    let mut display = display;
+    let mut monitors = app
+        .available_monitors()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|monitor| {
+            let position = monitor.position();
+            let size = monitor.size();
+            crate::capture::linux::LinuxMonitorHint {
+                pixel_x: f64::from(position.x),
+                pixel_y: f64::from(position.y),
+                pixel_width: f64::from(size.width),
+                pixel_height: f64::from(size.height),
+                scale: monitor.scale_factor().max(1.0),
+            }
+        })
+        .collect::<Vec<_>>();
+    // Hyprland's own layout is authoritative when GTK/GDK_SCALE disagrees.
+    if let Some(hypr) = crate::capture::linux::hyprland_focused_monitor_hint() {
+        monitors.insert(0, hypr);
+    }
+    for (index, monitor) in monitors.iter().enumerate() {
+        log::info!(
+            "Linux monitor[{index}]: reported={:.0}x{:.0} at ({:.0},{:.0}) scale={:.2}",
+            monitor.pixel_width,
+            monitor.pixel_height,
+            monitor.pixel_x,
+            monitor.pixel_y,
+            monitor.scale
+        );
+    }
+    crate::capture::linux::apply_overlay_geometry(&mut display, &monitors);
+    finish_frozen_capture(
+        app,
+        display,
+        prep.pid,
+        prep.name,
+        prep.was_kiri_frontmost,
+        prep.hidden_windows,
+    )
+}
+
+fn finish_frozen_capture(
+    app: &AppHandle,
+    display: crate::capture::CapturedDisplay,
+    pid: Option<u32>,
+    name: Option<String>,
+    was_kiri_frontmost: bool,
+    hidden_windows: Vec<String>,
+) -> Result<CaptureContextDto, String> {
+    log::info!(
+        "start_capture: display frozen logical={}x{} pixels={}x{} scale={}",
+        display.screen_frame.width,
+        display.screen_frame.height,
+        display.pixel_width,
+        display.pixel_height,
+        display.backing_scale
+    );
+
     let context = CaptureContextDto {
         display_width: display.screen_frame.width,
         display_height: display.screen_frame.height,
@@ -1464,7 +1658,7 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
     log::info!("start_capture: capture session published capture_id={capture_id}");
 
     log::info!("start_capture: creating overlay window capture_id={capture_id}");
-    if let Err(error) = create_overlay_window(&app, overlay_frame, overlay_scale, &capture_token) {
+    if let Err(error) = create_overlay_window(app, overlay_frame, overlay_scale, &capture_token) {
         let failed_session = {
             let state = app.state::<AppState>();
             let mut capture = state.capture.lock().unwrap();
@@ -1479,7 +1673,7 @@ pub fn start_capture(app: AppHandle) -> Result<CaptureContextDto, String> {
             }
         };
         if let Some(session) = failed_session {
-            teardown_cancelled_capture(&app, session, false);
+            teardown_cancelled_capture(app, session, false);
         }
         log::error!("start_capture: overlay window creation failed: {error}");
         return Err(error.to_string());
@@ -2789,11 +2983,27 @@ pub async fn start_recording_flow(
         )
     };
 
-    for label in &overlay_labels {
-        if let Some(window) = app.get_webview_window(label) {
-            let _ = window.close();
+    let region = request.region.clone();
+    let uses_countdown = options.uses_countdown;
+    let present_recording_ui = {
+        let app = app.clone();
+        let overlay_labels = overlay_labels.clone();
+        move || {
+            for label in &overlay_labels {
+                if let Some(window) = app.get_webview_window(label) {
+                    let _ = window.close();
+                }
+            }
+            if uses_countdown {
+                create_countdown_window(&app, screen_frame, backing_scale, &region)?;
+            }
+            Ok(())
         }
-    }
+    };
+    #[cfg(target_os = "linux")]
+    linux_run_on_main(&app, present_recording_ui)?;
+    #[cfg(not(target_os = "linux"))]
+    present_recording_ui()?;
 
     // Restore focus to the source application (mirrors AppModel.onRecord).
     if !was_kiri_frontmost {
@@ -2809,27 +3019,38 @@ pub async fn start_recording_flow(
         return begin_recording(app, None).await;
     }
 
+    // React reveals/focuses the window after mounting its controls. Do not
+    // spend the three-second interval loading a hidden/lazy WebView.
+    Ok(())
+}
+
+fn create_countdown_window(
+    app: &AppHandle,
+    screen_frame: Rect,
+    backing_scale: f64,
+    region: &RectDto,
+) -> Result<(), String> {
     let label = "countdown".to_string();
     let session_id = app.state::<AppState>().recording.lock().unwrap().session_id;
     let region_screen = Rect::new(
-        screen_frame.x + request.region.x,
-        screen_frame.y + request.region.y,
-        request.region.width,
-        request.region.height,
+        screen_frame.x + region.x,
+        screen_frame.y + region.y,
+        region.width,
+        region.height,
     );
     log::info!(
         "create countdown window: screen_frame=({:.0},{:.0}) region=({:.0},{:.0}) → window at ({:.0},{:.0} {:.0}x{:.0})",
         screen_frame.x,
         screen_frame.y,
-        request.region.x,
-        request.region.y,
+        region.x,
+        region.y,
         region_screen.x,
         region_screen.y,
         region_screen.width,
         region_screen.height,
     );
     let builder = WebviewWindowBuilder::new(
-        &app,
+        app,
         label.clone(),
         WebviewUrl::App(format!("index.html?window=countdown&session={session_id}").into()),
     )
@@ -2848,17 +3069,15 @@ pub async fn start_recording_flow(
     let window = match builder.build() {
         Ok(window) => window,
         Err(error) => {
-            reset_recording_session(&app);
+            reset_recording_session(app);
             return Err(error.to_string());
         }
     };
     if let Err(error) = platform::place_transient_window(&window, screen_frame, backing_scale) {
         let _ = window.close();
-        reset_recording_session(&app);
+        reset_recording_session(app);
         return Err(error.to_string());
     }
-    // React reveals/focuses the window after mounting its controls. Do not
-    // spend the three-second interval loading a hidden/lazy WebView.
     Ok(())
 }
 
@@ -3426,22 +3645,35 @@ pub async fn begin_recording(app: AppHandle, session_id: Option<uuid::Uuid>) -> 
 
     // Claim first: a late completion from an old WebView cannot close the
     // countdown belonging to a newer recording.
-    if let Some(window) = app.get_webview_window("countdown") {
-        let _ = window.close();
+    let present_controls = {
+        let app = app.clone();
+        let configuration = configuration.clone();
+        move || {
+            if let Some(window) = app.get_webview_window("countdown") {
+                let _ = window.close();
+            }
+            create_control_panel(&app, &configuration)?;
+            if configuration.options.highlights_clicks {
+                create_ripple_window(&app, &configuration)?;
+            }
+            Ok(())
+        }
+    };
+    #[cfg(target_os = "linux")]
+    if let Err(error) = linux_run_on_main(&app, present_controls) {
+        if reset_startup_if_current(&app, startup_token) {
+            return Err(error);
+        }
+        return Ok(());
     }
-    if let Err(error) = create_control_panel(&app, &configuration) {
+    #[cfg(not(target_os = "linux"))]
+    if let Err(error) = present_controls() {
         if reset_startup_if_current(&app, startup_token) {
             return Err(error);
         }
         return Ok(());
     }
     if configuration.options.highlights_clicks {
-        if let Err(error) = create_ripple_window(&app, &configuration) {
-            if reset_startup_if_current(&app, startup_token) {
-                return Err(error);
-            }
-            return Ok(());
-        }
         // The click monitor needs the Input Monitoring permission; install
         // it only while highlighting clicks (avoids a permission prompt at
         // every launch).

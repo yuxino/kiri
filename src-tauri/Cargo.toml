@@ -164,6 +164,7 @@ windows-capture = "2.0"
 keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+arboard = { version = "3", default-features = true, features = ["wayland-data-control"] }
 ashpd = { version = "0.11", default-features = false, features = [
     "tokio",
     "wayland",

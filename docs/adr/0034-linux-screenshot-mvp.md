@@ -38,3 +38,10 @@ no-downloaded-FFmpeg media contract make a single-step full parity port unsafe.
   packages to compile on Ubuntu.
 - Product docs must state Linux limitations (window hover, local OCR, audio,
   click highlights) without weakening the local-first and no-FFmpeg promises.
+
+## Amendment
+
+Frozen stills and Wayland shortcut registration are refined in
+[ADR 0035](0035-linux-wayland-grim-and-hyprland-shortcut.md) (`grim` preferred,
+Hyprland compositor bind, fullscreen overlay geometry). Recording still follows
+this ADR's ScreenCast + system GStreamer path.
