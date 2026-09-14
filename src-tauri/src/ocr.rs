@@ -139,3 +139,10 @@ mod windows_tests {
         assert_eq!(pixels, [3, 2, 1, 4, 30, 20, 10, 40]);
     }
 }
+
+#[cfg(target_os = "linux")]
+pub fn recognize_text(_png: &[u8]) -> Result<String> {
+    Err(anyhow!(
+        "Local text recognition is not available on Linux yet. Choose a remote OCR profile in Settings, or use Screenshot."
+    ))
+}

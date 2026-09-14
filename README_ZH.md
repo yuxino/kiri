@@ -9,7 +9,7 @@
   </p>
 </div>
 
-Kiri 支持 macOS 和 Windows。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Windows），选择窗口或区域，即可截图、标注、识别文字或录屏。截图会复制到剪贴板；截图、MP4 和 GIF 保存在本地素材库。
+Kiri 支持 macOS、Windows，以及实验性的 Linux。按 `⇧⌘A`（macOS）或 `Shift+Ctrl+A`（Windows / Linux），选择窗口或区域，即可截图、标注、识别文字或录屏。截图会复制到剪贴板；截图、MP4 和 GIF 保存在本地素材库。
 
 <!-- project-demo-v1 -->
 <h2 align="center">演示</h2>
@@ -37,6 +37,7 @@ https://github.com/user-attachments/assets/13742f07-1845-4201-9295-39f83515547f
 
 - **macOS 14+**：下载 Universal `.dmg`（Apple 芯片与 Intel），把 `Kiri.app` 拖入“应用程序”。截图与录屏需要“屏幕与系统音频录制”权限；点击高亮才需要“输入监控”。麦克风录制需要 macOS 15+。
 - **Windows 11（x64）**：提供 x64 安装包，完整捕获流程的真机验收进度见[路线图](ROADMAP.md)。运行 `.exe` 安装程序；屏幕捕获不需要额外系统授权，麦克风权限由 Windows 隐私设置控制。安装程序未经过 Authenticode 签名，SmartScreen 可能提示警告。
+- **Linux（实验性）**：目前以源码构建为主（启用 Linux 打包目标时可生成 AppImage）。Wayland 静态截图优先使用系统自带的 `grim`（Hyprland / Sway 推荐安装），否则回退到 xdg-desktop-portal Screenshot；录屏走 ScreenCast → PipeWire，并用系统 GStreamer 编码，不会下载 FFmpeg。在 Hyprland 上，`Shift+Ctrl+A` 通过合成器注册。窗口悬停轮廓、本地 OCR、系统声音、麦克风和点击高亮可能受合成器限制或暂不可用。
 
 Windows 安装器跟随系统语言，支持简体中文、英文和日文，安装、更新与卸载提示均已翻译；应用内语言可在设置中单独选择。Kiri 的半身立绘与公共安装样式统一在 [desktop-installer](https://github.com/yuxino/desktop-installer) 维护。
 
@@ -44,7 +45,7 @@ macOS 发布包使用项目维护的本地自签名身份，未使用 Developer 
 
 ## 隐私
 
-素材、OCR 和编码默认都在本机处理。远程 OCR 完全可选，API Key 保存在 macOS 钥匙串或 Windows 凭据管理器中，每次请求都需要明确点击“发送”或“重试”。
+素材、OCR 和编码默认都在本机处理。远程 OCR 完全可选，API Key 保存在 macOS 钥匙串、Windows 凭据管理器或 Linux Secret Service 中，每次请求都需要明确点击“发送”或“重试”。
 
 可重编辑截图会在本地保存未加标注的源图；其中可能仍有被马赛克或图形遮住的像素。保存裁剪会同时移除框外像素。macOS 的 MP4 录屏、合并、缩略图和 GIF 生成使用 AVFoundation 与 ImageIO；Windows 使用 Media Foundation 与系统图像组件。两个平台都不下载 FFmpeg，媒体处理始终在本机完成。
 
@@ -64,7 +65,7 @@ macOS 开发版还需要稳定的签名身份。请通过 Tauri 命令运行或�
 
 ## 快捷键
 
-- **⇧⌘A**（macOS）/ **Shift+Ctrl+A**（Windows）：打开 Kiri
+- **⇧⌘A**（macOS）/ **Shift+Ctrl+A**（Windows / Linux）：打开 Kiri
 - **Esc**：取消截图；录屏时停止录制
 - **Return**：确认截图
 - **C**：在截图编辑器中裁剪

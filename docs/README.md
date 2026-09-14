@@ -89,3 +89,5 @@ development.
 
 - [ADR 0032: Localized Kiri installer](adr/0032-localized-kiri-installer.md)
 - [ADR 0033: Shared installer source](adr/0033-shared-installer-source.md)
+- [ADR 0034: Linux screenshot MVP and staged recording](adr/0034-linux-screenshot-mvp.md)
+- [ADR 0035: Linux Wayland grim stills and Hyprland shortcut](adr/0035-linux-wayland-grim-and-hyprland-shortcut.md)

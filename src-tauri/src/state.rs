@@ -658,6 +658,9 @@ fn show_completion_toast(app: &AppHandle, notice: &NoticeDto, monitor: Option<Mo
 
     // Content is delivered via event so the resident window can update in
     // place (initial render reads the URL params above).
+    // tao's Linux CursorIgnoreEvents path unwraps GdkWindow and panics if the
+    // toast is not realized yet. Keep the notice clickable on Linux instead.
+    #[cfg(not(target_os = "linux"))]
     let _ = window.set_ignore_cursor_events(true);
     let _ = window.set_content_protected(true);
     crate::platform::set_window_capture_excluded(app, label, true);
@@ -730,6 +733,7 @@ pub fn show_completion_preview(
         position_completion_toast(&window, &monitor, 124.0);
     }
 
+    #[cfg(not(target_os = "linux"))]
     let _ = window.set_ignore_cursor_events(preview.phase == "processing");
     let _ = window.set_content_protected(true);
     crate::platform::set_window_capture_excluded(app, label, true);
@@ -853,6 +857,10 @@ fn append_error_log(message: &str, recovery: Option<RecoveryAction>) {
     let Some(log_dir) = log_dir() else {
         return;
     };
+    if let Err(error) = std::fs::create_dir_all(&log_dir) {
+        log::warn!("[error] could not create log directory {log_dir:?}: {error}");
+        return;
+    }
     let path = log_dir.join("errors.log");
     let recovery = match recovery {
         Some(RecoveryAction::OpenSettings) => " [openSettings]",

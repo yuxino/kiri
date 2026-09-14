@@ -2,7 +2,7 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ShortcutModifier {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     Control,
     Shift,
     #[cfg(target_os = "macos")]
@@ -12,11 +12,11 @@ pub enum ShortcutModifier {
 impl ShortcutModifier {
     fn display_token(self) -> &'static str {
         match self {
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             ShortcutModifier::Control => "Ctrl",
             #[cfg(target_os = "macos")]
             ShortcutModifier::Shift => "⇧",
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             ShortcutModifier::Shift => "Shift",
             #[cfg(target_os = "macos")]
             ShortcutModifier::Command => "⌘",
@@ -36,7 +36,7 @@ pub const KIRI_CAPTURE: CaptureShortcut = CaptureShortcut {
     modifiers: &[ShortcutModifier::Shift, ShortcutModifier::Command],
 };
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 pub const KIRI_CAPTURE: CaptureShortcut = CaptureShortcut {
     key: 'a',
     modifiers: &[ShortcutModifier::Shift, ShortcutModifier::Control],
@@ -44,13 +44,14 @@ pub const KIRI_CAPTURE: CaptureShortcut = CaptureShortcut {
 
 impl CaptureShortcut {
     pub fn display_label(&self) -> String {
+        let use_plus = cfg!(any(windows, target_os = "linux"));
         let prefix: String = self
             .modifiers
             .iter()
             .map(|m| m.display_token())
             .collect::<Vec<_>>()
-            .join(if cfg!(windows) { "+" } else { "" });
-        let separator = if cfg!(windows) && !prefix.is_empty() {
+            .join(if use_plus { "+" } else { "" });
+        let separator = if use_plus && !prefix.is_empty() {
             "+"
         } else {
             ""
@@ -80,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn kiri_shortcut_is_shift_control_a() {
         assert_eq!(KIRI_CAPTURE.key, 'a');
         assert_eq!(
