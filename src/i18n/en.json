@@ -537,5 +537,12 @@
   "Cover a rounded area": "Cover a rounded area",
   "Shape": "Shape",
   "Style": "Style",
-  "Enter finishes; Shift + Enter adds a line. Esc cancels this edit.": "Enter finishes; Shift + Enter adds a line. Esc cancels this edit."
+  "Enter finishes; Shift + Enter adds a line. Esc cancels this edit.": "Enter finishes; Shift + Enter adds a line. Esc cancels this edit.",
+  "Export in progress": "Export in progress",
+  "Close without exporting?": "Close without exporting?",
+  "Wait for the export to finish before closing this window.": "Wait for the export to finish before closing this window.",
+  "Your cuts, text and effects will be lost when this window closes. Export a copy to keep the finished video.": "Your cuts, text and effects will be lost when this window closes. Export a copy to keep the finished video.",
+  "Keep editing": "Keep editing",
+  "Close without exporting": "Close without exporting",
+  "Outside the edit": "Outside the edit"
 }

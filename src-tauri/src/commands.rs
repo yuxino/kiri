@@ -1194,7 +1194,7 @@ pub async fn import_media(
                 let asset = context
                     .library_mut()
                     .map_err(|e| e.to_string())?
-                    .import_file(
+                    .import_file_with_title(
                         prepared.file.path(),
                         prepared.kind,
                         prepared.extension,
@@ -1202,6 +1202,7 @@ pub async fn import_media(
                         prepared.height,
                         prepared.duration,
                         None,
+                        crate::media_import::display_title(&path),
                     )
                     .map_err(|e| e.to_string())?;
                 Ok(asset.id.to_string())

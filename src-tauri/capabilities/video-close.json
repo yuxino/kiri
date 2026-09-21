@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "video-close",
+  "description": "Allow a viewer to finish closing after its unsaved-video confirmation.",
+  "windows": ["viewer-*"],
+  "permissions": ["core:window:allow-destroy"]
+}

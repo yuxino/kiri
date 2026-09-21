@@ -440,8 +440,25 @@ impl AssetLibrary {
         duration: Option<f64>,
         source_application: Option<String>,
     ) -> Result<CaptureAsset> {
+        self.import_file_with_title(source_url, kind, file_extension, pixel_width, pixel_height,
+            duration, source_application, None)
+    }
+
+    /// Publish the imported file and its display name in the same index write.
+    #[allow(clippy::too_many_arguments)]
+    pub fn import_file_with_title(
+        &mut self,
+        source_url: &Path,
+        kind: CaptureKind,
+        file_extension: &str,
+        pixel_width: i64,
+        pixel_height: i64,
+        duration: Option<f64>,
+        source_application: Option<String>,
+        title: Option<String>,
+    ) -> Result<CaptureAsset> {
         let safe_extension = Self::validated_extension(file_extension)?;
-        let asset = Self::make_asset_with_id(
+        let mut asset = Self::make_asset_with_id(
             uuid::Uuid::new_v4(),
             kind,
             &safe_extension,
@@ -451,6 +468,7 @@ impl AssetLibrary {
             source_application,
             Self::normalized_date(now_ms()),
         );
+        asset.title = title;
         self.import_prepared_file(source_url, asset)
     }
 
@@ -1800,6 +1818,23 @@ mod tests {
         library
             .save_annotation_project(&asset.id, &rendered, &annotation_document(label))
             .unwrap();
+    }
+
+    #[test]
+    fn named_import_is_persisted_and_searchable_without_changing_the_source() {
+        let (dir, root) = temp_root();
+        let source = dir.path().join("source.mp4");
+        std::fs::write(&source, b"video-fixture").unwrap();
+        let mut library = AssetLibrary::open(root.clone()).unwrap();
+        let asset = library.import_file_with_title(&source, CaptureKind::Video, "mp4",
+            1920, 1080, Some(12.0), None, Some("海边散步".into())).unwrap();
+        assert_eq!(asset.title.as_deref(), Some("海边散步"));
+        assert_ne!(asset.filename, "source.mp4");
+        drop(library);
+        let library = AssetLibrary::open(root).unwrap();
+        assert_eq!(library.asset_by_id(&asset.id).unwrap().title, asset.title);
+        assert_eq!(library.search("海边", false).first().unwrap().id, asset.id);
+        assert_eq!(std::fs::read(source).unwrap(), b"video-fixture");
     }
 
     #[test]

@@ -218,3 +218,9 @@
 .kiri-video-effect-tool:hover:not(:disabled) {background:var(--kiri-group-fill);}.kiri-video-effect-tool:disabled,.kiri-video-layer-label:disabled {opacity:.4;cursor:default;}
 .kiri-video-effect-tool:focus-visible {outline:1px solid var(--kiri-label);outline-offset:-1px;}
 .kiri-video-timeline-detail:has(.kiri-video-track-help) {min-height:22px;margin-top:4px;}
+.kiri-video-close-dialog{max-width:400px;padding:24px;border:1px solid #444;border-radius:14px;background:#202020;color:#f5f5f5;}
+.kiri-video-close-dialog::backdrop{background:rgba(0,0,0,.48);}
+.kiri-video-close-dialog strong{font-size:17px;}
+.kiri-video-close-dialog p{font-size:13px;line-height:1.6;color:#c8c8c8;margin:12px 0 22px;}
+.kiri-video-close-dialog>div{display:flex;gap:10px;flex-wrap:wrap;}
+.kiri-video-visible-times { display: grid; gap: 3px; text-align: right; }

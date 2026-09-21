@@ -15,6 +15,14 @@ pub struct PreparedMedia {
     pub height: i64,
     pub duration: Option<f64>,
 }
+
+pub fn display_title(path: &Path) -> Option<String> {
+    let name: String = path.file_stem()?.to_string_lossy().chars()
+        .filter(|c| !c.is_control()).take(200).collect();
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
+}
+
 pub fn prepare(path: &Path) -> Result<PreparedMedia> {
     let metadata = std::fs::metadata(path)?;
     if !metadata.is_file() {
@@ -122,6 +130,13 @@ fn probe_video(_: &Path) -> Result<(i64, i64, Option<f64>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn imported_names_are_readable_bounded_and_do_not_include_paths() {
+        assert_eq!(display_title(Path::new("/tmp/海边散步.mp4")).as_deref(), Some("海边散步"));
+        assert_eq!(display_title(Path::new("/tmp/ hello\n.mp4")).as_deref(), Some("hello"));
+        assert_eq!(display_title(Path::new("/tmp/   .png")), None);
+        assert_eq!(display_title(Path::new(&format!("{}.mp4", "界".repeat(300)))).unwrap().chars().count(), 200);
+    }
     #[test]
     fn images_are_copied_and_normalized_without_changing_source() {
         let dir = tempfile::tempdir().unwrap();

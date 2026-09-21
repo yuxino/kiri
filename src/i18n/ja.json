@@ -537,5 +537,12 @@
   "Cover a rounded area": "アイコンや顔などの範囲を丸く隠す",
   "Shape": "形",
   "Style": "スタイル",
-  "Enter finishes; Shift + Enter adds a line. Esc cancels this edit.": "Enterで完了、Shift + Enterで改行。Escで今回の文字編集を取り消します。"
+  "Enter finishes; Shift + Enter adds a line. Esc cancels this edit.": "Enterで完了、Shift + Enterで改行。Escで今回の文字編集を取り消します。",
+  "Export in progress": "書き出し中",
+  "Close without exporting?": "書き出さずに閉じますか？",
+  "Wait for the export to finish before closing this window.": "書き出しが完了してからウィンドウを閉じてください。",
+  "Your cuts, text and effects will be lost when this window closes. Export a copy to keep the finished video.": "ウィンドウを閉じると、カット・テキスト・効果の編集内容は失われます。完成した動画を残すには、先にコピーを書き出してください。",
+  "Keep editing": "編集を続ける",
+  "Close without exporting": "書き出さずに閉じる",
+  "Outside the edit": "編集範囲外"
 }

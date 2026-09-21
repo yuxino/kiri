@@ -537,5 +537,12 @@
   "Cover a rounded area": "框选圆形区域，适合头像和人脸",
   "Shape": "形状",
   "Style": "样式",
-  "Enter finishes; Shift + Enter adds a line. Esc cancels this edit.": "回车完成，Shift + 回车换行。Esc 取消本次文字编辑。"
+  "Enter finishes; Shift + Enter adds a line. Esc cancels this edit.": "回车完成，Shift + 回车换行。Esc 取消本次文字编辑。",
+  "Export in progress": "正在导出",
+  "Close without exporting?": "尚未导出，要关闭吗？",
+  "Wait for the export to finish before closing this window.": "请等导出完成后再关闭窗口。",
+  "Your cuts, text and effects will be lost when this window closes. Export a copy to keep the finished video.": "关闭窗口会丢失这次的剪切、文字和效果。要保留成片，请先导出副本。",
+  "Keep editing": "继续编辑",
+  "Close without exporting": "不导出，直接关闭",
+  "Outside the edit": "不在成片中"
 }

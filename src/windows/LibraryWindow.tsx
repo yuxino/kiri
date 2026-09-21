@@ -716,7 +716,17 @@ export function LibraryWindow() {
   const importMedia=useCallback(async(paths?:string[])=>{
     if(mediaImporting.current||libraryStatus?.availability!=="ready")return;
     mediaImporting.current=true;setMediaImportBusy(true);setMediaImportMessage("");
-    try{const result=await api.importMedia(paths);if(result.ids.length||result.failed)setMediaImportMessage(fmt("Imported %d files; %d could not be imported.",result.ids.length,result.failed));await refresh();}
+    try{
+      const result=await api.importMedia(paths);
+      if(result.ids.length||result.failed)setMediaImportMessage(fmt("Imported %d files; %d could not be imported.",result.ids.length,result.failed));
+      if(result.ids.length){
+        queryRef.current="";showingTrashRef.current=false;
+        setQuery("");setSection("library");setDestination("captures");
+        setKindFilter("all");setFavoritesOnly(false);setTagFilter(null);setSelection(new Set());
+        gridScrollRef.current?.scrollTo({top:0});
+      }
+      await refresh();
+    }
     catch{setMediaImportMessage(t("Could not import these files. Choose supported local images or videos."));}
     finally{mediaImporting.current=false;setMediaImportBusy(false);}
   },[libraryStatus?.availability,refresh]);

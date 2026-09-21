@@ -5,7 +5,8 @@ import {t} from "../i18n";
 import {activeVideoEffects,clamp,createVideoEffect,moveVideoEffect,resizeVideoEffectFromHandle,validVideoEffect,cropVideoFrame,effectLabels,videoFrameRect,videoPreviewTransform,videoZoomViewport} from "./video-effects";
 import {videoLayerRank,videoLayerPreviewTime} from "./video-layers";
 import type {VideoEffect,EffectHandle} from "./video-effects";
-import {videoTimeLabel} from "./video-trim.js";
+import type {VideoSegment} from "./video-trim.js";
+import {VideoVisibleTime} from "./VideoVisibleTime";
 import {VideoTimeInput} from "./VideoTimeInput";
 import "./video-effects.css";
 import {ChoiceSelect} from "../components/ChoiceSelect";
@@ -20,7 +21,7 @@ const effectDescriptions={
   frame:"Keep the part you need and add a clean border around it.",
   fade:"Gradually reveal the picture, then fade it away at the end.",
 } as const;
-export function VideoEffectsControls(props:VideoEffectsProps){
+export function VideoEffectsControls(props:VideoEffectsProps & {segments:VideoSegment[]}){
   const [error,setError]=useState(false);
   const selected=props.effects.find(effect=>effect.id===props.selectedId);
   function add(kind:VideoEffect["kind"]){const effect=createVideoEffect(kind,props.time,props.duration,props.effects);if(!effect){setError(true);return;}setError(false);props.onChange([...props.effects,effect]);props.onSelect(effect.id);props.onSeek?.(videoLayerPreviewTime(effect.start,effect.end,effect.transition));}
@@ -52,7 +53,7 @@ export function VideoEffectsControls(props:VideoEffectsProps){
       {(selected.kind==="zoom"||selected.kind==="fade")&&<EffectSlider label={t(selected.kind==="fade"?"Fade duration":"Zoom in and back out")} min={selected.kind==="fade"?Math.min(.05,(selected.end-selected.start)/2):0} max={Math.min(2,(selected.end-selected.start)/2)} step={.01} value={transition} text={`${transition.toFixed(2)} s`} onChange={(transition,transient)=>update({...selected,transition},transient)}/>}
       {selected.kind==="fade"&&colors(t("Fade color"))}
       {(selected.kind==="zoom"||selected.kind==="frame")&&<p className="kiri-effect-note">{t("Drag the image to reframe. Changes appear immediately.")}</p>}
-      <details className="kiri-effect-timing" key={selected.id}><summary><span>{t("Visible during")}</span><output>{videoTimeLabel(selected.start)} – {videoTimeLabel(selected.end)}</output><ChevronDown size={12}/></summary><p className="kiri-effect-note">{t("Times refer to the original video. You can also drag the track edges below.")}</p>
+      <details className="kiri-effect-timing" key={selected.id}><summary><span>{t("Visible during")}</span><VideoVisibleTime segments={props.segments} start={selected.start} end={selected.end}/><ChevronDown size={12}/></summary><p className="kiri-effect-note">{t("Times refer to the original video. You can also drag the track edges below.")}</p>
       <div className="kiri-effect-times"><label>{t("Effect start")}<VideoTimeInput key={`${selected.id}-start`} min={0} max={selected.end-.05} step={.1} value={selected.start} onCommit={start=>update({...selected,start})}/></label><label>{t("Effect end")}<VideoTimeInput key={`${selected.id}-end`} min={selected.start+.05} max={props.duration} step={.1} value={selected.end} onCommit={end=>update({...selected,end})}/></label></div>
     </details></fieldset></>}
     {error&&<p className="kiri-video-effects-error" role="alert">{t("Choose a valid range. Two zoom, crop or fade effects of the same kind cannot overlap.")}</p>}

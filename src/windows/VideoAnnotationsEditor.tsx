@@ -10,6 +10,7 @@ import "./VideoAnnotationsEditor.css";
 import {useAnnotationAppearance} from "../annotation/useAnnotationAppearance";
 
 export type VideoAnnotationsEditorProps={
+  onPendingTextChange?(pending:boolean):void;
   onLiveMarks?(marks:AnnotationMark[],draft:AnnotationMark|null,editingId:number|null):void;
   onFrame?(canvas:HTMLCanvasElement):void;active:boolean;onActivate():void;extraTools?:ReactNode;image:HTMLImageElement|null;sourceSize:{width:number;height:number};viewSize:{width:number;height:number};
   onToolChange?(tool:Tool):void;onCancelGesture?():boolean;
@@ -33,6 +34,7 @@ export function VideoAnnotationsEditor(props:VideoAnnotationsEditorProps) {
   useEffect(()=>props.onToolChange?.(tool),[tool,props.onToolChange]);
   const [mosaicShape,setMosaicShape]=useState<MosaicShape>("brush");
   const [selection,setSelection]=useState<{mark:AnnotationMark|null;editing:boolean}>({mark:null,editing:false});
+  useEffect(()=>{props.onPendingTextChange?.(selection.editing);return()=>props.onPendingTextChange?.(false);},[selection.editing,props.onPendingTextChange]);
   const receiveSelection=useCallback((mark:AnnotationMark|null,editing:boolean)=>setSelection({mark,editing}),[]);
   const created=useCallback(()=>setTool("select"),[]);
   useEffect(()=>{
