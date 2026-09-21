@@ -517,13 +517,14 @@ pub fn migrate_library(
 
     let prepared = (|| -> Result<PreparedLibraryLocation> {
         std::fs::create_dir(&staging_root)?;
-        for directory in ["Assets", "Annotations", "Thumbnails"] {
+        for directory in ["Assets", "Annotations", "Thumbnails", "VideoProjects"] {
             std::fs::create_dir(staging_root.join(directory))?;
         }
         write_marker(&staging_root, source.library_id, target_generation)?;
         copy_index(&source_root, &staging_root)?;
         copy_flat_directory(&source_root, &staging_root, "Assets")?;
         copy_flat_directory(&source_root, &staging_root, "Annotations")?;
+        copy_flat_directory(&source_root, &staging_root, "VideoProjects")?;
         verify_staged_copy(&source_root, &staging_root)?;
         validate_marker_identity(&staging_root, source.library_id, target_generation)?;
         let staged_library = AssetLibrary::open_existing(staging_root.clone())?;
@@ -641,6 +642,7 @@ fn ensure_no_unknown_root_entries(root: &Path) -> Result<()> {
         "Assets",
         "Annotations",
         "Thumbnails",
+        "VideoProjects",
         ".DS_Store",
     ];
     for entry in std::fs::read_dir(root)? {
@@ -692,7 +694,11 @@ fn copy_index(source_root: &Path, target_root: &Path) -> Result<()> {
 fn copy_flat_directory(source_root: &Path, target_root: &Path, directory: &str) -> Result<()> {
     let source = source_root.join(directory);
     let target = target_root.join(directory);
-    let metadata = std::fs::symlink_metadata(&source)?;
+    let metadata = match std::fs::symlink_metadata(&source) {
+        Ok(metadata) => metadata,
+        Err(error) if directory == "VideoProjects" && error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return Err(LibraryLocationError::InvalidLibrary);
     }
@@ -715,10 +721,13 @@ fn copy_flat_directory(source_root: &Path, target_root: &Path, directory: &str) 
                 "library file changed while copying",
             )));
         }
-        std::fs::OpenOptions::new()
+        let file = std::fs::OpenOptions::new()
             .write(true)
-            .open(target.join(&name))?
-            .sync_all()?;
+            .open(target.join(&name))?;
+        // Draft source fingerprints include mtime. Preserve it while the
+        // existing manifest verifies every copied byte before activation.
+        file.set_times(std::fs::FileTimes::new().set_modified(metadata.modified()?))?;
+        file.sync_all()?;
     }
     sync_directory(&target)?;
     Ok(())
@@ -726,9 +735,14 @@ fn copy_flat_directory(source_root: &Path, target_root: &Path, directory: &str) 
 
 fn migration_manifest(root: &Path) -> Result<Vec<(String, u64, String)>> {
     let mut manifest = Vec::new();
-    for directory in ["Assets", "Annotations"] {
+    for directory in ["Assets", "Annotations", "VideoProjects"] {
         let path = root.join(directory);
-        for entry in std::fs::read_dir(path)? {
+        let entries = match std::fs::read_dir(&path) {
+            Ok(entries) => entries,
+            Err(error) if directory == "VideoProjects" && error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        for entry in entries {
             let entry = entry?;
             let name = entry
                 .file_name()
@@ -1149,6 +1163,31 @@ mod tests {
         validate_marker_identity(&prepared.root, id, prepared.generation).unwrap();
         assert_ne!(prepared.generation, source_generation);
         validate_marker_identity(&source_root, id, source_generation).unwrap();
+    }
+
+    #[test]
+    fn migration_preserves_video_projects_and_changes_open_revision() {
+        use crate::core::video_project::{test_project, VideoProjectState};
+        let directory = tempfile::tempdir().unwrap();
+        let source_root = directory.path().join("source");
+        let target = directory.path().join("destination");
+        let library_id = uuid::Uuid::new_v4();
+        let mut library = create_library(&source_root, library_id);
+        let asset = library.import_data(b"video fixture", CaptureKind::Video, "mp4", 1920, 1080, Some(20.0), None, None).unwrap();
+        let source = migration_source(&source_root, library_id);
+        let initial = library.load_video_project(&asset.id, library_id, source.generation).unwrap();
+        let saved = library.save_video_project(&asset.id, library_id, source.generation, &initial.revision, test_project()).unwrap();
+        let prepared = migrate_library(&source, &target, false).unwrap();
+        let moved = prepared.library.load_video_project(&asset.id, library_id, prepared.generation).unwrap();
+        assert_eq!(moved.state, VideoProjectState::Valid);
+        assert_eq!(moved.project, saved.project);
+        assert_ne!(moved.revision, saved.revision);
+        assert_eq!(migration_manifest(&source_root).unwrap(), migration_manifest(&target).unwrap());
+        // A divergent draft in a previous same-library copy is unique content.
+        let target_project = target.join("VideoProjects").join(format!("{}.json", asset.id));
+        std::fs::write(&target_project, b"a unique older editing draft").unwrap();
+        assert!(matches!(migrate_library(&source, &target, true), Err(LibraryLocationError::InvalidDestination)));
+        assert_eq!(std::fs::read(target_project).unwrap(), b"a unique older editing draft");
     }
 
     #[test]

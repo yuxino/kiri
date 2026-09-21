@@ -1,7 +1,7 @@
 //! Native slice-speed rendering. PCM resampling intentionally changes pitch.
 //! Input is the already edited, ordered master, so effects stay in source time.
-use super::super::VideoSegment;
-use super::{annotations, storage_file, ticks};
+use super::super::{ExportProgressRange, VideoSegment};
+use super::{annotations, storage_file_controlled, ticks, wait_operation, wait_render};
 use anyhow::{bail, Context, Result};
 use std::{
     io::{BufWriter, Write},
@@ -59,7 +59,10 @@ pub(super) fn render(
     destination: &Path,
     segments: &[VideoSegment],
     profile: &MediaEncodingProfile,
+    progress: &ExportProgressRange,
 ) -> Result<()> {
+    progress.check()?;
+    let video_progress = progress.child(0.0, 0.5);
     let timeline = ranges(segments);
     let total = timeline.last().context("Speed export has no slices")?;
     let staging = tempfile::Builder::new()
@@ -110,6 +113,7 @@ pub(super) fn render(
         let mut output_index = 0_i64;
         let mut next_output_time = 0_i64;
         loop {
+            progress.check()?;
             let next = reader.read_frame()?;
             let start = if first { 0 } else { pending.0.max(0) };
             first = false;
@@ -129,6 +133,7 @@ pub(super) fn render(
                 // and sample fast frames instead of feeding 4x-dense timestamps
                 // into an encoder configured for the source cadence.
                 while next_output_time < output_end && next_output_time < total.output_end {
+                    progress.check()?;
                     output_index += 1;
                     let next =
                         ((i128::from(output_index) * 10_000_000 * i128::from(rate_denominator)
@@ -142,6 +147,7 @@ pub(super) fn render(
                         next - next_output_time,
                     )?;
                     next_output_time = next;
+                    video_progress.report(next_output_time as f64 / total.output_end as f64);
                 }
             }
             let Some(following) = next else {
@@ -155,33 +161,35 @@ pub(super) fn render(
             }
             pending = following;
         }
+        progress.check()?;
         writer
             .Finalize()
             .context("Could not finalize speed-adjusted video")?;
     }
     drop(writer);
-    let original = MediaClip::CreateFromFileAsync(&storage_file(source)?)?.join()?;
+    let original = wait_operation(MediaClip::CreateFromFileAsync(&storage_file_controlled(source, progress)?)?, progress)?;
     if original.EmbeddedAudioTracks()?.Size()? == 0 {
+        progress.check()?;
         std::fs::rename(&video_path, destination)?;
+        progress.report(1.0);
         return Ok(());
     }
     let audio_path = staging.path().join("speed-audio.wav");
-    render_audio(source, &audio_path, &timeline)?;
+    render_audio(source, &audio_path, &timeline, &progress.child(0.5, 0.65))?;
     let composition = MediaComposition::new()?;
     composition
         .Clips()?
-        .Append(&MediaClip::CreateFromFileAsync(&storage_file(&video_path)?)?.join()?)?;
+        .Append(&wait_operation(MediaClip::CreateFromFileAsync(&storage_file_controlled(&video_path, progress)?)?, progress)?)?;
     composition
         .BackgroundAudioTracks()?
-        .Append(&BackgroundAudioTrack::CreateFromFileAsync(&storage_file(&audio_path)?)?.join()?)?;
+        .Append(&wait_operation(BackgroundAudioTrack::CreateFromFileAsync(&storage_file_controlled(&audio_path, progress)?)?, progress)?)?;
     std::fs::File::create(destination)?;
-    let result = composition
+    let result = wait_render(composition
         .RenderToFileWithProfileAsync(
-            &storage_file(destination)?,
+            &storage_file_controlled(destination, progress)?,
             MediaTrimmingPreference::Precise,
             profile,
-        )?
-        .join()?;
+        )?, &progress.child(0.65, 1.0))?;
     if result != TranscodeFailureReason::None {
         bail!("Windows cannot combine speed-adjusted audio/video: {result:?}");
     }
@@ -301,7 +309,8 @@ impl PcmReader {
     }
 }
 
-fn render_audio(source: &Path, destination: &Path, timeline: &[Range]) -> Result<()> {
+fn render_audio(source: &Path, destination: &Path, timeline: &[Range], progress: &ExportProgressRange) -> Result<()> {
+    progress.check()?;
     let mut reader = PcmReader::open(source)?;
     let total = timeline
         .last()
@@ -333,6 +342,10 @@ fn render_audio(source: &Path, destination: &Path, timeline: &[Range]) -> Result
     let mut source_index = 0_u64;
     let mut range_index = 0;
     for output_index in 0..output_frames {
+        if output_index % 4096 == 0 {
+            progress.check()?;
+            progress.report(output_index as f64 / output_frames as f64);
+        }
         let output_time = output_index as f64 * 10_000_000.0 / f64::from(reader.rate);
         while range_index + 1 < timeline.len()
             && output_time >= timeline[range_index].output_end as f64
@@ -359,6 +372,8 @@ fn render_audio(source: &Path, destination: &Path, timeline: &[Range]) -> Result
         }
     }
     file.flush()?;
+    progress.check()?;
+    progress.report(1.0);
     if reader.decoded_frames == 0 {
         bail!("The source audio track contained no decodable PCM; refusing silent speed export");
     }

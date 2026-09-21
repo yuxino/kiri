@@ -9,6 +9,7 @@ mod core;
 mod diagnostics;
 mod gif;
 mod video_export;
+mod video_project_commands;
 mod media_import;
 mod microphone;
 #[cfg(target_os = "macos")]
@@ -181,6 +182,9 @@ pub fn run() {
             commands::reveal_asset,
             commands::convert_to_gif,
             commands::export_video_copy,
+            commands::cancel_video_export,
+            video_project_commands::load_video_project,
+            video_project_commands::save_video_project,
             commands::import_media,
             commands::start_capture,
             commands::cancel_capture,

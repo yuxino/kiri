@@ -1,6 +1,188 @@
 //! Native, non-destructive MP4 trimming and size presets. Run on a worker thread.
 use anyhow::{bail, Context, Result};
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU8, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
+};
+
+pub const EXPORT_CANCELLED: &str = "VIDEO_EXPORT_CANCELLED";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportPhase {
+    Preparing,
+    Rendering,
+    Saving,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct ExportProgress {
+    pub phase: ExportPhase,
+    pub progress: Option<f64>,
+}
+
+struct ExportControlInner {
+    // Cancellation and library import have one atomic linearization point.
+    // Once committing begins, cancellation reports false and import completes.
+    state: AtomicU8,
+    reported: Mutex<Option<(ExportProgress, Instant)>>,
+    observer: Box<dyn Fn(ExportProgress) + Send + Sync>,
+}
+
+#[derive(Clone)]
+pub struct ExportControl(Arc<ExportControlInner>);
+
+impl Default for ExportControl {
+    fn default() -> Self {
+        Self::new(|_| {})
+    }
+}
+
+impl ExportControl {
+    pub fn new(observer: impl Fn(ExportProgress) + Send + Sync + 'static) -> Self {
+        Self(Arc::new(ExportControlInner {
+            state: AtomicU8::new(0),
+            reported: Mutex::new(None),
+            observer: Box::new(observer),
+        }))
+    }
+
+    pub fn request_cancel(&self) -> bool {
+        self.0
+            .state
+            .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+            || self.is_cancelled()
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.0.state.load(Ordering::Acquire) == 1
+    }
+
+    pub fn check(&self) -> Result<()> {
+        if self.is_cancelled() {
+            bail!(EXPORT_CANCELLED);
+        }
+        Ok(())
+    }
+
+    pub fn begin_commit(&self) -> Result<()> {
+        self.0
+            .state
+            .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| anyhow::anyhow!(EXPORT_CANCELLED))?;
+        Ok(())
+    }
+
+    pub fn report(&self, phase: ExportPhase, progress: Option<f64>) {
+        if self.is_cancelled() {
+            return;
+        }
+        let progress = progress
+            .filter(|value| value.is_finite())
+            .map(|value| value.clamp(0.0, 1.0));
+        let mut reported = self
+            .0
+            .reported
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if self.is_cancelled() {
+            return;
+        }
+        let mut update = ExportProgress { phase, progress };
+        if let Some((previous, time)) = *reported {
+            if phase < previous.phase {
+                return;
+            }
+            if phase == previous.phase {
+                // Native pipelines can contain multiple passes or out-of-order callbacks.
+                // Never let a stale callback move the displayed work backwards.
+                if let Some(previous) = previous.progress {
+                    update.progress = Some(progress.unwrap_or(previous).max(previous));
+                }
+                if update.progress == previous.progress
+                    || (update.progress != Some(1.0) && time.elapsed() < Duration::from_millis(100))
+                {
+                    return;
+                }
+            }
+        }
+        *reported = Some((update, Instant::now()));
+        // Serialize delivery along with the watermark so concurrent native callbacks
+        // cannot emit a later event first. Observers must be brief and non-reentrant.
+        (self.0.observer)(update);
+    }
+
+    pub(super) fn rendering(&self) -> ExportProgressRange {
+        ExportProgressRange {
+            control: self.clone(),
+            start: 0.0,
+            end: 1.0,
+        }
+    }
+}
+
+/// Measured pass progress mapped onto a fixed share of the complete render.
+/// This is processed work, not an estimated clock or remaining-time promise.
+#[derive(Clone)]
+pub(super) struct ExportProgressRange {
+    control: ExportControl,
+    start: f64,
+    end: f64,
+}
+
+impl ExportProgressRange {
+    pub(super) fn check(&self) -> Result<()> {
+        self.control.check()
+    }
+    pub(super) fn report(&self, progress: f64) {
+        if progress.is_finite() {
+            self.control.report(
+                ExportPhase::Rendering,
+                Some(self.start + (self.end - self.start) * progress.clamp(0.0, 1.0)),
+            );
+        }
+    }
+    #[cfg(windows)]
+    fn child(&self, start: f64, end: f64) -> Self {
+        Self {
+            control: self.control.clone(),
+            start: self.start + (self.end - self.start) * start,
+            end: self.start + (self.end - self.start) * end,
+        }
+    }
+}
+
+/// A source can be on a slow external disk. Copy in bounded chunks, outside the
+/// library mutex, checking cancellation between reads and writes.
+pub fn copy_export_source<R: std::io::Read, W: std::io::Write>(
+    source: &mut R,
+    destination: &mut W,
+    length: u64,
+    control: &ExportControl,
+) -> Result<()> {
+    let mut buffer = vec![0; 1024 * 1024];
+    let mut copied = 0;
+    control.report(ExportPhase::Preparing, Some(0.0));
+    while copied < length {
+        control.check()?;
+        let size = usize::try_from((length - copied).min(buffer.len() as u64))?;
+        let count = source.read(&mut buffer[..size])?;
+        if count == 0 {
+            bail!("The video source changed while preparing export");
+        }
+        control.check()?;
+        destination.write_all(&buffer[..count])?;
+        copied += count as u64;
+        control.report(ExportPhase::Preparing, Some(copied as f64 / length as f64));
+    }
+    control.check()?;
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -165,7 +347,12 @@ pub(super) fn composition_order(effects: &[VideoEffect], annotations: &[Prepared
     layers.into_iter().map(|(_, _, index)| index).collect()
 }
 
+#[cfg(test)]
 fn prepare_annotations(annotations: &[VideoAnnotation]) -> Result<Vec<PreparedVideoAnnotation>> {
+    prepare_annotations_controlled(annotations, &ExportControl::default())
+}
+
+fn prepare_annotations_controlled(annotations: &[VideoAnnotation], control: &ExportControl) -> Result<Vec<PreparedVideoAnnotation>> {
     use base64::Engine;
     use image::ImageDecoder;
     if annotations.len() > 128 {
@@ -184,6 +371,7 @@ fn prepare_annotations(annotations: &[VideoAnnotation]) -> Result<Vec<PreparedVi
     annotations
         .iter()
         .map(|annotation| {
+            control.check()?;
             let VideoAnnotation {
                 start,
                 end,
@@ -375,6 +563,7 @@ pub fn export_video(
     export_video_with_annotations(source, segments, effects, &[], preset)
 }
 
+#[cfg(test)]
 pub fn export_video_with_annotations(
     source: &Path,
     segments: &[VideoSegment],
@@ -382,15 +571,30 @@ pub fn export_video_with_annotations(
     annotations: &[VideoAnnotation],
     preset: VideoExportPreset,
 ) -> Result<(PathBuf, i64, i64, f64)> {
+    export_video_with_annotations_controlled(source, segments, effects, annotations, preset, &ExportControl::default())
+}
+
+pub fn export_video_with_annotations_controlled(
+    source: &Path,
+    segments: &[VideoSegment],
+    effects: &[VideoEffect],
+    annotations: &[VideoAnnotation],
+    preset: VideoExportPreset,
+    control: &ExportControl,
+) -> Result<(PathBuf, i64, i64, f64)> {
+    control.check()?;
     validate_segments(segments, None)?;
     validate_effects(effects, None)?;
-    let annotations = prepare_annotations(annotations)?;
+    let annotations = prepare_annotations_controlled(annotations, control)?;
     let staging = tempfile::Builder::new()
         .prefix("kiri-video-export-")
         .tempdir()?;
     let output = staging.path().join("export.mp4");
+    control.check()?;
+    control.report(ExportPhase::Rendering, Some(0.0));
     let (width, height, duration) =
-        platform_export(source, &output, segments, effects, &annotations, preset)?;
+        platform_export(source, &output, segments, effects, &annotations, preset, &control.rendering())?;
+    control.check()?;
     if width <= 0
         || height <= 0
         || !duration.is_finite()
@@ -403,6 +607,9 @@ pub fn export_video_with_annotations(
     let destination =
         std::env::temp_dir().join(format!("kiri-export-{}.mp4", uuid::Uuid::new_v4()));
     std::fs::rename(&output, &destination).context("could not retain the exported video")?;
+    // The returned file is owned by the caller from here, including cancellation
+    // racing this rename. The command immediately adopts it into a TempPath.
+    control.report(ExportPhase::Rendering, Some(1.0));
     Ok((destination, width, height, duration))
 }
 
@@ -414,9 +621,10 @@ fn platform_export(
     effects: &[VideoEffect],
     annotations: &[PreparedVideoAnnotation],
     preset: VideoExportPreset,
+    progress: &ExportProgressRange,
 ) -> Result<(i64, i64, f64)> {
     use std::{
-        ffi::{c_char, CStr, CString},
+        ffi::{c_char, c_void, CStr, CString},
         os::unix::ffi::OsStrExt,
     };
     #[repr(C)]
@@ -463,10 +671,21 @@ fn platform_export(
             order: *const usize,
             order_count: usize,
             max_edge: u32,
+            progress: extern "C" fn(*const c_void, f64) -> bool,
+            progress_context: *const c_void,
             error: *mut c_char,
             capacity: usize,
         ) -> bool;
     }
+    extern "C" fn update_progress(context: *const c_void, fraction: f64) -> bool {
+        // Do not unwind across AVFoundation's C bridge.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let progress = unsafe { &*context.cast::<ExportProgressRange>() };
+            if fraction >= 0.0 { progress.report(fraction); }
+            progress.check().is_ok()
+        })).unwrap_or(false)
+    }
+    progress.check()?;
     let (_, _, duration) = crate::macos_media::probe_media(source)?;
     let duration = duration.context("video duration is unavailable")?;
     let segments = validate_segments(segments, Some(duration))?;
@@ -488,10 +707,13 @@ fn platform_export(
             order.as_ptr(),
             order.len(),
             preset.max_edge(),
+            update_progress,
+            (progress as *const ExportProgressRange).cast(),
             error.as_mut_ptr(),
             error.len(),
         )
     };
+    progress.check()?;
     if !success {
         bail!(
             "{}",
@@ -499,6 +721,7 @@ fn platform_export(
         );
     }
     let (width, height, duration) = crate::macos_media::probe_media(output)?;
+    progress.check()?;
     Ok((
         width,
         height,
@@ -520,6 +743,7 @@ fn platform_export(
     _: &[VideoEffect],
     _: &[PreparedVideoAnnotation],
     _: VideoExportPreset,
+    _: &ExportProgressRange,
 ) -> Result<(i64, i64, f64)> {
     bail!("Native video export is supported on macOS and Windows")
 }
@@ -527,6 +751,117 @@ fn platform_export(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_control_cancels_before_reading_or_native_media_work() {
+        let control = ExportControl::default();
+        assert!(control.request_cancel());
+        let result = export_video_with_annotations_controlled(Path::new("missing-source.mp4"),
+            &[VideoSegment {start: 0.0, end: 1.0, speed: 1.0}], &[], &[], VideoExportPreset::Original, &control);
+        assert_eq!(result.unwrap_err().to_string(), EXPORT_CANCELLED);
+        let mut target = Vec::new();
+        let result = copy_export_source(&mut std::io::Cursor::new(vec![7; 16]), &mut target, 16, &control);
+        assert_eq!(result.unwrap_err().to_string(), EXPORT_CANCELLED);
+        assert!(target.is_empty());
+        assert!(control.begin_commit().is_err());
+    }
+
+    #[test]
+    fn export_control_stops_source_copy_between_chunks() {
+        struct Source { remaining: usize, control: ExportControl }
+        impl std::io::Read for Source {
+            fn read(&mut self, target: &mut [u8]) -> std::io::Result<usize> {
+                let count = self.remaining.min(target.len());
+                target[..count].fill(7);
+                self.remaining -= count;
+                if self.remaining <= 1024 * 1024 { self.control.request_cancel(); }
+                Ok(count)
+            }
+        }
+        let control = ExportControl::default();
+        let mut source = Source { remaining: 3 * 1024 * 1024, control: control.clone() };
+        let mut target = Vec::new();
+        let result = copy_export_source(&mut source, &mut target, 3 * 1024 * 1024, &control);
+        assert_eq!(result.unwrap_err().to_string(), EXPORT_CANCELLED);
+        assert_eq!(target.len(), 1024 * 1024);
+    }
+
+    #[test]
+    fn export_control_cancel_and_import_have_one_winner() {
+        for _ in 0..32 {
+            let control = ExportControl::default();
+            let committing = control.clone();
+            let ready = Arc::new(std::sync::Barrier::new(2));
+            let worker_ready = ready.clone();
+            let worker = std::thread::spawn(move || { worker_ready.wait(); committing.begin_commit().is_ok() });
+            ready.wait();
+            let cancelled = control.request_cancel();
+            let committed = worker.join().unwrap();
+            assert_ne!(cancelled, committed);
+            if committed { assert!(!control.request_cancel()); }
+            else { assert_eq!(control.check().unwrap_err().to_string(), EXPORT_CANCELLED); }
+        }
+    }
+
+    #[test]
+    fn export_control_progress_is_bounded_monotonic_and_throttled() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let observed = events.clone();
+        let control = ExportControl::new(move |event| observed.lock().unwrap().push(event));
+        control.report(ExportPhase::Preparing, None);
+        control.report(ExportPhase::Rendering, Some(0.0));
+        for index in 1..100 { control.report(ExportPhase::Rendering, Some(index as f64 / 100.0)); }
+        control.report(ExportPhase::Rendering, Some(8.0));
+        control.report(ExportPhase::Rendering, Some(0.5));
+        control.report(ExportPhase::Preparing, Some(0.7));
+        control.report(ExportPhase::Saving, None);
+        control.report(ExportPhase::Rendering, Some(f64::NAN));
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 4, "per-frame callbacks must be throttled");
+        assert_eq!(events[0].phase, ExportPhase::Preparing);
+        assert_eq!(events[1].progress, Some(0.0));
+        assert_eq!(events[2].progress, Some(1.0));
+        assert_eq!(events[3].phase, ExportPhase::Saving);
+        assert_eq!(events[3].progress, None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_export_cancel_stops_in_flight_render_and_keeps_source() {
+        use crate::macos_media::MacosSegmentEncoder;
+        use std::sync::{atomic::AtomicBool, OnceLock, Weak};
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("cancel-source.mp4");
+        let mut encoder = MacosSegmentEncoder::new(&source, 1280, 720, 30, 4_000_000, false).unwrap();
+        let frame: Vec<u8> = (0..1280 * 720).flat_map(|index| {
+            [(index % 253) as u8, ((index / 1280) % 251) as u8, 90, 255]
+        }).collect();
+        for index in 0..180 { assert!(encoder.append_video(&frame, index).unwrap()); }
+        encoder.finish().unwrap();
+        let before = std::fs::read(&source).unwrap();
+        let slot: Arc<OnceLock<Weak<ExportControlInner>>> = Arc::new(OnceLock::new());
+        let observed = slot.clone();
+        let cancelled_in_flight = Arc::new(AtomicBool::new(false));
+        let triggered = cancelled_in_flight.clone();
+        let control = ExportControl::new(move |event| {
+            if event.phase == ExportPhase::Rendering && event.progress.is_some_and(|value| value > 0.0 && value < 1.0) {
+                if let Some(inner) = observed.get().and_then(Weak::upgrade) {
+                    triggered.store(ExportControl(inner).request_cancel(), Ordering::Release);
+                }
+            }
+        });
+        assert!(slot.set(Arc::downgrade(&control.0)).is_ok());
+        let started = Instant::now();
+        let result = export_video_with_annotations_controlled(&source,
+            &[VideoSegment {start: 0.0, end: 6.0, speed: 1.0}],
+            &[VideoEffect {kind: VideoEffectKind::Mask, start: 0.0, end: 6.0,
+                mask_style: VideoMaskStyle::Blur, strength: 1.0, ..Default::default()}],
+            &[], VideoExportPreset::Original, &control);
+        assert!(cancelled_in_flight.load(Ordering::Acquire), "must cancel at real intermediate native progress");
+        assert_eq!(result.unwrap_err().to_string(), EXPORT_CANCELLED);
+        assert!(started.elapsed() < Duration::from_secs(30), "cancellation must finish promptly");
+        assert_eq!(std::fs::read(&source).unwrap(), before);
+    }
     #[test]
     fn rejects_invalid_and_out_of_bounds_ranges() {
         for (start, end, duration) in [

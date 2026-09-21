@@ -11,6 +11,7 @@ import {useAnnotationAppearance} from "../annotation/useAnnotationAppearance";
 
 export type VideoAnnotationsEditorProps={
   onPendingTextChange?(pending:boolean):void;
+  onTextDraftChange?(mark:AnnotationMark|null,previousId:number|null,editing:boolean):void;
   onLiveMarks?(marks:AnnotationMark[],draft:AnnotationMark|null,editingId:number|null):void;
   onFrame?(canvas:HTMLCanvasElement):void;active:boolean;onActivate():void;extraTools?:ReactNode;image:HTMLImageElement|null;sourceSize:{width:number;height:number};viewSize:{width:number;height:number};
   onToolChange?(tool:Tool):void;onCancelGesture?():boolean;
@@ -121,7 +122,7 @@ export function VideoAnnotationsEditor(props:VideoAnnotationsEditorProps) {
     {props.active&&<div className="kiri-video-annotation-surface" style={{width:props.viewSize.width,height:props.viewSize.height}}>
       <AnnotationCanvas ref={canvas} onLiveMarks={props.onLiveMarks} onFrame={props.onFrame} image={props.image} region={{x:0,y:0,...props.sourceSize}} viewSize={props.viewSize}
         initialDocument={{schemaVersion:1,canvas:props.sourceSize,sourcePixels:props.sourceSize,marks:props.marks}} documentRevision={props.revision} selectedMarkId={props.selectedMarkId} onSelectionChange={props.onSelectionChange}
-        onSelectionInfo={receiveSelection} onMarkCreated={created} mosaicShape={mosaicShape} textEscapeCancelsEdit commitTextOnToolChange={false}
+        onSelectionInfo={receiveSelection} onTextDraftChange={props.onTextDraftChange} onMarkCreated={created} mosaicShape={mosaicShape} textEscapeCancelsEdit commitTextOnToolChange={false}
         interactionDisabled={props.disabled} tool={tool} appearance={scaled} onHistoryChange={noop} onDocumentChange={props.onChange} onUndo={props.onUndo} onRedo={props.onRedo} onCancel={props.onClose}/>
     </div>}
   </div>;

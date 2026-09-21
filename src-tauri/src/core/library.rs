@@ -14,6 +14,7 @@ use thiserror::Error;
 
 use crate::core::annotation::AnnotationDocument;
 use crate::core::asset::{CaptureAsset, CaptureKind};
+use crate::core::video_project::{self, VideoProject, VideoProjectError, VideoProjectSnapshot};
 
 #[derive(Debug, Error)]
 pub enum AssetLibraryError {
@@ -118,6 +119,7 @@ pub struct AssetLibrary {
     assets_url: PathBuf,
     thumbnails_url: PathBuf,
     annotations_url: PathBuf,
+    video_projects_url: PathBuf,
     index_url: PathBuf,
     index: Vec<CaptureAsset>,
     #[cfg(test)]
@@ -141,6 +143,7 @@ impl AssetLibrary {
         let assets_url = root_url.join("Assets");
         let thumbnails_url = root_url.join("Thumbnails");
         let annotations_url = root_url.join("Annotations");
+        let video_projects_url = root_url.join("VideoProjects");
         let index_url = root_url.join("library.json");
 
         if allow_creation {
@@ -155,6 +158,9 @@ impl AssetLibrary {
             ensure_directory(&thumbnails_url)?;
             ensure_directory(&annotations_url)?;
         }
+        // Older managed libraries predate video drafts. Missing is valid;
+        // symlinks and non-directories never are. Create only on first save.
+        ensure_optional_directory(&video_projects_url)?;
 
         let index = match std::fs::symlink_metadata(&index_url) {
             Ok(_) => {
@@ -175,6 +181,7 @@ impl AssetLibrary {
             assets_url,
             thumbnails_url,
             annotations_url,
+            video_projects_url,
             index_url,
             index,
             #[cfg(test)]
@@ -204,12 +211,70 @@ impl AssetLibrary {
         ensure_directory(&self.assets_url)?;
         ensure_directory(&self.thumbnails_url)?;
         ensure_directory(&self.annotations_url)?;
+        ensure_optional_directory(&self.video_projects_url)?;
         ensure_regular_file(&self.index_url)?;
         Ok(())
     }
 
     pub fn asset_url(&self, asset: &CaptureAsset) -> PathBuf {
         self.assets_url.join(&asset.filename)
+    }
+
+    pub fn load_video_project(
+        &self,
+        id: &uuid::Uuid,
+        library_id: uuid::Uuid,
+        generation: uuid::Uuid,
+    ) -> std::result::Result<VideoProjectSnapshot, VideoProjectError> {
+        let asset = self.video_project_asset(id)?;
+        video_project::load_project(
+            asset,
+            &self.asset_url(asset),
+            &self.video_project_url(asset),
+            library_id,
+            generation,
+        )
+    }
+
+    /// Caller holds the managed-library mutex through the compare-and-swap.
+    pub fn save_video_project(
+        &self,
+        id: &uuid::Uuid,
+        library_id: uuid::Uuid,
+        generation: uuid::Uuid,
+        revision: &str,
+        project: VideoProject,
+    ) -> std::result::Result<VideoProjectSnapshot, VideoProjectError> {
+        let asset = self.video_project_asset(id)?;
+        ensure_or_create_directory(&self.video_projects_url)
+            .map_err(|_| VideoProjectError::Unavailable)?;
+        if let Some(root) = self.video_projects_url.parent() {
+            sync_directory(root).map_err(|_| VideoProjectError::Unavailable)?;
+        }
+        video_project::save_project(
+            asset,
+            &self.asset_url(asset),
+            &self.video_project_url(asset),
+            library_id,
+            generation,
+            revision,
+            project,
+        )
+    }
+
+    fn video_project_asset(
+        &self,
+        id: &uuid::Uuid,
+    ) -> std::result::Result<&CaptureAsset, VideoProjectError> {
+        self.validate_storage_layout()
+            .map_err(|_| VideoProjectError::Unavailable)?;
+        self.asset_by_id(id)
+            .filter(|asset| asset.kind == CaptureKind::Video)
+            .ok_or(VideoProjectError::Unavailable)
+    }
+
+    fn video_project_url(&self, asset: &CaptureAsset) -> PathBuf {
+        self.video_projects_url.join(format!("{}.json", asset.id))
     }
 
     pub fn asset_availability(&self, id: &uuid::Uuid) -> Result<AssetAvailability> {
@@ -1160,6 +1225,7 @@ impl AssetLibrary {
                 .join(format!("{}.jpg", asset.id.to_string().to_lowercase())),
             annotation_document,
             annotation_source,
+            self.video_project_url(asset),
         ])
     }
 
@@ -1302,6 +1368,14 @@ fn ensure_directory(path: &Path) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+fn ensure_optional_directory(path: &Path) -> Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(_) => ensure_directory(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(AssetLibraryError::Io(error)),
+    }
 }
 
 fn ensure_regular_file(path: &Path) -> Result<()> {
@@ -1679,6 +1753,23 @@ fn sync_directory_after_commit(path: &Path, operation: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn video_project_survives_a_failed_permanent_delete() {
+        let (_directory, root) = temp_root();
+        let mut library = AssetLibrary::open(root).unwrap();
+        let asset = library.import_data(b"video fixture", CaptureKind::Video, "mp4", 1920, 1080, Some(20.0), None, None).unwrap();
+        let library_id = uuid::Uuid::new_v4();
+        let generation = uuid::Uuid::new_v4();
+        let initial = library.load_video_project(&asset.id, library_id, generation).unwrap();
+        let saved = library.save_video_project(&asset.id, library_id, generation, &initial.revision, video_project::test_project()).unwrap();
+        library.move_to_trash(&asset.id).unwrap();
+        library.persist_fail.set(true);
+        assert!(library.permanently_delete(&asset.id).is_err());
+        library.persist_fail.set(false);
+        assert!(library.asset_url(&asset).exists());
+        assert_eq!(library.load_video_project(&asset.id, library_id, generation).unwrap(), saved);
+    }
 
     #[test]
     fn ocr_history_round_trip_search_and_recoverable_trash() {

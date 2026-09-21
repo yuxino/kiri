@@ -88,6 +88,8 @@ interface Props {
   selectedMarkId?: number | null;
   onSelectionChange?(markId: number | null): void;
   onSelectionInfo?(mark: AnnotationMark | null, editing: boolean): void;
+  /** A recoverable text snapshot without committing history or interrupting IME. */
+  onTextDraftChange?(mark: AnnotationMark | null, previousId: number | null, editing: boolean): void;
   onMarkCreated?(): void;
   mosaicShape?: MosaicShape;
   textEscapeCancelsEdit?: boolean;
@@ -119,6 +121,7 @@ interface Props {
 }
 
 interface EditingState {
+  id: number;
   index: number | null;
   text: string;
   rect: Rect;
@@ -147,6 +150,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       selectedMarkId,
       onSelectionChange,
       onSelectionInfo,
+      onTextDraftChange,
       onMarkCreated,
       mosaicShape = "brush",
       textEscapeCancelsEdit = false,
@@ -293,6 +297,15 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       onSelectionInfo?.(mark,!!editing);
     },[marks,selectedIndex,editing,onSelectionInfo]);
 
+    useEffect(()=>{
+      const text=editing?annotationTextForCommit(editing.text):null;
+      const mark:AnnotationMark|null=editing&&text!==null?{kind:"text",id:editing.id,text,
+        rect:{x:editing.rect.x+8*editing.uiScale,y:editing.rect.y+5*editing.uiScale,
+          width:Math.max(1,editing.rect.width-16*editing.uiScale),height:Math.max(1,editing.rect.height-10*editing.uiScale)},
+        color:editing.color,background:editing.background,fontSize:editing.fontSize}:null;
+      onTextDraftChange?.(mark,editing?.index!=null?marks[editing.index]?.id??null:null,!!editing);
+    },[editing,marks,onTextDraftChange]);
+
     const appendMark=useCallback((mark:AnnotationMark)=>{
       history.append(mark);syncMarks();selectMark(history.elements.length-1);markCreatedRef.current?.();
     },[history,syncMarks,selectMark]);
@@ -426,7 +439,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       const newMark: AnnotationMark = {
         // Reuse the previous id so an unchanged edit compares equal and
         // does not create a no-op history entry (spec §6.6).
-        id: previous && previous.kind === "text" ? previous.id : Date.now() + Math.random(),
+        id: previous && previous.kind === "text" ? previous.id : current.id,
         kind: "text",
         text,
         rect: textRect,
@@ -465,7 +478,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       const uiScale=hitTestScale.radial;
       const width=Math.max(1,Math.min(mark.rect.width+16*uiScale,documentSize.width));
       const height=Math.max(1,Math.min(mark.rect.height+10*uiScale,documentSize.height));
-      const next:EditingState={index,text:mark.text,uiScale,rect:{x:Math.min(Math.max(0,mark.rect.x-8*uiScale),Math.max(0,documentSize.width-width)),
+      const next:EditingState={id:mark.id,index,text:mark.text,uiScale,rect:{x:Math.min(Math.max(0,mark.rect.x-8*uiScale),Math.max(0,documentSize.width-width)),
         y:Math.min(Math.max(0,mark.rect.y-5*uiScale),Math.max(0,documentSize.height-height)),width,height},
         maxWidth:Math.max(width,documentSize.width-Math.max(0,mark.rect.x-8*uiScale)),color:mark.color,background:mark.background,fontSize:mark.fontSize};
       editingRef.current=next;setEditing(next);selectMark(index);publishHistory();
@@ -545,6 +558,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             height,
           };
           const nextEditing: EditingState = {
+            id: Date.now() + Math.random(),
             // The Text tool always creates a new mark. Existing text is edited
             // only through the Select tool's double-click path below; carrying
             // a stale selection index here would replace the selected mark.

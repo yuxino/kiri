@@ -1,0 +1,7 @@
+.kiri-video-project-status {color:var(--kiri-secondary-label);font-size:11px;white-space:nowrap;}
+.kiri-video-save-retry {border:0;padding:4px 0;background:none;color:var(--kiri-label);font:inherit;text-decoration:underline;text-underline-offset:3px;cursor:pointer;}
+.kiri-video-save-retry:hover {text-decoration:underline 2px;}
+.kiri-video-project-notice {display:flex;align-items:center;gap:16px;flex:none;padding:10px 18px;background:var(--kiri-elevated);border-bottom:1px solid var(--kiri-surface-border);}
+.kiri-video-project-notice p {margin:0;flex:1;font-size:12px;line-height:1.45;}
+.kiri-video-project-notice button {flex:none;}
+@media(max-width:760px){.kiri-video-editor-heading{gap:8px;}.kiri-video-project-status{max-width:110px;white-space:normal;}}

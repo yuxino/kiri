@@ -2,11 +2,12 @@
 use super::{
     validate_annotation_duration, validate_effects, validate_segments, PreparedVideoAnnotation,
     VideoEffect, VideoEffectKind, VideoExportPreset, VideoMaskStyle, VideoSegment,
+    ExportProgressRange,
 };
 use anyhow::{bail, Context, Result};
 use std::{collections::HashMap, path::Path};
 use windows::{
-    core::HSTRING,
+    core::{HSTRING, Interface, RuntimeType},
     Foundation::{Rect, Size, TimeSpan},
     Media::{
         Editing::{
@@ -20,6 +21,10 @@ use windows::{
     Storage::{FileProperties::VideoOrientation, StorageFile},
     Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED},
 };
+use windows_future::{
+    AsyncStatus, AsyncOperationProgressHandler, AsyncActionProgressHandler, IAsyncInfo,
+    IAsyncOperation, IAsyncOperationWithProgress, IAsyncActionWithProgress,
+};
 
 #[path = "video_annotation_windows.rs"]
 mod annotations;
@@ -28,7 +33,12 @@ mod speed;
 
 // WinRT rejects forward slashes even though Rust file APIs accept them.
 // Keep UTF-16 intact so paths containing non-ASCII names remain readable.
+#[cfg(test)]
 fn storage_file(path: &Path) -> Result<StorageFile> {
+    storage_file_controlled(path, &super::ExportControl::default().rendering())
+}
+
+fn storage_file_controlled(path: &Path, progress: &ExportProgressRange) -> Result<StorageFile> {
     use std::os::windows::ffi::OsStrExt;
     let absolute = std::path::absolute(path)?;
     let wide: Vec<u16> = absolute
@@ -42,9 +52,58 @@ fn storage_file(path: &Path) -> Result<StorageFile> {
             }
         })
         .collect();
-    StorageFile::GetFileFromPathAsync(&HSTRING::from_wide(&wide))?
-        .join()
+    wait_operation(StorageFile::GetFileFromPathAsync(&HSTRING::from_wide(&wide))?, progress)
         .context("could not open native video media file")
+}
+
+fn wait_async(operation: &IAsyncInfo, progress: &ExportProgressRange) -> Result<()> {
+    let started = std::time::Instant::now();
+    let mut stopping = false;
+    let mut timed_out = false;
+    while operation.Status()? == AsyncStatus::Started {
+        if !stopping && (progress.check().is_err() || started.elapsed().as_secs() >= 3600) {
+            timed_out = started.elapsed().as_secs() >= 3600;
+            // A provider may reject Cancel after finishing between Status and
+            // Cancel. Always wait for its terminal state before removing output.
+            let _ = operation.Cancel();
+            stopping = true;
+        }
+        // Wait for the native operation to release its staging file even after
+        // requesting cancellation. Returning early would race temp cleanup.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    progress.check()?;
+    if timed_out { bail!("Windows video export timed out"); }
+    Ok(())
+}
+
+fn wait_operation<T: RuntimeType + 'static>(operation: IAsyncOperation<T>, progress: &ExportProgressRange) -> Result<T> {
+    wait_async(&operation.cast()?, progress)?;
+    Ok(operation.GetResults()?)
+}
+
+fn wait_render(operation: IAsyncOperationWithProgress<TranscodeFailureReason, f64>, progress: &ExportProgressRange) -> Result<TranscodeFailureReason> {
+    let updates = progress.clone();
+    operation.SetProgress(&AsyncOperationProgressHandler::new(move |_, percent| {
+        updates.report(*percent / 100.0);
+        Ok(())
+    }))?;
+    wait_async(&operation.cast()?, progress)?;
+    let result = operation.GetResults()?;
+    if result == TranscodeFailureReason::None { progress.report(1.0); }
+    Ok(result)
+}
+
+fn wait_transcode(operation: IAsyncActionWithProgress<f64>, progress: &ExportProgressRange) -> Result<()> {
+    let updates = progress.clone();
+    operation.SetProgress(&AsyncActionProgressHandler::new(move |_, percent| {
+        updates.report(*percent / 100.0);
+        Ok(())
+    }))?;
+    wait_async(&operation.cast()?, progress)?;
+    operation.GetResults()?;
+    progress.report(1.0);
+    Ok(())
 }
 
 fn ticks(seconds: f64) -> i64 {
@@ -58,7 +117,9 @@ pub(super) fn platform_export(
     effects: &[VideoEffect],
     annotations: &[PreparedVideoAnnotation],
     preset: VideoExportPreset,
+    progress: &ExportProgressRange,
 ) -> Result<(i64, i64, f64)> {
+    progress.check()?;
     struct Apartment;
     impl Drop for Apartment {
         fn drop(&mut self) {
@@ -67,9 +128,9 @@ pub(super) fn platform_export(
     }
     unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.context("could not initialize Windows media")?;
     let _apartment = Apartment;
-    let input = storage_file(source)?;
-    let properties = input.Properties()?.GetVideoPropertiesAsync()?.join()?;
-    let source_clip = MediaClip::CreateFromFileAsync(&input)?.join()?;
+    let input = storage_file_controlled(source, progress)?;
+    let properties = wait_operation(input.Properties()?.GetVideoPropertiesAsync()?, progress)?;
+    let source_clip = wait_operation(MediaClip::CreateFromFileAsync(&input)?, progress)?;
     // Use the editor's exact timebase rather than rounded shell metadata duration.
     let duration = source_clip.OriginalDuration()?.Duration as f64 / 10_000_000.0;
     let segments = validate_segments(segments, Some(duration))?;
@@ -83,7 +144,7 @@ pub(super) fn platform_export(
     {
         bail!("Windows cannot apply video effects to rotated source videos; export an upright copy first");
     }
-    let profile = MediaEncodingProfile::CreateFromFileAsync(&input)?.join()?;
+    let profile = wait_operation(MediaEncodingProfile::CreateFromFileAsync(&input)?, progress)?;
     if has_speed_changes {
         // Render source-time edits first, in the requested slice order. The speed
         // pass then operates on contiguous master intervals, including reorders.
@@ -105,14 +166,13 @@ pub(super) fn platform_export(
             effects,
             annotations,
             preset,
+            &progress.child(0.0, 0.5),
         )?;
         let master_profile =
-            MediaEncodingProfile::CreateFromFileAsync(&storage_file(&master)?)?.join()?;
-        speed::render(&master, output, &segments, &master_profile)?;
-        let actual = storage_file(output)?
-            .Properties()?
-            .GetVideoPropertiesAsync()?
-            .join()?;
+            wait_operation(MediaEncodingProfile::CreateFromFileAsync(&storage_file_controlled(&master, progress)?)?, progress)?;
+        speed::render(&master, output, &segments, &master_profile, &progress.child(0.5, 1.0))?;
+        let actual = wait_operation(storage_file_controlled(output, progress)?
+            .Properties()?.GetVideoPropertiesAsync()?, progress)?;
         return Ok((
             i64::from(actual.Width()?),
             i64::from(actual.Height()?),
@@ -140,28 +200,29 @@ pub(super) fn platform_export(
             annotations,
             effects,
             &profile,
+            &progress.child(0.0, 0.5),
         )?;
         let tracks = source_clip.EmbeddedAudioTracks()?;
         let annotated_source = if tracks.Size()? > 0 {
             let composed = MediaComposition::new()?;
             composed
                 .Clips()?
-                .Append(&MediaClip::CreateFromFileAsync(&storage_file(&silent_path)?)?.join()?)?;
+                .Append(&wait_operation(MediaClip::CreateFromFileAsync(&storage_file_controlled(&silent_path, progress)?)?, progress)?)?;
             // Preserve every embedded source track, including separate microphone/system tracks.
             for index in 0..tracks.Size()? {
+                progress.check()?;
                 composed.BackgroundAudioTracks()?.Append(
                     &BackgroundAudioTrack::CreateFromEmbeddedAudioTrack(&tracks.GetAt(index)?)?,
                 )?;
             }
             let with_audio = staging.path().join("annotated-with-audio.mp4");
             std::fs::File::create(&with_audio)?;
-            let result = composed
+            let result = wait_render(composed
                 .RenderToFileWithProfileAsync(
-                    &storage_file(&with_audio)?,
+                    &storage_file_controlled(&with_audio, progress)?,
                     MediaTrimmingPreference::Precise,
                     &profile,
-                )?
-                .join()?;
+                )?, &progress.child(0.5, 0.7))?;
             if result != TranscodeFailureReason::None {
                 bail!("Windows cannot preserve annotated video audio: {result:?}");
             }
@@ -169,7 +230,8 @@ pub(super) fn platform_export(
         } else {
             silent_path
         };
-        return platform_export(&annotated_source, output, &segments, &[], &[], preset);
+        return platform_export(&annotated_source, output, &segments, &[], &[], preset,
+            &progress.child(if tracks.Size()? > 0 {0.7} else {0.5}, 1.0));
     }
     let video = profile.Video()?;
     let (width, height) = (video.Width()?, video.Height()?);
@@ -194,7 +256,12 @@ pub(super) fn platform_export(
     let mut output_time = 0_i64;
     let mut overlay_count = 0_usize;
     let mut zoom_count = 0_usize;
+    let zoom_duration: f64 = segments.iter().flat_map(|segment| effects.iter()
+        .filter(|effect| effect.kind == VideoEffectKind::Zoom)
+        .map(move |effect| (segment.end.min(effect.end) - segment.start.max(effect.start)).max(0.0))).sum();
+    let mut zoom_done = 0.0;
     for segment in segments {
+        progress.check()?;
         // Each zoom interval becomes a native clip with a constant crop. Mask timing
         // remains independent and uses composition time after deleted footage is removed.
         let mut boundaries = vec![ticks(segment.start), ticks(segment.end)];
@@ -211,6 +278,7 @@ pub(super) fn platform_export(
         boundaries.sort_unstable();
         boundaries.dedup();
         for range in boundaries.windows(2) {
+            progress.check()?;
             let (start, end) = (range[0], range[1]);
             let mut clip = source_clip.Clone()?;
             let original_duration = clip.OriginalDuration()?.Duration;
@@ -247,7 +315,7 @@ pub(super) fn platform_export(
                 zoom_count += 1;
                 let path = images.path().join(format!("zoom-{zoom_count}.mp4"));
                 std::fs::File::create(&path)?;
-                let destination = storage_file(&path)?;
+                let destination = storage_file_controlled(&path, progress)?;
                 let transcoder = MediaTranscoder::new()?;
                 transcoder.SetTrimStartTime(TimeSpan { Duration: start })?;
                 transcoder.SetTrimStopTime(TimeSpan { Duration: end })?;
@@ -256,9 +324,8 @@ pub(super) fn platform_export(
                     true,
                     &transform.Properties()?,
                 )?;
-                let prepared = transcoder
-                    .PrepareFileTranscodeAsync(&input, &destination, &profile)?
-                    .join()
+                let prepared = wait_operation(transcoder
+                    .PrepareFileTranscodeAsync(&input, &destination, &profile)?, progress)
                     .context("preparing Windows zoom segment")?;
                 if !prepared.CanTranscode()? {
                     bail!(
@@ -266,12 +333,12 @@ pub(super) fn platform_export(
                         prepared.FailureReason()?
                     );
                 }
-                prepared
-                    .TranscodeAsync()?
-                    .join()
+                let zoom_length = (end - start) as f64 / 10_000_000.0;
+                wait_transcode(prepared.TranscodeAsync()?, &progress.child(
+                    0.5 * zoom_done / zoom_duration, 0.5 * (zoom_done + zoom_length) / zoom_duration))
                     .context("encoding Windows zoom segment")?;
-                clip = MediaClip::CreateFromFileAsync(&destination)?
-                    .join()
+                zoom_done += zoom_length;
+                clip = wait_operation(MediaClip::CreateFromFileAsync(&destination)?, progress)
                     .context("opening encoded Windows zoom segment")?;
                 let rendered_duration = clip.OriginalDuration()?.Duration;
                 if rendered_duration < end - start - 500_000 {
@@ -288,6 +355,7 @@ pub(super) fn platform_export(
                 .iter()
                 .filter(|effect| effect.kind == VideoEffectKind::Mask)
             {
+                progress.check()?;
                 let mask_start = start.max(ticks(mask.start));
                 let mask_end = end.min(ticks(mask.end));
                 if mask_end <= mask_start {
@@ -315,17 +383,16 @@ pub(super) fn platform_export(
                         image::Rgba([0, 0, 0, 255]),
                     )
                     .save(&path)?;
-                    let file = storage_file(&path)?;
+                    let file = storage_file_controlled(&path, progress)?;
                     mask_files.insert(dimensions, file.clone());
                     file
                 };
-                let mask_clip = MediaClip::CreateFromImageFileAsync(
+                let mask_clip = wait_operation(MediaClip::CreateFromImageFileAsync(
                     &mask_file,
                     TimeSpan {
                         Duration: mask_end - mask_start,
                     },
-                )?
-                .join()?;
+                )?, progress)?;
                 let overlay = MediaOverlay::CreateWithPositionAndOpacity(&mask_clip, rect, 1.0)?;
                 overlay.SetAudioEnabled(false)?;
                 // Delay is absolute from the composition start, even within one layer.
@@ -341,18 +408,15 @@ pub(super) fn platform_export(
         composition.OverlayLayers()?.Append(&masks)?;
     }
     std::fs::File::create(output)?;
-    let destination = storage_file(output)?;
-    let result = composition
+    let destination = storage_file_controlled(output, progress)?;
+    let result = wait_render(composition
         .RenderToFileWithProfileAsync(&destination, MediaTrimmingPreference::Precise, &profile)?
-        .join()
+        , &progress.child(if zoom_duration > 0.0 {0.5} else {0.0}, 1.0))
         .context("rendering Windows edited composition")?;
     if result != TranscodeFailureReason::None {
         bail!("Windows cannot export this video: {result:?}");
     }
-    let actual = destination
-        .Properties()?
-        .GetVideoPropertiesAsync()?
-        .join()?;
+    let actual = wait_operation(destination.Properties()?.GetVideoPropertiesAsync()?, progress)?;
     Ok((
         i64::from(actual.Width()?),
         i64::from(actual.Height()?),
@@ -504,6 +568,40 @@ mod tests {
             "synthetic source encoding failed"
         );
 
+        // Exercise both cooperative CPU frame cancellation and the WinRT render
+        // operation. The output must be released before the worker returns.
+        for (name, effects) in [
+            ("native", Vec::new()),
+            ("frames", vec![VideoEffect {kind: VideoEffectKind::Mask, start: 0.0, end: 4.0,
+                mask_style: VideoMaskStyle::Blur, strength: 1.0, ..Default::default()}]),
+        ] {
+            use super::super::{ExportControl, ExportControlInner, ExportPhase};
+            use std::sync::{Arc, OnceLock, Weak, atomic::{AtomicBool, Ordering}};
+            let slot: Arc<OnceLock<Weak<ExportControlInner>>> = Arc::new(OnceLock::new());
+            let observed = slot.clone();
+            let triggered = Arc::new(AtomicBool::new(false));
+            let cancelled = triggered.clone();
+            let control = ExportControl::new(move |event| {
+                if event.phase == ExportPhase::Rendering && event.progress.is_some_and(|value| value < 1.0) {
+                    if let Some(inner) = observed.get().and_then(Weak::upgrade) {
+                        cancelled.store(ExportControl(inner).request_cancel(), Ordering::Release);
+                    }
+                }
+            });
+            assert!(slot.set(Arc::downgrade(&control.0)).is_ok());
+            let cancelled_path = directory.join(format!("cancelled-{name}.mp4"));
+            let before = std::fs::read(&source_path)?;
+            let started = std::time::Instant::now();
+            let result = platform_export(&source_path, &cancelled_path,
+                &[VideoSegment { start: 0.0, end: 4.0, speed: 1.0 }], &effects, &[],
+                VideoExportPreset::Original, &control.rendering());
+            assert!(triggered.load(Ordering::Acquire), "{name} cancellation must reach a live native pass");
+            assert!(format!("{:#}", result.unwrap_err()).contains(super::super::EXPORT_CANCELLED));
+            assert!(started.elapsed() < std::time::Duration::from_secs(30));
+            assert_eq!(std::fs::read(&source_path)?, before);
+            if cancelled_path.exists() { std::fs::remove_file(&cancelled_path)?; }
+        }
+
         let output = directory.join("edited.mp4");
         let (width, height, duration) = platform_export(
             &source_path,
@@ -544,6 +642,7 @@ mod tests {
             ],
             &[],
             VideoExportPreset::Original,
+            &super::super::ExportControl::default().rendering(),
         )?;
         assert_eq!((width, height), (320, 180));
         assert!(
@@ -669,6 +768,7 @@ mod tests {
                 },
             ],
             VideoExportPreset::Original,
+            &super::super::ExportControl::default().rendering(),
         )?;
         let annotated_clip =
             MediaClip::CreateFromFileAsync(&storage_file(&annotation_output)?)?.join()?;
@@ -759,6 +859,7 @@ mod tests {
             ],
             &[],
             VideoExportPreset::Original,
+            &super::super::ExportControl::default().rendering(),
         )?;
         let styled = MediaComposition::new()?;
         let styled_clip = MediaClip::CreateFromFileAsync(&storage_file(&styled_output)?)?.join()?;
@@ -850,6 +951,7 @@ mod tests {
             }],
             &[],
             VideoExportPreset::Original,
+            &super::super::ExportControl::default().rendering(),
         )?;
         assert!(
             (speed_duration - 2.9).abs() < 0.12,

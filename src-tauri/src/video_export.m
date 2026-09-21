@@ -18,6 +18,16 @@ typedef struct {
     const unsigned char *pixels;
     unsigned pixelWidth, pixelHeight;
 } KiriVideoAnnotation;
+typedef bool (*KiriExportProgress)(const void *context, double progress);
+
+static bool KiriExportContinue(KiriExportProgress progress, const void *context, double value,
+                               char *error, size_t capacity) {
+    if (progress && !progress(context, value)) {
+        snprintf(error, capacity, "VIDEO_EXPORT_CANCELLED");
+        return false;
+    }
+    return true;
+}
 
 static CIImage *KiriPlacedAnnotation(CIImage *image, KiriVideoAnnotation annotation, CGRect extent) {
     CGRect rect = CGRectMake(extent.origin.x + annotation.x * extent.size.width,
@@ -29,11 +39,13 @@ static CIImage *KiriPlacedAnnotation(CIImage *image, KiriVideoAnnotation annotat
 
 // Called only on a background worker; the source is immutable and output is staging.
 bool kiri_export_video(const char *source, const char *output, const KiriVideoSegment *segments,
-                       size_t count, const KiriVideoEffect *effects, size_t effectCount, const KiriVideoAnnotation *annotations, size_t annotationCount, const size_t *order, size_t orderCount, unsigned maxEdge, char *error, size_t capacity) {
+                       size_t count, const KiriVideoEffect *effects, size_t effectCount, const KiriVideoAnnotation *annotations, size_t annotationCount, const size_t *order, size_t orderCount, unsigned maxEdge,
+                       KiriExportProgress progress, const void *progressContext, char *error, size_t capacity) {
     @autoreleasepool {
         @try {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+            if (!KiriExportContinue(progress, progressContext, -1, error, capacity)) return false;
             AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:
                 [[NSFileManager defaultManager] stringWithFileSystemRepresentation:source length:strlen(source)]] options:nil];
             double duration = CMTimeGetSeconds(asset.duration);
@@ -48,6 +60,7 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
             NSMutableArray<AVMutableCompositionTrack *> *audioOutputs = [NSMutableArray array];
             CMTime cursor = kCMTimeZero;
             for (size_t index = 0; index < count; index++) {
+                if (!KiriExportContinue(progress, progressContext, -1, error, capacity)) return false;
                 double start = segments[index].start, end = segments[index].end, speed = segments[index].speed;
                 if (!isfinite(start) || !isfinite(end) || start < 0 || !isfinite(speed) || speed < 0.25 || speed > 4 || end <= start || start >= duration || end > duration + 0.05) {
                     snprintf(error, capacity, "Invalid or overlapping video segments."); return false;
@@ -110,6 +123,7 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
             }
             NSMutableArray<CIImage *> *annotationImages = [NSMutableArray arrayWithCapacity:annotationCount];
             for (size_t index = 0; index < annotationCount; index++) {
+                if (!KiriExportContinue(progress, progressContext, -1, error, capacity)) return false;
                 KiriVideoAnnotation annotation = annotations[index];
                 NSData *data = [NSData dataWithBytes:annotation.pixels length:(size_t)annotation.pixelWidth * annotation.pixelHeight * 4];
                 CGDataProviderRef provider = CGDataProviderCreateWithCFData((__bridge CFDataRef)data);
@@ -278,13 +292,22 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
             session.outputFileType = AVFileTypeMPEG4;
             session.shouldOptimizeForNetworkUse = YES;
             dispatch_semaphore_t done = dispatch_semaphore_create(0);
+            if (!KiriExportContinue(progress, progressContext, -1, error, capacity)) return false;
             [session exportAsynchronouslyWithCompletionHandler:^{ dispatch_semaphore_signal(done); }];
-            if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 3600LL * NSEC_PER_SEC))) {
-                [session cancelExport];
-                // Wait for cancellation to release its output before Rust removes staging.
-                dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
-                snprintf(error, capacity, "MP4 export timed out."); return false;
+            double deadline = NSProcessInfo.processInfo.systemUptime + 3600;
+            bool cancelled = false, timedOut = false;
+            while (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 100LL * NSEC_PER_MSEC))) {
+                if (!cancelled && !timedOut) {
+                    cancelled = !KiriExportContinue(progress, progressContext, session.progress, error, capacity);
+                    timedOut = NSProcessInfo.processInfo.systemUptime >= deadline;
+                    if (cancelled || timedOut) [session cancelExport];
+                }
             }
+            // The completion handler owns the native resources until it fires. Do
+            // not return on cancellation before the output handle has been released.
+            if (cancelled) return false;
+            if (timedOut) { snprintf(error, capacity, "MP4 export timed out."); return false; }
+            if (!KiriExportContinue(progress, progressContext, session.progress, error, capacity)) return false;
             if (session.status != AVAssetExportSessionStatusCompleted) {
                 snprintf(error, capacity, "%s", (session.error.localizedDescription ?: @"MP4 export failed.").UTF8String);
                 return false;

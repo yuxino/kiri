@@ -407,6 +407,27 @@ removed on failure and the original asset is never overwritten. The library
 receives only completed output. High quality retains source dimensions; Share
 and Small cap the longest edge at 1080 and 720 pixels, without upscaling.
 
+The viewer assigns a UUID request ID to each export. Window-scoped
+`video-export-progress` events report preparation, measured native rendering
+progress and final saving. `cancel_video_export` accepts only a matching viewer
+and request. A shared control keeps cancellation and the final import gate
+mutually exclusive; the single-flight lease remains held until native work and
+cleanup finish. AVFoundation sessions and Windows asynchronous operations are
+cancelled at the platform boundary. Snapshot copying and frame/audio passes also
+check cancellation. The final library-save phase is not cancellable.
+
+Editable state lives separately in optional `VideoProjects/<asset UUID>.json`
+files ([ADR 0045](adr/0045-local-video-projects-and-cancellable-export.md)). The
+schema preserves source-time segments, effects, annotation marks, embedded PNG
+stickers, the output preset and playhead. `video_project_commands` restricts
+load/save to the asset's viewer and runs validation/storage off the main thread
+under the library lock. Atomic writes require the current revision, which binds
+the prior document, library identity/generation and source size/mtime metadata.
+Corrupt documents and changed sources are protected from automatic overwrite.
+The frontend uses a debounced serial save queue, includes pending text snapshots
+without committing IME edits, and flushes before normal close. Projects migrate
+with the library, survive Trash, and are cleaned after durable permanent deletion.
+
 Timed annotations carry cropped PNG overlays or mosaic alpha masks with source-time
 ranges and normalized geometry. Native validation limits annotations to 128, PNG
 dimensions to 4096, encoded payloads to 64 MiB and decoded storage to 128 MiB.

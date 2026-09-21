@@ -1,6 +1,7 @@
 //! Bounded-memory, timestamp-preserving native annotation prepass.
 use super::super::{
     composition_order, PreparedVideoAnnotation, VideoAnnotationKind, VideoEffect, VideoEffectKind, VideoMaskStyle,
+    ExportProgressRange,
 };
 use anyhow::{bail, Context, Result};
 use image::{imageops, RgbaImage};
@@ -16,7 +17,9 @@ pub(super) fn render(
     annotations: &[PreparedVideoAnnotation],
     effects: &[VideoEffect],
     profile: &MediaEncodingProfile,
+    progress: &ExportProgressRange,
 ) -> Result<()> {
+    progress.check()?;
     let order = composition_order(effects, annotations);
     // Reader owns the Media Foundation startup guard until writer resources drop.
     let reader = crate::gif::WindowsVideoReader::open(source)?;
@@ -59,6 +62,7 @@ pub(super) fn render(
             .context("Video has no decodable frames")?;
         let mut first = true;
         loop {
+            progress.check()?;
             let following = reader.read_frame()?;
             let start = if first { 0 } else { pending.0.max(0) };
             first = false;
@@ -97,6 +101,7 @@ pub(super) fn render(
                 for interval in boundaries.windows(2) {
                     let mut timestamp = interval[0];
                     while timestamp < interval[1] {
+                        progress.check()?;
                         // Long VFR frames need intermediate camera positions during
                         // ramps. Stream these samples instead of allocating a timeline.
                         let next = if effect_is_animating(effects, timestamp) {
@@ -111,6 +116,7 @@ pub(super) fn render(
                         paint_layers(&mut frame, timestamp, annotations, effects, &order)?;
                         write_frame(&writer, stream, &frame, timestamp, next - timestamp)?;
                         timestamp = next;
+                        progress.report(timestamp as f64 / duration as f64);
                     }
                 }
             }
@@ -125,10 +131,13 @@ pub(super) fn render(
             }
             pending = next;
         }
+        progress.check()?;
         writer
             .Finalize()
             .context("Could not finalize annotated Windows video")?;
     }
+    progress.check()?;
+    progress.report(1.0);
     Ok(())
 }
 

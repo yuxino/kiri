@@ -7,3 +7,9 @@
 .kiri-video-export-panel .kiri-video-export-settings-title,.kiri-video-export-panel .kiri-video-export-settings-detail {display:flex;}
 .kiri-video-editor-heading .kiri-video-export-panel span {display:initial;}
 .kiri-video-export-panel .kiri-video-export-status:empty {display:none;}
+.kiri-video-export-panel .kiri-video-export-status {justify-content:space-between;}
+.kiri-video-export-progress {height:4px;border-radius:3px;overflow:hidden;background:var(--kiri-group-fill);}
+.kiri-video-export-progress i {display:block;height:100%;background:var(--kiri-label);border-radius:3px;transition:width .15s linear;}
+.kiri-video-export-progress[data-indeterminate=true] i {animation:kiri-export-wait 1.3s ease-in-out infinite alternate;}
+@keyframes kiri-export-wait {from{transform:translateX(0);}to{transform:translateX(230%);}}
+@media(prefers-reduced-motion:reduce){.kiri-video-export-progress[data-indeterminate=true] i{animation:none;}.kiri-video-export-progress i{transition:none;}}

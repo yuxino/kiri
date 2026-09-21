@@ -11,7 +11,7 @@ Kiri keeps one managed library in the operating-system application-data
 location by default. Settings can copy it to another local directory or
 external disk and switch to that copy; the previous copy is retained. The
 selected location contains the library index, captures, and editable screenshot
-projects.
+and video projects.
 
 If a completed recording cannot be imported into the active library, Kiri
 keeps it in a local recovery area until a later import succeeds.
@@ -27,6 +27,16 @@ and remain recoverable when the screenshot is moved to Trash.
 They are removed when that screenshot is permanently deleted. Older flattened
 screenshots do not contain reconstructable annotation data; starting a new edit
 uses the current flattened image as its source.
+
+## Editable video projects
+
+Video edits save automatically as a local project alongside the original clip.
+Projects contain cut points, speed settings, timed effects, annotation text and
+embedded image stickers. They do not overwrite the original video, which can
+still contain information hidden by masks in an exported copy. Projects are
+never uploaded by the editing feature. They move with the managed library,
+remain recoverable in Trash, and are removed when their source asset is
+permanently deleted. Exported MP4 copies are separate flattened videos.
 
 ## Local media processing
 

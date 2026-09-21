@@ -100,3 +100,4 @@ development.
 - [0042 — Readable tools and explicit layer order](adr/0042-readable-tools-and-layer-order.md)
 - [0043 — Editable video annotation objects](adr/0043-editable-video-annotation-objects.md)
 - [0044 — Completing an edit without losing the user's place](adr/0044-video-editing-completion-and-selection.md)
+- [0045 — Local video projects and cancellable export](adr/0045-local-video-projects-and-cancellable-export.md)

@@ -7,3 +7,4 @@ pub mod ocr_provider;
 pub mod policy;
 pub mod recording_recovery;
 pub mod shortcut;
+pub mod video_project;

@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AnnotationDocumentV1, AppearanceSettings } from "../annotation/model";
 import type { CropPixels } from "../annotation/crop.js";
 import { kiriResourceUrl } from "./kiri-resource-url.js";
+import type {VideoProject,VideoProjectSnapshot} from "../windows/video-project";
 
 // ---------------------------------------------------------------------------
 // Shared DTO types (mirror src-tauri/src/commands.rs)
@@ -244,8 +245,11 @@ export const api = {
   openAsset: (id: string) => invoke<void>("open_asset", { id }),
   openEditor: (id: string) => invoke<void>("open_editor", { id }),
   revealAsset: (id: string) => invoke<void>("reveal_asset", { id }),
-  exportVideoCopy: (id: string, segments: {start: number; end: number}[], effects: import("../windows/video-effects").VideoEffect[], annotations: import("../windows/video-annotation-render").RasterizedVideoAnnotation[], preset: "original" | "share" | "small") =>
-    invoke<string>("export_video_copy", { id, segments, effects: effects.map(({id: _id, ...effect}) => effect), annotations, preset }),
+  loadVideoProject: (id:string) => invoke<VideoProjectSnapshot>("load_video_project",{id}),
+  saveVideoProject: (id:string,revision:string,project:VideoProject) => invoke<VideoProjectSnapshot>("save_video_project",{id,revision,project}),
+  exportVideoCopy: (id: string, segments: {start: number; end: number;speed?:number}[], effects: import("../windows/video-effects").VideoEffect[], annotations: import("../windows/video-annotation-render").RasterizedVideoAnnotation[], preset: "original" | "share" | "small",requestId?:string) =>
+    invoke<string>("export_video_copy", { id, segments, effects: effects.map(({id: _id, ...effect}) => effect), annotations, preset,requestId }),
+  cancelVideoExport: (requestId:string) => invoke<boolean>("cancel_video_export",{requestId}),
   convertToGif: (id: string) => invoke<void>("convert_to_gif", { id }),
 
   startCapture: () => invoke<CaptureContextDto>("start_capture"),

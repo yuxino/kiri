@@ -141,6 +141,7 @@ keyring = { version = "3.6.3", default-features = false, features = ["apple-nati
 [target.'cfg(windows)'.dependencies]
 xcap = { version = "0.9", default-features = false, features = ["image"] }
 cpal = "0.18"
+windows-future = "0.3.2"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",

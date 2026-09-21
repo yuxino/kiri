@@ -67,6 +67,9 @@ Release validation still open:
 - [x] Thumbnail video timeline with draggable clip edges, split/delete, undo/redo, and non-destructive library copies
 - [x] Timed zoom regions and opaque privacy masks in preview and native MP4 export
 - [x] Native MP4 export size presets and explicit five-second microphone checks
+- [x] Local video projects with autosave, reopen-to-resume, and protected close
+- [x] Native video export progress and cancellation before final library saving
+- [ ] Multiple video and image sources in one editable timeline
 - [ ] Inline video and GIF playback
 - [ ] Recording duration and file-size safeguards
 - [ ] Smart collections
