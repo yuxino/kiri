@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createVideoProjectSaveQueue,sameVideoProjectValue} from '../src/windows/video-project-save.js';
+import {installVideoProjectShortcuts} from '../src/windows/video-project-shortcuts.js';
 
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b;});return{promise,resolve,reject};};
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
@@ -106,4 +107,75 @@ test('debounced updates write once, and disposal cancels a pending write',async 
   await new Promise(resolve=>setTimeout(resolve,30));assert.deepEqual(calls,[{edit:'c'}]);
   queue.enqueue({edit:'disposed'});queue.dispose();
   await new Promise(resolve=>setTimeout(resolve,30));assert.equal(calls.length,1);
+});
+
+// An inline textarea stops bubbling after its own keyboard handler. Keep this
+// phase-aware harness small: a bubble-only regression must miss the shortcut.
+function textEditorSurface(){
+  const listeners=[];
+  return{
+    addEventListener(type,callback,capture){listeners.push({type,callback,capture});},
+    removeEventListener(type,callback,capture){const index=listeners.findIndex(item=>item.type===type&&item.callback===callback&&item.capture===capture);if(index>=0)listeners.splice(index,1);},
+    key(options){
+      const event={key:'',metaKey:false,ctrlKey:false,altKey:false,shiftKey:false,isComposing:false,repeat:false,keyCode:0,defaultPrevented:false,cancelBubble:false,
+        preventDefault(){this.defaultPrevented=true;},stopPropagation(){this.cancelBubble=true;},...options};
+      for(const item of listeners.filter(item=>item.capture===true))item.callback(event);
+      const reachedTextEditor=!event.cancelBubble;
+      if(reachedTextEditor)event.stopPropagation();
+      if(!event.cancelBubble)for(const item of listeners.filter(item=>item.capture!==true))item.callback(event);
+      return{event,reachedTextEditor};
+    },
+  };
+}
+
+test('Cmd/Ctrl+S commits the current text before flushing, despite a textarea consuming bubble events',async t=>{
+  for(const modifier of ['metaKey','ctrlKey']){
+    const {queue,calls}=fixture(t),surface=textEditorSurface();
+    let saving;
+    const stop=installVideoProjectShortcuts(surface,{save:()=>{queue.enqueue({edit:'刚输入而未点完成的文字'});saving=queue.flush();}});
+    t.after(stop);
+    const handled=surface.key({key:'s',[modifier]:true});
+    assert.equal(handled.reachedTextEditor,false);assert.equal(handled.event.defaultPrevented,true);
+    assert.equal(calls.length,1);assert.deepEqual(calls[0].project,{edit:'刚输入而未点完成的文字'});
+    calls[0].resolve(result('text-saved'));assert.equal(await saving,true);
+  }
+});
+
+test('Ctrl+W from the text field goes through the close flush and waits for the latest edit',async t=>{
+  const {queue,calls}=fixture(t),surface=textEditorSurface();let closed=0,closing;
+  t.after(installVideoProjectShortcuts(surface,{close:()=>{
+    queue.enqueue({edit:'latest inline text'});
+    closing=queue.flush().then(saved=>{if(saved)closed++;});
+  }}));
+  const handled=surface.key({key:'w',ctrlKey:true});
+  assert.equal(handled.reachedTextEditor,false);assert.equal(closed,0);
+  assert.deepEqual(calls[0].project,{edit:'latest inline text'});
+  calls[0].resolve(result('closed-text'));await closing;assert.equal(closed,1);
+});
+
+test('video capture shortcuts leave Escape, native undo, IME and modified variants with the text editor',t=>{
+  const surface=textEditorSurface();let invoked=0;
+  t.after(installVideoProjectShortcuts(surface,{save:()=>invoked++,close:()=>invoked++}));
+  for(const options of [
+    {key:'Escape'},{key:'z',metaKey:true},{key:'z',ctrlKey:true},{key:'z',metaKey:true,shiftKey:true},
+    {key:'s'},{key:'s',ctrlKey:true,isComposing:true},{key:'w',metaKey:true,isComposing:true},
+    {key:'s',ctrlKey:true,keyCode:229},{key:'s',ctrlKey:true,altKey:true},{key:'w',metaKey:true,shiftKey:true},
+  ]){
+    const outcome=surface.key(options);assert.equal(outcome.reachedTextEditor,true);
+    assert.equal(outcome.event.defaultPrevented,false);
+  }
+  assert.equal(invoked,0);
+});
+
+test('video shortcut cleanup and repeat handling avoid duplicate writes or close requests',()=>{
+  const surface=textEditorSurface();let saved=0,closed=0;
+  const stopClose=installVideoProjectShortcuts(surface,{close:()=>closed++});
+  const stopSave=installVideoProjectShortcuts(surface,{save:()=>saved++});
+  surface.key({key:'s',metaKey:true});surface.key({key:'s',metaKey:true,repeat:true});
+  surface.key({key:'w',ctrlKey:true});surface.key({key:'w',ctrlKey:true,repeat:true});
+  assert.equal(saved,1);assert.equal(closed,1);
+  stopClose();stopSave();
+  assert.equal(surface.key({key:'s',metaKey:true}).reachedTextEditor,true);
+  assert.equal(surface.key({key:'w',ctrlKey:true}).reachedTextEditor,true);
+  assert.equal(saved,1);assert.equal(closed,1);
 });

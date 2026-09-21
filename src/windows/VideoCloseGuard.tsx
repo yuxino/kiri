@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from "react";
 import {getCurrentWindow} from "@tauri-apps/api/window";
 import {t} from "../i18n";
+import {installVideoProjectShortcuts} from "./video-project-shortcuts.js";
 
 /** Ordinary closes flush autosave silently. Only blocked closes need a dialog. */
 export function VideoCloseGuard({busy,prepareClose}:{busy:boolean;prepareClose():Promise<boolean>}) {
@@ -28,7 +29,8 @@ export function VideoCloseGuard({busy,prepareClose}:{busy:boolean;prepareClose()
       if(disposed||allowClose.current)return;
       event.preventDefault();void requestClose.current();
     });
-    return()=>{disposed=true;void subscription.then(stop=>stop()).catch(()=>{});};
+    const stopShortcut=installVideoProjectShortcuts(window,{close:()=>void requestClose.current()});
+    return()=>{disposed=true;stopShortcut();void subscription.then(stop=>stop()).catch(()=>{});};
   },[]);
   useEffect(()=>{if(reason)dialog.current?.showModal();else dialog.current?.close();},[reason]);
   useEffect(()=>{if(reason==="export"&&!busy)setReason(null);},[reason,busy]);

@@ -20,6 +20,7 @@ import {VideoVisibleTime} from "./VideoVisibleTime";
 import {useVideoProject} from "./useVideoProject";
 import {sameVideoProjectValue} from "./video-project-save.js";
 import {hasVideoEdits,type VideoEdit,type VideoProject,type VideoExportProgress} from "./video-project";
+import {installVideoProjectShortcuts} from "./video-project-shortcuts.js";
 import "./VideoProjectStatus.css";
 
 import {importVideoSticker,rasterizeVideoStickers,type VideoSticker} from "./video-stickers";
@@ -351,14 +352,14 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     if(!editing) return;
     const onKey=(event:KeyboardEvent)=>{
       const target=event.target as HTMLElement;
-      if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="s"&&!event.isComposing){event.preventDefault();if(!busy)void flushProject();return;}
       if(event.defaultPrevented||target.closest("input,select,textarea,[contenteditable=true],[role=listbox]")) return;
       if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="z") {event.preventDefault();undo(event.shiftKey);}
       else if(event.code==="Space" && !target.closest("[role=dialog],summary")) {event.preventDefault();playEdit();}
       else if(event.key.toLowerCase()==="s" && !event.metaKey && !event.ctrlKey) {event.preventDefault();split();}
       else if(event.key==="Delete"||event.key==="Backspace") {event.preventDefault();removeSelection();}
     };
-    window.addEventListener("keydown",onKey); return()=>window.removeEventListener("keydown",onKey);
+    const stopProjectShortcut=installVideoProjectShortcuts(window,{save:()=>{if(!busy)void flushProject();}});
+    window.addEventListener("keydown",onKey); return()=>{stopProjectShortcut();window.removeEventListener("keydown",onKey);};
   });
 
   function dragHandle(event:PointerEvent<HTMLDivElement>,index:number,edge:"start"|"end") {
