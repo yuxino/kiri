@@ -97,7 +97,7 @@ pub struct SystemSecretStore;
 
 impl SecretStore for SystemSecretStore {
     fn get(&self, account: &str) -> Result<Option<SecretString>, CredentialError> {
-        #[cfg(any(target_os = "macos", windows))]
+        #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
         {
             let entry = keyring::Entry::new(CREDENTIAL_SERVICE, account)
                 .map_err(|_| CredentialError::Unavailable)?;
@@ -107,7 +107,7 @@ impl SecretStore for SystemSecretStore {
                 Err(_) => Err(CredentialError::Unavailable),
             }
         }
-        #[cfg(not(any(target_os = "macos", windows)))]
+        #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
         {
             let _ = account;
             Err(CredentialError::Unavailable)
@@ -115,7 +115,7 @@ impl SecretStore for SystemSecretStore {
     }
 
     fn set(&self, account: &str, secret: &SecretString) -> Result<(), CredentialError> {
-        #[cfg(any(target_os = "macos", windows))]
+        #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
         {
             let entry = keyring::Entry::new(CREDENTIAL_SERVICE, account)
                 .map_err(|_| CredentialError::Unavailable)?;
@@ -123,7 +123,7 @@ impl SecretStore for SystemSecretStore {
                 .set_password(secret.expose_secret())
                 .map_err(|_| CredentialError::Unavailable)
         }
-        #[cfg(not(any(target_os = "macos", windows)))]
+        #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
         {
             let _ = (account, secret);
             Err(CredentialError::Unavailable)
@@ -131,7 +131,7 @@ impl SecretStore for SystemSecretStore {
     }
 
     fn delete(&self, account: &str) -> Result<(), CredentialError> {
-        #[cfg(any(target_os = "macos", windows))]
+        #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
         {
             let entry = keyring::Entry::new(CREDENTIAL_SERVICE, account)
                 .map_err(|_| CredentialError::Unavailable)?;
@@ -140,7 +140,7 @@ impl SecretStore for SystemSecretStore {
                 Err(_) => Err(CredentialError::Unavailable),
             }
         }
-        #[cfg(not(any(target_os = "macos", windows)))]
+        #[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
         {
             let _ = account;
             Err(CredentialError::Unavailable)

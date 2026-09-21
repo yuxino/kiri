@@ -66,7 +66,7 @@
   "3-second countdown": "3秒カウントダウン",
   "System audio": "システム音声",
   "Microphone": "マイク",
-  "Requires macOS 15": "macOS 15 が必要",
+  "Unavailable on this platform": "このプラットフォームでは利用できません",
   "Show pointer": "ポインタを表示",
   "Highlight clicks": "クリックを強調",
   "Start Recording": "録画を開始",

@@ -33,9 +33,10 @@ uses the current flattened image as its source.
 Kiri records, merges paused segments, generates video thumbnails, and converts
 MP4 files to GIF with operating-system media frameworks. macOS uses
 AVFoundation and ImageIO; Windows uses Media Foundation and Windows imaging
-components. Kiri does not download or execute FFmpeg or another third-party
-media binary. Screenshots, recordings, filenames, library metadata,
-credentials, and media bytes remain on the device during these operations.
+components; Linux uses system-installed GStreamer plugins. Kiri does not
+download or execute FFmpeg or another third-party media binary. Screenshots,
+recordings, filenames, library metadata, credentials, and media bytes remain on
+the device during these operations.
 
 ## Manual update checks
 
@@ -92,8 +93,8 @@ card; users should only configure endpoints they trust.
 
 ## Credentials and configuration
 
-API keys are entered inside Kiri and stored in macOS Keychain or Windows
-Credential Manager. Kiri's profile JSON stores only non-secret metadata such
+API keys are entered inside Kiri and stored in macOS Keychain, Windows
+Credential Manager, or the Linux Secret Service. Kiri's profile JSON stores only non-secret metadata such
 as a profile name, base URL, and model. API keys are not returned to the UI,
 written to logs or plaintext configuration, or loaded from environment
 variables.

@@ -13,6 +13,8 @@ mod media_import;
 mod microphone;
 #[cfg(target_os = "macos")]
 mod macos_media;
+#[cfg(target_os = "linux")]
+mod linux_media;
 mod ocr;
 mod ocr_commands;
 mod ocr_controller;
@@ -216,6 +218,7 @@ pub fn run() {
             commands::mic_supported,
             microphone::microphone_check,
             microphone::stop_microphone_check,
+            commands::platform_capabilities,
             commands::log_frontend_error,
             commands::get_locale,
             commands::get_language,
@@ -303,13 +306,41 @@ fn install_macos_app_icon() -> std::io::Result<()> {
 pub(crate) fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
     let shortcut = capture_shortcut();
-    app.global_shortcut()
-        .register(shortcut)
-        .map_err(|e| tauri::Error::Anyhow(e.into()))?;
-    log::info!(
-        "[shortcut] registered {}",
-        crate::core::shortcut::KIRI_CAPTURE.display_label()
-    );
+
+    // X11-only grab. On Hyprland/Wayland it often "succeeds" via XWayland,
+    // spews CapsLock mapping noise, and never receives the real key events.
+    let skip_plugin = cfg!(target_os = "linux")
+        && std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some();
+    if skip_plugin {
+        log::info!(
+            "[shortcut] skipping X11 plugin grab on Hyprland; using compositor bind for {}",
+            crate::core::shortcut::KIRI_CAPTURE.display_label()
+        );
+    } else {
+        match app.global_shortcut().register(shortcut) {
+            Ok(()) => log::info!(
+                "[shortcut] registered {} (plugin)",
+                crate::core::shortcut::KIRI_CAPTURE.display_label()
+            ),
+            Err(error) => log::warn!(
+                "[shortcut] plugin registration failed for {}: {error}",
+                crate::core::shortcut::KIRI_CAPTURE.display_label()
+            ),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let handle = app.clone();
+        match crate::platform::linux::install_compositor_capture_hotkey(move || {
+            schedule_capture_start(&handle, "hyprland-bind");
+        }) {
+            Ok(true) => {}
+            Ok(false) => log::info!("[shortcut] no Wayland compositor hotkey backend for this session"),
+            Err(error) => log::warn!("[shortcut] compositor hotkey install failed: {error}"),
+        }
+    }
+
     Ok(())
 }
 
@@ -325,7 +356,15 @@ fn capture_shortcut() -> tauri_plugin_global_shortcut::Shortcut {
 
 pub(crate) fn capture_shortcut_is_registered(app: &tauri::AppHandle) -> bool {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    app.global_shortcut().is_registered(capture_shortcut())
+    let plugin_registered = app.global_shortcut().is_registered(capture_shortcut());
+    #[cfg(target_os = "linux")]
+    {
+        plugin_registered || crate::platform::linux::compositor_hotkey_is_active()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        plugin_registered
+    }
 }
 
 /// Installs the global click monitor for the click ripple. The monitor uses
@@ -373,10 +412,10 @@ pub fn ensure_click_monitor(app: &tauri::AppHandle) -> tauri::Result<()> {
                 _ => return,
             };
             // Platform callbacks deliver platform-native global coordinates:
-            // macOS Quartz bottom-left points; Windows physical pixels.
+            // macOS Quartz bottom-left points; Windows/Linux physical pixels.
             #[cfg(target_os = "macos")]
             let (gx, gy) = (x, main_height - y);
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "linux"))]
             let (gx, gy) = (x / scale, y / scale);
             #[cfg(target_os = "macos")]
             let _ = scale;
@@ -491,13 +530,13 @@ fn schedule_capture_start(app: &tauri::AppHandle, source: &'static str) {
 
     let handle = app.clone();
 
-    #[cfg(target_os = "windows")]
+    #[cfg(windows)]
     {
         // Desktop capture and WebView2 controller creation must not occupy the
         // Tauri event-loop thread. A slow frame otherwise looks like an app
         // hang, and a second controller can wait for a COM callback that needs
         // the main STA to keep pumping messages.
-        if let Err(error) = spawn_windows_capture_start(move || {
+        if let Err(error) = spawn_capture_start(move || {
             // Keep the owned permit for the entire invocation. Drop
             // reopens scheduling on every success and failure path.
             let _permit = permit;
@@ -509,7 +548,22 @@ fn schedule_capture_start(app: &tauri::AppHandle, source: &'static str) {
         }
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    {
+        // Portal screenshot waits off the GTK thread so the app stays responsive.
+        // Overlay creation must return to the main thread: tao panics if a GTK
+        // window request runs against an unrealized GdkWindow.
+        if let Err(error) = spawn_capture_start(move || {
+            let _permit = permit;
+            if let Err(error) = commands::start_linux_capture_from_shortcut(handle) {
+                log::warn!("[{source}] capture start returned: {error}");
+            }
+        }) {
+            log::warn!("[{source}] could not spawn capture start: {error}");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
     {
         let trigger = handle.clone();
         if let Err(error) = trigger.run_on_main_thread(move || {
@@ -527,8 +581,8 @@ fn schedule_capture_start(app: &tauri::AppHandle, source: &'static str) {
     }
 }
 
-#[cfg(target_os = "windows")]
-fn spawn_windows_capture_start<F>(task: F) -> std::io::Result<std::thread::JoinHandle<()>>
+#[cfg(any(windows, target_os = "linux"))]
+fn spawn_capture_start<F>(task: F) -> std::io::Result<std::thread::JoinHandle<()>>
 where
     F: FnOnce() + Send + 'static,
 {
@@ -549,12 +603,12 @@ fn tray_labels(language: &str) -> (&'static str, &'static str, &'static str) {
 mod tests {
     use super::{tray_labels, tray_menu_entries};
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(windows, target_os = "linux"))]
     #[test]
-    fn windows_capture_start_uses_its_named_background_thread() {
+    fn capture_start_uses_its_named_background_thread() {
         let caller = std::thread::current().id();
         let (sender, receiver) = std::sync::mpsc::channel();
-        let worker = super::spawn_windows_capture_start(move || {
+        let worker = super::spawn_capture_start(move || {
             sender
                 .send((
                     std::thread::current().id(),

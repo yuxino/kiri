@@ -228,6 +228,11 @@ pub fn video_first_frame(video: &Path) -> Option<Vec<u8>> {
     crate::gif::video_first_frame(video, MAX_THUMBNAIL_EDGE).ok()
 }
 
+#[cfg(target_os = "linux")]
+pub fn video_first_frame(video: &Path) -> Option<Vec<u8>> {
+    crate::linux_media::video_first_frame_png(video, MAX_THUMBNAIL_EDGE).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
