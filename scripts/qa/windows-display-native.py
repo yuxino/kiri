@@ -59,7 +59,7 @@ def monitors():
     return found
 
 
-def move_display(device, x, y, primary=False, resize=True):
+def move_display(device, x, y, primary=False, resize=True, deferred=False):
     mode = DevMode(size=ctypes.sizeof(DevMode))
     if not u.EnumDisplaySettingsW(device, 0xffffffff, ctypes.byref(mode)):
         raise ctypes.WinError(ctypes.get_last_error())
@@ -68,10 +68,12 @@ def move_display(device, x, y, primary=False, resize=True):
     if resize:
         mode.width, mode.height, mode.frequency = 2560, 1440, 60
         mode.fields |= 0x80000 | 0x100000 | 0x400000  # width, height, frequency
-    result = u.ChangeDisplaySettingsExW(device, ctypes.byref(mode), None, 0x10 if primary else 0, None)
+    flags = (0x10 if primary else 0) | (0x10000001 if deferred else 0)
+    result = u.ChangeDisplaySettingsExW(device, ctypes.byref(mode), None, flags, None)
     if result != 0:
-        raise RuntimeError('ChangeDisplaySettingsEx: ' + str(result))
-    time.sleep(2)
+        raise RuntimeError(f'ChangeDisplaySettingsEx {device} ({x}, {y}), primary={primary}, deferred={deferred}: {result}')
+    if not deferred:
+        time.sleep(2)
 
 
 def set_scale(device, percent):
@@ -173,9 +175,14 @@ try:
     # The hosted machine's 1024x768 adapter cannot support high DPI. Use two
     # 1440p OS displays, retaining the original adapter as an additional screen.
     primary, secondary = virtual[:2]
-    move_display(primary['device'], 0, 0, primary=True)
+    move_display(primary['device'], 0, 0, primary=True, deferred=True)
+    move_display(secondary['device'], 2560, 0, deferred=True)
     original = next(m for m in report['environment'] if m['primary'])
-    move_display(original['device'], 0, 1440, resize=False)
+    move_display(original['device'], 0, 1440, resize=False, deferred=True)
+    result = u.ChangeDisplaySettingsExW(None, None, None, 0, None)
+    if result:
+        raise RuntimeError('Apply complete display layout: ' + str(result))
+    time.sleep(2)
     primary = next(m for m in monitors() if m['device'] == primary['device'])
     report['test_primary'] = primary
     app = subprocess.Popen([str(exe)])
