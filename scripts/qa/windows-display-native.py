@@ -59,14 +59,14 @@ def monitors():
     return found
 
 
-def move_display(device, x, y):
+def move_display(device, x, y, primary=False):
     mode = DevMode(size=ctypes.sizeof(DevMode))
     if not u.EnumDisplaySettingsW(device, 0xffffffff, ctypes.byref(mode)):
         raise ctypes.WinError(ctypes.get_last_error())
     mode.x, mode.y = x, y
-    mode.width, mode.height, mode.frequency = 1920, 1080, 60
+    mode.width, mode.height, mode.frequency = 2560, 1440, 60
     mode.fields = 0x20 | 0x80000 | 0x100000 | 0x400000  # position, width, height, frequency
-    result = u.ChangeDisplaySettingsExW(device, ctypes.byref(mode), None, 0, None)
+    result = u.ChangeDisplaySettingsExW(device, ctypes.byref(mode), None, 0x10 if primary else 0, None)
     if result != 0:
         raise RuntimeError('ChangeDisplaySettingsEx: ' + str(result))
     time.sleep(2)
@@ -165,24 +165,29 @@ def overlay():
 
 
 try:
-    primary = next(m for m in report['environment'] if m['primary'])
-    secondary = next((m for m in report['environment'] if not m['primary']), None)
-    if not secondary:
-        raise RuntimeError('No OS-level secondary display; acceptance cannot run')
+    virtual = [m for m in report['environment'] if not m['primary']]
+    if len(virtual) < 2:
+        raise RuntimeError('Two OS-level virtual displays are required for mixed-DPI acceptance')
+    # The hosted machine's 1024x768 adapter cannot support high DPI. Use two
+    # 1440p OS displays, retaining the original adapter as an additional screen.
+    primary, secondary = virtual[:2]
+    move_display(primary['device'], 0, 0, primary=True)
+    primary = next(m for m in monitors() if m['device'] == primary['device'])
+    report['test_primary'] = primary
     app = subprocess.Popen([str(exe)])
     wait_for(lambda: Desktop(backend='uia').windows(process=app.pid, visible_only=True))
     time.sleep(2)
     layouts = [(f'{name}-primary{primary_scale}-secondary{scale}', x, y, primary_scale, scale)
                for primary_scale, scale in [(100, 100), (100, 125), (100, 150), (100, 200), (150, 100)]
-               for name, x, y in [('right', primary['rect'][2], 0), ('left', -1920, 0), ('above', 0, -1080)]]
+               for name, x, y in [('right', primary['rect'][2], 0), ('left', -2560, 0), ('above', 0, -1440)]]
     for layout, x, y, primary_scale, scale in layouts:
         move_display(secondary['device'], x, y)
         set_scale(primary['device'], primary_scale)
         set_scale(secondary['device'], scale)
-        fixture = subprocess.Popen([sys.executable, __file__, '--fixture', str(x), str(y), '1920', '1080'])
+        fixture = subprocess.Popen([sys.executable, __file__, '--fixture', str(x), str(y), '2560', '1440'])
         fixture_windows = wait_for(lambda: Desktop(backend='win32').windows(process=fixture.pid, visible_only=True))
         fixture_window = fixture_windows[0]
-        fixture_window.move_window(x, y, 1920, 1080, repaint=True)
+        fixture_window.move_window(x, y, 2560, 1440, repaint=True)
         fixture_window.set_focus()
         time.sleep(1)
         source = ImageGrab.grab(bbox=(x + 120, y + 180, x + 680, y + 380), all_screens=True).convert('RGB')
@@ -194,7 +199,7 @@ try:
         window = wait_for(overlay)
         rect = window.rectangle()
         actual = [rect.left, rect.top, rect.right, rect.bottom]
-        expected = [x, y, x + 1920, y + 1080]
+        expected = [x, y, x + 2560, y + 1440]
         report['checks'].append({'layout': layout, 'monitors': monitors(), 'overlay': actual, 'expected': expected})
         ImageGrab.grab(bbox=tuple(expected), all_screens=True).save(out / f'{layout}-overlay.png')
         if actual != expected:
@@ -220,6 +225,7 @@ try:
         report['checks'][-1]['pixel_mean_error'] = error
         if error > 2:
             raise RuntimeError(f'{layout}: clipboard differs from actual secondary pixels: {error}')
+        print(f'{layout}: native overlay bounds and clipboard pixels verified (mean error {error})', flush=True)
         fixture.terminate()
         fixture.wait(timeout=10)
         fixture = None
