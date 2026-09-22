@@ -35,6 +35,7 @@ export function VideoCloseGuard({busy,prepareClose}:{busy:boolean;prepareClose()
   useEffect(()=>{if(reason)dialog.current?.showModal();else dialog.current?.close();},[reason]);
   useEffect(()=>{if(reason==="export"&&!busy)setReason(null);},[reason,busy]);
   return <dialog ref={dialog} role="dialog" className="kiri-video-close-dialog"
+    aria-hidden={reason===null}
     aria-labelledby="video-close-title" aria-describedby="video-close-detail"
     onCancel={event=>{event.preventDefault();if(!retrying)setReason(null);}}
     onKeyDown={event=>event.stopPropagation()}>

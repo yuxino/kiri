@@ -37,11 +37,170 @@ static CIImage *KiriPlacedAnnotation(CIImage *image, KiriVideoAnnotation annotat
     return [image imageByApplyingTransform:CGAffineTransformMakeTranslation(rect.origin.x, rect.origin.y)];
 }
 
+static bool KiriAudioError(NSError *failure, NSString *fallback, char *error, size_t capacity) {
+    snprintf(error, capacity, "%s", (failure.localizedDescription ?: fallback).UTF8String);
+    return false;
+}
+
+static bool KiriHasSpeedAudioFrames(CMTimeRange range, double speed) {
+    double seconds = CMTimeGetSeconds(range.duration);
+    return CMTIMERANGE_IS_VALID(range) && isfinite(seconds) && seconds >= MAX(1, speed) / 96000.0;
+}
+
+// AVAssetExportSession's time-pitch mix can intermittently lose samples at rate
+// boundaries. Render changed-rate audio offline first, then insert it at 1x.
+// Both decoding and rendering use fixed-size buffers; long clips stay on disk.
+static AVURLAsset *KiriRenderSpeedAudio(AVAsset *asset, AVAssetTrack *track,
+    CMTimeRange range, double speed, NSURL *directory, double progressStart, double progressEnd,
+    KiriExportProgress progress, const void *context, char *error, size_t capacity) {
+    const double sampleRate = 48000;
+    const AVAudioFrameCount blockSize = 4096;
+    CMAudioFormatDescriptionRef description = (__bridge CMAudioFormatDescriptionRef)track.formatDescriptions.firstObject;
+    const AudioStreamBasicDescription *sourceFormat = description ? CMAudioFormatDescriptionGetStreamBasicDescription(description) : NULL;
+    AVAudioChannelCount channels = sourceFormat ? sourceFormat->mChannelsPerFrame : 2;
+    if (channels == 0 || channels > 32) {
+        KiriAudioError(nil, @"Unsupported audio channel count.", error, capacity); return nil;
+    }
+    AVAudioFormat *format = [[AVAudioFormat alloc] initStandardFormatWithSampleRate:sampleRate channels:channels];
+    NSDictionary *settings = @{AVFormatIDKey: @(kAudioFormatLinearPCM), AVSampleRateKey: @(sampleRate),
+        AVNumberOfChannelsKey: @(channels), AVLinearPCMBitDepthKey: @32,
+        AVLinearPCMIsFloatKey: @YES, AVLinearPCMIsNonInterleaved: @NO};
+    NSString *name = NSUUID.UUID.UUIDString;
+    NSURL *inputURL = [directory URLByAppendingPathComponent:[name stringByAppendingString:@"-input.caf"]];
+    NSURL *outputURL = [directory URLByAppendingPathComponent:[name stringByAppendingString:@"-output.caf"]];
+    NSError *failure = nil;
+    AVAssetReader *reader = [[AVAssetReader alloc] initWithAsset:asset error:&failure];
+    AVAssetReaderTrackOutput *decoded = [[AVAssetReaderTrackOutput alloc] initWithTrack:track outputSettings:settings];
+    decoded.alwaysCopiesSampleData = NO;
+    if (!reader || ![reader canAddOutput:decoded]) {
+        KiriAudioError(failure, @"Could not prepare audio decoding.", error, capacity); return nil;
+    }
+    [reader addOutput:decoded];
+    reader.timeRange = range;
+    AVAudioFile *input = [[AVAudioFile alloc] initForWriting:inputURL settings:settings error:&failure];
+    if (!input) { KiriAudioError(failure, @"Could not stage audio.", error, capacity); return nil; }
+    AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:format frameCapacity:blockSize];
+    NSMutableData *interleaved = [NSMutableData dataWithLength:(size_t)blockSize * channels * sizeof(float)];
+    AVAudioFramePosition wanted = llround(CMTimeGetSeconds(range.duration) * sampleRate), written = 0;
+    AVAudioEngine *engine = nil;
+    @try {
+        if (![reader startReading]) { KiriAudioError(reader.error, @"Could not decode audio.", error, capacity); return nil; }
+        CMSampleBufferRef sample;
+        while (written < wanted && (sample = [decoded copyNextSampleBuffer])) {
+          @autoreleasepool {
+            @try {
+                CMBlockBufferRef bytes = CMSampleBufferGetDataBuffer(sample);
+                const AudioStreamBasicDescription *pcm = CMAudioFormatDescriptionGetStreamBasicDescription(CMSampleBufferGetFormatDescription(sample));
+                if (!bytes || !pcm || pcm->mSampleRate != sampleRate || pcm->mChannelsPerFrame != channels
+                    || pcm->mBytesPerFrame != channels * sizeof(float) || !(pcm->mFormatFlags & kAudioFormatFlagIsFloat)) {
+                    KiriAudioError(nil, @"Could not decode the audio sample format.", error, capacity); return nil;
+                }
+                AVAudioFramePosition position = llround(CMTimeGetSeconds(CMTimeSubtract(CMSampleBufferGetPresentationTimeStamp(sample), range.start)) * sampleRate);
+                AVAudioFramePosition count = (AVAudioFramePosition)(CMBlockBufferGetDataLength(bytes) / pcm->mBytesPerFrame);
+                AVAudioFramePosition offset = MAX(0, written - position);
+                // Preserve real gaps in a track, and trim AAC packet padding using
+                // presentation timestamps rather than assuming contiguous packets.
+                while (written < wanted && (written < position || offset < count)) {
+                    if (!KiriExportContinue(progress, context,
+                        progressStart + (progressEnd - progressStart) * 0.5 * written / wanted, error, capacity)) return nil;
+                    bool silence = written < position;
+                    AVAudioFrameCount frames = (AVAudioFrameCount)MIN(blockSize, MIN(wanted - written,
+                        silence ? position - written : count - offset));
+                    buffer.frameLength = frames;
+                    if (!silence && CMBlockBufferCopyDataBytes(bytes, (size_t)offset * pcm->mBytesPerFrame,
+                        (size_t)frames * pcm->mBytesPerFrame, interleaved.mutableBytes) != kCMBlockBufferNoErr) {
+                        KiriAudioError(nil, @"Could not read decoded audio.", error, capacity); return nil;
+                    }
+                    const float *values = interleaved.bytes;
+                    for (AVAudioChannelCount channel = 0; channel < channels; channel++) {
+                        float *destination = buffer.floatChannelData[channel];
+                        for (AVAudioFrameCount frame = 0; frame < frames; frame++)
+                            destination[frame] = silence ? 0 : values[(size_t)frame * channels + channel];
+                    }
+                    if (![input writeFromBuffer:buffer error:&failure]) {
+                        KiriAudioError(failure, @"Could not stage decoded audio.", error, capacity); return nil;
+                    }
+                    written += frames;
+                    if (!silence) offset += frames;
+                }
+            } @finally { CFRelease(sample); }
+          }
+        }
+        if (reader.status == AVAssetReaderStatusFailed) {
+            KiriAudioError(reader.error, @"Could not decode audio.", error, capacity); return nil;
+        }
+        while (written < wanted) {
+            if (!KiriExportContinue(progress, context,
+                progressStart + (progressEnd - progressStart) * 0.5 * written / wanted, error, capacity)) return nil;
+            buffer.frameLength = (AVAudioFrameCount)MIN(blockSize, wanted - written);
+            for (AVAudioChannelCount channel = 0; channel < channels; channel++)
+                memset(buffer.floatChannelData[channel], 0, buffer.frameLength * sizeof(float));
+            if (![input writeFromBuffer:buffer error:&failure]) {
+                KiriAudioError(failure, @"Could not finish staged audio.", error, capacity); return nil;
+            }
+            written += buffer.frameLength;
+        }
+        input = nil; // Close the PCM writer before opening the streaming reader.
+        if (!KiriExportContinue(progress, context, (progressStart + progressEnd) * 0.5, error, capacity)) return nil;
+        AVAudioFile *file = [[AVAudioFile alloc] initForReading:inputURL error:&failure];
+        if (!file) { KiriAudioError(failure, @"Could not open staged audio.", error, capacity); return nil; }
+        engine = [[AVAudioEngine alloc] init];
+        AVAudioPlayerNode *player = [[AVAudioPlayerNode alloc] init];
+        AVAudioUnitTimePitch *pitch = [[AVAudioUnitTimePitch alloc] init];
+        pitch.rate = speed;
+        [engine attachNode:player]; [engine attachNode:pitch];
+        [engine connect:player to:pitch format:format];
+        [engine connect:pitch to:engine.mainMixerNode format:format];
+        // Offline mode never connects to a microphone or physical audio output.
+        if (![engine enableManualRenderingMode:AVAudioEngineManualRenderingModeOffline format:format
+            maximumFrameCount:blockSize error:&failure]) {
+            KiriAudioError(failure, @"Could not prepare audio speed processing.", error, capacity); return nil;
+        }
+        [player scheduleFile:file atTime:nil completionHandler:nil];
+        if (![engine startAndReturnError:&failure]) {
+            KiriAudioError(failure, @"Could not start audio speed processing.", error, capacity); return nil;
+        }
+        [player play];
+        AVAudioFile *rendered = [[AVAudioFile alloc] initForWriting:outputURL settings:settings error:&failure];
+        if (!rendered) { KiriAudioError(failure, @"Could not save processed audio.", error, capacity); return nil; }
+        AVAudioFramePosition renderFrames = llround(CMTimeGetSeconds(range.duration) * sampleRate / speed);
+        AVAudioFramePosition remaining = renderFrames;
+        double lastProgress = NSProcessInfo.processInfo.systemUptime;
+        while (remaining > 0) {
+          @autoreleasepool {
+            if (!KiriExportContinue(progress, context, progressStart + (progressEnd - progressStart)
+                * (0.5 + 0.5 * (renderFrames - remaining) / renderFrames), error, capacity)) return nil;
+            AVAudioFrameCount frames = (AVAudioFrameCount)MIN(blockSize, remaining);
+            AVAudioEngineManualRenderingStatus status = [engine renderOffline:frames toBuffer:buffer error:&failure];
+            if ((status == AVAudioEngineManualRenderingStatusSuccess || status == AVAudioEngineManualRenderingStatusInsufficientDataFromInputNode)
+                && buffer.frameLength > 0) {
+                if (![rendered writeFromBuffer:buffer error:&failure]) {
+                    KiriAudioError(failure, @"Could not save processed audio.", error, capacity); return nil;
+                }
+                remaining -= buffer.frameLength;
+                lastProgress = NSProcessInfo.processInfo.systemUptime;
+            } else if (status == AVAudioEngineManualRenderingStatusError
+                || NSProcessInfo.processInfo.systemUptime - lastProgress > 5) {
+                KiriAudioError(failure, @"Audio speed processing stalled.", error, capacity); return nil;
+            }
+          }
+        }
+        [player stop]; [engine stop];
+        rendered = nil;
+        [[NSFileManager defaultManager] removeItemAtURL:inputURL error:nil];
+        return [AVURLAsset URLAssetWithURL:outputURL options:nil];
+    } @finally {
+        if (reader.status == AVAssetReaderStatusReading) [reader cancelReading];
+        [engine stop];
+    }
+}
+
 // Called only on a background worker; the source is immutable and output is staging.
 bool kiri_export_video(const char *source, const char *output, const KiriVideoSegment *segments,
                        size_t count, const KiriVideoEffect *effects, size_t effectCount, const KiriVideoAnnotation *annotations, size_t annotationCount, const size_t *order, size_t orderCount, unsigned maxEdge,
                        KiriExportProgress progress, const void *progressContext, char *error, size_t capacity) {
     @autoreleasepool {
+        NSURL *audioDirectory = nil;
         @try {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -58,6 +217,22 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
             video.preferredTransform = track.preferredTransform;
             NSArray<AVAssetTrack *> *audioTracks = [asset tracksWithMediaType:AVMediaTypeAudio];
             NSMutableArray<AVMutableCompositionTrack *> *audioOutputs = [NSMutableArray array];
+            // AVAssetTrack.asset is weak. Keep every staged asset alive until the
+            // export session has completed, including cancellation cleanup.
+            __attribute__((objc_precise_lifetime)) NSMutableArray<AVURLAsset *> *audioAssets = [NSMutableArray array];
+            size_t speedAudioCount = 0, completedSpeedAudio = 0;
+            // Count only real audio intersections. Invalid segment requests still
+            // fail below before insertion; this pass only allocates progress.
+            for (size_t index = 0; index < count; index++) {
+                double start = segments[index].start, end = MIN(segments[index].end, duration), speed = segments[index].speed;
+                if (!isfinite(start) || !isfinite(end) || !isfinite(speed) || start < 0 || end <= start
+                    || speed < 0.25 || speed > 4 || speed == 1) continue;
+                CMTimeRange range = CMTimeRangeFromTimeToTime(CMTimeMakeWithSeconds(start, 600000), CMTimeMakeWithSeconds(end, 600000));
+                for (AVAssetTrack *audio in audioTracks)
+                    if (KiriHasSpeedAudioFrames(CMTimeRangeGetIntersection(range, audio.timeRange), speed)) speedAudioCount++;
+            }
+            double audioProgress = speedAudioCount > 0 ? 0.2 : 0;
+            NSMutableArray<NSValue *> *outputRanges = [NSMutableArray arrayWithCapacity:count];
             CMTime cursor = kCMTimeZero;
             for (size_t index = 0; index < count; index++) {
                 if (!KiriExportContinue(progress, progressContext, -1, error, capacity)) return false;
@@ -83,18 +258,40 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                     // Audio may begin later or end sooner than video. Preserve that offset.
                     CMTimeRange intersection = CMTimeRangeGetIntersection(range, audio.timeRange);
                     if (CMTIMERANGE_IS_VALID(intersection) && CMTimeCompare(intersection.duration, kCMTimeZero) > 0) {
-                        // Give each speed segment its own time-pitch processor. Reusing
-                        // one track lets Spectral carry state across a rate discontinuity.
+                        if (speed != 1.0 && !KiriHasSpeedAudioFrames(intersection, speed)) continue;
                         AVMutableCompositionTrack *audioOutput = [edited addMutableTrackWithMediaType:AVMediaTypeAudio preferredTrackID:kCMPersistentTrackID_Invalid];
                         [audioOutputs addObject:audioOutput];
                         CMTime position = CMTimeAdd(cursor, CMTimeMultiplyByFloat64(CMTimeSubtract(intersection.start, range.start), 1.0 / speed));
-                        if (![audioOutput insertTimeRange:intersection ofTrack:audio atTime:position error:&insertError]) {
+                        AVAssetTrack *insertTrack = audio;
+                        CMTimeRange insertRange = intersection;
+                        if (speed != 1.0) {
+                            if (!audioDirectory) {
+                                audioDirectory = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:
+                                    [@"kiri-video-audio-" stringByAppendingString:NSUUID.UUID.UUIDString]] isDirectory:YES];
+                                if (![[NSFileManager defaultManager] createDirectoryAtURL:audioDirectory
+                                    withIntermediateDirectories:NO attributes:nil error:&insertError]) {
+                                    return KiriAudioError(insertError, @"Could not prepare temporary audio storage.", error, capacity);
+                                }
+                            }
+                            AVURLAsset *processed = KiriRenderSpeedAudio(asset, audio, intersection, speed,
+                                audioDirectory, audioProgress * completedSpeedAudio / speedAudioCount,
+                                audioProgress * (completedSpeedAudio + 1) / speedAudioCount,
+                                progress, progressContext, error, capacity);
+                            if (!processed) return false;
+                            completedSpeedAudio++;
+                            if (!KiriExportContinue(progress, progressContext,
+                                audioProgress * completedSpeedAudio / speedAudioCount, error, capacity)) return false;
+                            [audioAssets addObject:processed];
+                            insertTrack = [processed tracksWithMediaType:AVMediaTypeAudio].firstObject;
+                            if (!insertTrack) return KiriAudioError(nil, @"Processed audio is unavailable.", error, capacity);
+                            insertRange = insertTrack.timeRange;
+                        }
+                        if (![audioOutput insertTimeRange:insertRange ofTrack:insertTrack atTime:position error:&insertError]) {
                             snprintf(error, capacity, "%s", (insertError.localizedDescription ?: @"Could not insert audio segment.").UTF8String); return false;
                         }
-                        [audioOutput scaleTimeRange:CMTimeRangeMake(position, intersection.duration)
-                            toDuration:CMTimeMultiplyByFloat64(intersection.duration, 1.0 / speed)];
                     }
                 }
+                [outputRanges addObject:[NSValue valueWithCMTimeRange:CMTimeRangeMake(cursor, scaledDuration)]];
                 cursor = CMTimeAdd(cursor, scaledDuration);
             }
             AVAssetExportSession *session = [[AVAssetExportSession alloc]
@@ -114,7 +311,8 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
             if (width < 2 || height < 2) { snprintf(error, capacity, "Invalid video dimensions."); return false; }
             double scale = maxEdge && MAX(width, height) > maxEdge ? maxEdge / MAX(width, height) : 1.0;
             CGSize target = scale < 1 ? CGSizeMake(MAX(2, floor(width * scale / 2) * 2), MAX(2, floor(height * scale / 2) * 2)) : CGSizeMake(width, height);
-            // Both custom filters and ordinary resizing keep the source cadence.
+            // Resizing preserves source timing. Timed edits use a separate render
+            // cadence below so a held recording frame cannot suppress an effect.
             CMTime frameDuration = track.minFrameDuration;
             double frameSeconds = CMTimeGetSeconds(frameDuration);
             if (!CMTIME_IS_NUMERIC(frameDuration) || !isfinite(frameSeconds) || frameSeconds <= 0) {
@@ -144,13 +342,19 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                 CIContext *effectContext = [CIContext contextWithOptions:@{kCIContextWorkingColorSpace: (__bridge id)workingSpace}];
                 CGColorSpaceRelease(workingSpace);
                 AVVideoComposition *filtered = [AVVideoComposition videoCompositionWithAsset:edited applyingCIFiltersWithHandler:^(AVAsynchronousCIImageFilteringRequest *request) {
-                    double outputTime = CMTimeGetSeconds(request.compositionTime);
                     double sourceTime = segments[count - 1].end;
-                    double offset = 0;
                     for (size_t index = 0; index < count; index++) {
-                        double length = (MIN(segments[index].end, duration) - segments[index].start) / segments[index].speed;
-                        if (outputTime < offset + length) { sourceTime = segments[index].start + (outputTime - offset) * segments[index].speed; break; }
-                        offset += length;
+                        // Match the exact composition clock. Accumulating doubles
+                        // can classify the first frame after a fractional cut as
+                        // the previous clip, leaving its privacy mask unapplied.
+                        CMTimeRange outputRange = outputRanges[index].CMTimeRangeValue;
+                        if (CMTimeCompare(request.compositionTime, CMTimeRangeGetEnd(outputRange)) < 0) {
+                            CMTime elapsed = CMTimeSubtract(request.compositionTime, outputRange.start);
+                            CMTime sourceStart = CMTimeMakeWithSeconds(segments[index].start, 600000);
+                            sourceTime = CMTimeGetSeconds(CMTimeAdd(sourceStart,
+                                CMTimeMultiplyByFloat64(elapsed, segments[index].speed)));
+                            break;
+                        }
                     }
                     CIImage *image = request.sourceImage;
                     CGRect extent = image.extent;
@@ -268,13 +472,23 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
                     [request finishWithImage:image context:effectContext];
                 }];
                 AVMutableVideoComposition *composition = [filtered mutableCopy];
-                composition.frameDuration = frameDuration;
+                // The CI factory follows the source track even when frameDuration
+                // is set. Disable that override: VFR recordings can hold one image
+                // across an entire mask, annotation, zoom or fade interval.
+                composition.sourceTrackIDForFrameTiming = kCMPersistentTrackID_Invalid;
+                // A single short VFR interval (Simulator can report 1/600 s) is not
+                // a useful output rate. Keep ordinary/high-rate footage up to 120
+                // fps, with at least 30 fps for smooth effects on sparse recordings.
+                double effectFPS = track.nominalFrameRate;
+                if (!isfinite(effectFPS) || effectFPS <= 0) effectFPS = 30;
+                composition.frameDuration = CMTimeMakeWithSeconds(1.0 / MAX(30, MIN(120, effectFPS)), 600000);
                 composition.renderSize = target;
                 session.videoComposition = composition;
             } else if (scale < 1) {
                 AVMutableVideoComposition *composition = [AVMutableVideoComposition videoComposition];
                 composition.renderSize = target;
                 composition.frameDuration = frameDuration;
+                composition.sourceTrackIDForFrameTiming = video.trackID;
                 AVMutableVideoCompositionInstruction *instruction = [AVMutableVideoCompositionInstruction videoCompositionInstruction];
                 instruction.timeRange = CMTimeRangeMake(kCMTimeZero, cursor);
                 AVMutableVideoCompositionLayerInstruction *layer = [AVMutableVideoCompositionLayerInstruction videoCompositionLayerInstructionWithAssetTrack:video];
@@ -292,13 +506,14 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
             session.outputFileType = AVFileTypeMPEG4;
             session.shouldOptimizeForNetworkUse = YES;
             dispatch_semaphore_t done = dispatch_semaphore_create(0);
-            if (!KiriExportContinue(progress, progressContext, -1, error, capacity)) return false;
+            if (!KiriExportContinue(progress, progressContext, audioProgress, error, capacity)) return false;
             [session exportAsynchronouslyWithCompletionHandler:^{ dispatch_semaphore_signal(done); }];
             double deadline = NSProcessInfo.processInfo.systemUptime + 3600;
             bool cancelled = false, timedOut = false;
             while (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 100LL * NSEC_PER_MSEC))) {
                 if (!cancelled && !timedOut) {
-                    cancelled = !KiriExportContinue(progress, progressContext, session.progress, error, capacity);
+                    cancelled = !KiriExportContinue(progress, progressContext,
+                        audioProgress + (1 - audioProgress) * session.progress, error, capacity);
                     timedOut = NSProcessInfo.processInfo.systemUptime >= deadline;
                     if (cancelled || timedOut) [session cancelExport];
                 }
@@ -307,7 +522,8 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
             // not return on cancellation before the output handle has been released.
             if (cancelled) return false;
             if (timedOut) { snprintf(error, capacity, "MP4 export timed out."); return false; }
-            if (!KiriExportContinue(progress, progressContext, session.progress, error, capacity)) return false;
+            if (!KiriExportContinue(progress, progressContext,
+                audioProgress + (1 - audioProgress) * session.progress, error, capacity)) return false;
             if (session.status != AVAssetExportSessionStatusCompleted) {
                 snprintf(error, capacity, "%s", (session.error.localizedDescription ?: @"MP4 export failed.").UTF8String);
                 return false;
@@ -317,6 +533,8 @@ bool kiri_export_video(const char *source, const char *output, const KiriVideoSe
         } @catch (NSException *exception) {
             snprintf(error, capacity, "%s", (exception.reason ?: @"MP4 export failed.").UTF8String);
             return false;
+        } @finally {
+            if (audioDirectory) [[NSFileManager defaultManager] removeItemAtURL:audioDirectory error:nil];
         }
     }
 }
@@ -392,4 +610,40 @@ bool kiri_test_video_delayed_audio(const char *source, const char *destination) 
         return session.status == AVAssetExportSessionStatusCompleted;
 #pragma clang diagnostic pop
     }
+}
+
+// Two independently timed audio tracks catch accidentally decoding the first
+// track for every segment. This remains an isolated native media test fixture.
+bool kiri_test_video_two_audio_tracks(const char *source, const char *destination) {
+    @autoreleasepool {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:[NSString stringWithUTF8String:source]] options:nil];
+        AVMutableComposition *composition = [AVMutableComposition composition];
+        AVMutableCompositionTrack *video = [composition addMutableTrackWithMediaType:AVMediaTypeVideo preferredTrackID:kCMPersistentTrackID_Invalid];
+        if (![video insertTimeRange:CMTimeRangeMake(kCMTimeZero, asset.duration)
+            ofTrack:[asset tracksWithMediaType:AVMediaTypeVideo].firstObject atTime:kCMTimeZero error:nil]) return false;
+        for (int index = 0; index < 2; index++) {
+            AVMutableCompositionTrack *audio = [composition addMutableTrackWithMediaType:AVMediaTypeAudio preferredTrackID:kCMPersistentTrackID_Invalid];
+            CMTime start = CMTimeMake(index, 1);
+            if (![audio insertTimeRange:CMTimeRangeMake(start, CMTimeMake(1, 1))
+                ofTrack:[asset tracksWithMediaType:AVMediaTypeAudio].firstObject atTime:start error:nil]) return false;
+        }
+        AVAssetExportSession *session = [[AVAssetExportSession alloc] initWithAsset:composition presetName:AVAssetExportPresetPassthrough];
+        session.outputURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:destination]];
+        session.outputFileType = AVFileTypeMPEG4;
+        dispatch_semaphore_t done = dispatch_semaphore_create(0);
+        [session exportAsynchronouslyWithCompletionHandler:^{ dispatch_semaphore_signal(done); }];
+        dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+        AVURLAsset *result = [AVURLAsset URLAssetWithURL:session.outputURL options:nil];
+        return session.status == AVAssetExportSessionStatusCompleted && [result tracksWithMediaType:AVMediaTypeAudio].count == 2;
+#pragma clang diagnostic pop
+    }
+}
+
+bool kiri_test_export_cancel_audio(const char *source, const char *destination,
+    KiriExportProgress progress, const void *context, char *error, size_t capacity) {
+    const KiriVideoSegment segment = {0, 3, 0.25};
+    return kiri_export_video(source, destination, &segment, 1, NULL, 0, NULL, 0, NULL, 0,
+        0, progress, context, error, capacity);
 }

@@ -1048,7 +1048,7 @@ mod tests {
         assert!(frame_at(&output, 1.2).get_pixel(32, 24)[1] > 180);
         assert!(frame_at(&output, 2.2).get_pixel(32, 24)[0] > 180);
         assert_audio_track(&output);
-        for (probe_start, probe_end, expected_frequency) in [(0.1, 0.4, 660.0), (0.8, 2.2, 440.0)] {
+        for (probe_start, probe_end, expected_frequency) in [(0.1, 0.4, 660.0), (0.8, 2.2, 440.0), (2.3, 2.48, 440.0)] {
             let (audio_start, audio_duration, frequency) =
                 audio_stats(&output, probe_start, probe_end);
             assert!(audio_start.abs() < 0.05, "audio start {audio_start}");
@@ -1089,6 +1089,89 @@ mod tests {
             "delayed pitch {frequency}"
         );
         std::fs::remove_file(output).unwrap();
+
+        unsafe extern "C" {
+            fn kiri_test_video_two_audio_tracks(source: *const c_char, destination: *const c_char) -> bool;
+        }
+        let multiple = directory.path().join("two-audio-tracks.mp4");
+        let multiple_c = CString::new(multiple.to_str().unwrap()).unwrap();
+        assert!(unsafe { kiri_test_video_two_audio_tracks(source_c.as_ptr(), multiple_c.as_ptr()) });
+        // Exercise both supported speed extrema and preserve the identity of a
+        // second source audio track, whose tone differs from the first track.
+        let extremes = [
+            VideoSegment { start: 1.0, end: 2.0, speed: 0.25 },
+            VideoSegment { start: 0.0, end: 1.0, speed: 4.0 },
+        ];
+        for _ in 0..3 {
+            let (output, _, _, duration) = export_video(&multiple, &extremes, &[], VideoExportPreset::Original).unwrap();
+            assert!((duration - 4.25).abs() < 0.06, "extreme-speed duration {duration}");
+            for (start, end, expected) in [(0.4, 3.6, 660.0), (3.8, 3.98, 660.0), (4.04, 4.21, 440.0)] {
+                let (audio_start, audio_duration, frequency) = audio_stats(&output, start, end);
+                assert!(audio_start.abs() < 0.05, "extreme-speed start {audio_start}");
+                assert!((audio_duration - 4.25).abs() < 0.08, "extreme-speed audio duration {audio_duration}");
+                assert!((frequency - expected).abs() < 20.0, "extreme-speed pitch {frequency} vs {expected}");
+            }
+            std::fs::remove_file(output).unwrap();
+        }
+        assert_native_speed_audio_cancellation(&source, directory.path(), false);
+        assert_native_speed_audio_cancellation(&source, directory.path(), true);
+        assert_eq!(before, std::fs::read(&source).unwrap());
+    }
+
+    #[cfg(target_os = "macos")]
+    fn assert_native_speed_audio_cancellation(source: &Path, directory: &Path, while_rendering: bool) {
+        use std::ffi::{c_char, c_void, CStr, CString};
+        use std::collections::HashSet;
+        fn staged_directories() -> HashSet<PathBuf> {
+            std::fs::read_dir(std::env::temp_dir()).unwrap().filter_map(|entry| entry.ok())
+                .filter(|entry| entry.file_name().to_string_lossy().starts_with("kiri-video-audio-"))
+                .map(|entry| entry.path()).collect()
+        }
+        struct Probe { before: HashSet<PathBuf>, cancelled: Option<PathBuf>, while_rendering: bool, progress: Vec<f64> }
+        extern "C" fn cancel_at_pcm(context: *const c_void, progress: f64) -> bool {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                // The native exporter invokes preparation callbacks serially on
+                // this calling worker; the probe is borrowed only for this call.
+                let probe = unsafe { &mut *context.cast_mut().cast::<Probe>() };
+                if progress >= 0.0 { probe.progress.push(progress); }
+                let suffix = if probe.while_rendering { "-output.caf" } else { "-input.caf" };
+                for path in staged_directories().difference(&probe.before) {
+                    let has_pcm = std::fs::read_dir(path).unwrap().filter_map(|entry| entry.ok()).any(|entry| {
+                        entry.file_name().to_string_lossy().ends_with(suffix)
+                            && entry.metadata().is_ok_and(|metadata| metadata.len() > 1024)
+                    });
+                    // CAF reserves a header when opened. Wait for measured frame
+                    // progress as well, so cancellation tests actual PCM work.
+                    if has_pcm && progress > if probe.while_rendering { 0.1 } else { 0.0 } {
+                        probe.cancelled = Some(path.clone()); return false;
+                    }
+                }
+                true
+            })).unwrap_or(false)
+        }
+        unsafe extern "C" {
+            fn kiri_test_export_cancel_audio(source: *const c_char, destination: *const c_char,
+                progress: extern "C" fn(*const c_void, f64) -> bool, context: *const c_void,
+                error: *mut c_char, capacity: usize) -> bool;
+        }
+        let source = CString::new(source.to_str().unwrap()).unwrap();
+        let output = directory.join(if while_rendering { "cancel-render.mp4" } else { "cancel-decode.mp4" });
+        let output_c = CString::new(output.to_str().unwrap()).unwrap();
+        let mut probe = Probe { before: staged_directories(), cancelled: None, while_rendering, progress: Vec::new() };
+        let mut error = [0 as c_char; 1024];
+        let started = Instant::now();
+        let success = unsafe { kiri_test_export_cancel_audio(source.as_ptr(), output_c.as_ptr(), cancel_at_pcm,
+            (&mut probe as *mut Probe).cast(), error.as_mut_ptr(), error.len()) };
+        assert!(!success);
+        assert_eq!(unsafe { CStr::from_ptr(error.as_ptr()) }.to_str().unwrap(), EXPORT_CANCELLED);
+        assert!(started.elapsed() < Duration::from_secs(5), "audio cancellation must stop promptly");
+        assert!(!probe.cancelled.expect("must cancel after PCM processing began").exists(), "temporary audio directory must be removed");
+        assert!(!output.exists(), "cancelled preparation must not leave an MP4");
+        assert_eq!(probe.before, staged_directories(), "all temporary PCM must be cleaned up");
+        assert!(probe.progress.windows(2).all(|pair| pair[1] >= pair[0]), "audio progress must be monotonic");
+        let progress = *probe.progress.last().expect("audio preparation must report real progress");
+        assert!(progress > if while_rendering { 0.1 } else { 0.0 }, "audio processing must advance before movie encoding: {progress}");
+        assert!(progress < 0.2, "audio preprocessing occupies only its own progress interval");
     }
 
     #[test]
@@ -1385,6 +1468,94 @@ mod tests {
             }
             std::fs::remove_file(output).unwrap();
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_timed_edits_render_inside_held_source_frames() {
+        use crate::macos_media::MacosSegmentEncoder;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("held-screen-recording.mp4");
+        let mut encoder = MacosSegmentEncoder::new(&source, 128, 96, 30, 2_000_000, false).unwrap();
+        let mut pixels = vec![0u8; 128 * 96 * 4];
+        for y in 0..96 {
+            for x in 0..128 {
+                pixels[(y * 128 + x) * 4 + if x < 64 { 2 } else { 0 }] = 255;
+                pixels[(y * 128 + x) * 4 + 3] = 255;
+            }
+        }
+        // A screen recording can hold one frame for seconds. Every edit below
+        // starts and ends while that same source frame is still on screen.
+        for index in [0, 1, 119] {
+            assert!(encoder.append_video(&pixels, index).unwrap());
+        }
+        encoder.finish().unwrap();
+        let effects = [
+            VideoEffect { kind: VideoEffectKind::Mask, start: 0.4, end: 1.0,
+                x: 0.0, y: 0.0, width: 0.25, height: 1.0, layer: 1,
+                ..Default::default() },
+            VideoEffect { kind: VideoEffectKind::Zoom, start: 2.0, end: 3.0,
+                x: 0.0, y: 0.0, width: 0.5, height: 0.5, transition: 0.25,
+                layer: 3, ..Default::default() },
+            VideoEffect { kind: VideoEffectKind::Fade, start: 0.0, end: 4.0,
+                x: 0.0, y: 0.0, width: 1.0, height: 1.0, transition: 0.4,
+                color: 0xffffff, layer: 4, ..Default::default() },
+        ];
+        let annotation = VideoAnnotation { layer: 2, start: 1.2, end: 1.7,
+            x: 0.25, y: 0.25, width: 0.25, height: 0.5, kind: VideoAnnotationKind::Overlay,
+            image_base64: annotation_png(image::RgbaImage::from_pixel(4, 4, image::Rgba([0, 255, 0, 255]))),
+            amount: 0.0 };
+        let (output, _, _, _) = export_video_with_annotations(&source,
+            &[VideoSegment { start: 0.0, end: 4.0, speed: 1.0 }],
+            &effects, &[annotation], VideoExportPreset::Original).unwrap();
+        let masked = frame_at_with_edge(&output, 0.6, 128);
+        assert!(masked.get_pixel(10, 48).0.iter().all(|v| *v < 30),
+            "a timed privacy mask must appear even without a new source frame");
+        let after_mask = frame_at_with_edge(&output, 1.1, 128);
+        assert!(after_mask.get_pixel(10, 48)[0] > 200, "mask must end on time");
+        let annotated = frame_at_with_edge(&output, 1.4, 128);
+        assert!(annotated.get_pixel(48, 48)[1] > 200, "timed annotation missing");
+        let after_annotation = frame_at_with_edge(&output, 1.8, 128);
+        assert!(after_annotation.get_pixel(48, 48)[0] > 200, "annotation must end on time");
+        let zoomed = frame_at_with_edge(&output, 2.5, 128);
+        assert!(zoomed.get_pixel(110, 48)[0] > 200, "zoom must reach its target inside a held frame");
+        let after_zoom = frame_at_with_edge(&output, 3.2, 128);
+        assert!(after_zoom.get_pixel(110, 48)[2] > 200, "zoom must return to the full frame");
+        for time in [0.2, 3.8] {
+            let faded = frame_at_with_edge(&output, time, 128);
+            assert!((70..190).contains(&faded.get_pixel(48, 48)[1]),
+                "fade must animate inside a held frame at {time}: {:?}", faded.get_pixel(48, 48));
+        }
+        std::fs::remove_file(output).unwrap();
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_privacy_mask_covers_first_frame_after_fractional_speed_cut() {
+        use crate::macos_media::MacosSegmentEncoder;
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("fractional-cut.mp4");
+        let mut encoder = MacosSegmentEncoder::new(&source, 64, 48, 30, 500_000, false).unwrap();
+        for index in [0, 1, 269] {
+            assert!(encoder.append_video(&[0, 0, 255, 255].repeat(64 * 48), index).unwrap());
+        }
+        encoder.finish().unwrap();
+        let segments = [
+            VideoSegment { start: 0.0, end: 2.5, speed: 1.0 },
+            VideoSegment { start: 2.5, end: 7.5, speed: 1.5 },
+            VideoSegment { start: 8.0, end: 9.0, speed: 1.0 },
+        ];
+        let effects = [VideoEffect { kind: VideoEffectKind::Mask, start: 8.0, end: 9.0,
+            x: 0.0, y: 0.0, width: 1.0, height: 1.0, ..Default::default() }];
+        let (output, _, _, _) = export_video(&source, &segments, &effects, VideoExportPreset::Original).unwrap();
+        assert!(frame_at(&output, 5.8).get_pixel(32, 24)[0] > 200);
+        // 2.5 + 5 / 1.5 is just above the actual 175/30 composition boundary
+        // in binary floating point. Probe the first output frame after that cut.
+        for time in [5.835, 5.87, 6.7] {
+            assert!(frame_at(&output, time).get_pixel(32, 24).0.iter().all(|channel| *channel < 30),
+                "privacy mask must cover every frame from the cut, including {time}");
+        }
+        std::fs::remove_file(output).unwrap();
     }
 
     #[cfg(target_os = "macos")]

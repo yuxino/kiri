@@ -397,7 +397,12 @@ copies a snapshot outside the lock, then uses AVFoundation or Windows MediaCompo
 intervals and render a new MP4. Native
 metadata validates nonoverlapping source intervals in output order (at most 128), per-clip speed from 0.25 to 4, effect
 rectangles and source-time effect ranges (at most 128). macOS maps composition
-time back to source time for CI effects. Windows splits intervals at effect
+time back to source time for CI effects. Timed macOS effects and annotations render
+independently of source sample arrivals, at the nominal frame rate bounded to
+30–120 fps; long held frames in variable-rate screen recordings still receive
+their timed masks, zoom ramps and fades. Source-time mapping uses the composition's
+exact rational cut boundaries, including the first frame after a fractional-speed
+clip. Plain resizing preserves source frame timing. Windows splits intervals at effect
 boundaries, crops zoom clips through MediaTranscoder into temporary native MP4
 segments, then composes them and maps black overlays into each output viewport.
 Styled masks, animated zooms, spotlight, crop/background and fade use the bounded Media Foundation frame pass instead of static crop segments; source-time transitions are sampled at the source frame rate (capped at 120 fps). Zoom ramps are clamped to half the effect duration and use the same smoothstep viewport function as the preview. Legacy payloads default to black solid masks and zero transition duration.
@@ -406,6 +411,14 @@ identity and generation before adding a separate asset; temporary files are
 removed on failure and the original asset is never overwritten. The library
 receives only completed output. High quality retains source dimensions; Share
 and Small cap the longest edge at 1080 and 720 pixels, without upscaling.
+
+Changed-rate macOS audio is decoded per source track to temporary PCM and rendered
+through AVAudioEngine's offline time-pitch unit before insertion at its final
+timeline position. Fixed-size buffers bound memory use; original gaps and shorter
+audio ranges keep their timing. Normal-speed audio retains direct insertion.
+The offline engine does not connect to a microphone or physical audio output.
+Preparation reports measured progress and checks cancellation while decoding and
+rendering; temporary audio is removed on success, failure and cancellation.
 
 The viewer assigns a UUID request ID to each export. Window-scoped
 `video-export-progress` events report preparation, measured native rendering
