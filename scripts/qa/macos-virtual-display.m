@@ -3,7 +3,7 @@
 // https://chromium.googlesource.com/chromium/src/+/HEAD/ui/display/mac/test/virtual_display_util_mac.mm
 // clang -fobjc-arc -framework Cocoa -framework CoreGraphics \
 //   scripts/qa/macos-virtual-display.m -o /tmp/kiri-virtual-display
-// /tmp/kiri-virtual-display <x> <y> <scale:1|2>
+// /tmp/kiri-virtual-display <x> <y> <scale:1|2> [fullscreen]
 // The temporary display disappears when this process exits (or after 10 min).
 #import <Cocoa/Cocoa.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -31,10 +31,12 @@
 
 int main(int argc, const char **argv) {
     @autoreleasepool {
-        if (argc != 4 || (atoi(argv[3]) != 1 && atoi(argv[3]) != 2)) {
-            fprintf(stderr, "usage: kiri-virtual-display x y scale(1|2)\n");
+        if ((argc != 4 && argc != 5) || (atoi(argv[3]) != 1 && atoi(argv[3]) != 2)
+            || (argc == 5 && strcmp(argv[4], "fullscreen") != 0)) {
+            fprintf(stderr, "usage: kiri-virtual-display x y scale(1|2) [fullscreen]\n");
             return 1;
         }
+        BOOL fullscreen = argc == 5;
         [NSApplication sharedApplication];
         int scale = atoi(argv[3]);
         CGVirtualDisplayDescriptor *descriptor = [CGVirtualDisplayDescriptor new];
@@ -86,6 +88,15 @@ int main(int argc, const char **argv) {
         if (!target || target.backingScaleFactor != scale) return 7;
         NSWindow *fixture = [[NSWindow alloc] initWithContentRect:target.frame
             styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
+        if (fullscreen) {
+            fixture.styleMask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                | NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable;
+            // Keep the title bar inside the selected display before asking
+            // AppKit to create its native full-screen Space.
+            [fixture setFrame:NSInsetRect(target.frame, 60, 60) display:YES];
+            fixture.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
+            [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+        }
         fixture.backgroundColor = NSColor.whiteColor;
         fixture.title = @"Kiri display QA fixture";
         NSTextField *text = [NSTextField wrappingLabelWithString:
@@ -95,6 +106,13 @@ int main(int argc, const char **argv) {
         text.frame = NSMakeRect(140, 260, 1000, 300);
         [fixture.contentView addSubview:text];
         [fixture orderFrontRegardless];
+        if (fullscreen) {
+            [fixture makeKeyAndOrderFront:nil];
+            [NSApp activateIgnoringOtherApps:YES];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                [fixture toggleFullScreen:nil];
+            });
+        }
         NSLog(@"QA display id=%u bounds=%@ backingScale=%.0f", display.displayID,
             NSStringFromRect(NSRectFromCGRect(CGDisplayBounds(display.displayID))), target.backingScaleFactor);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 600 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{

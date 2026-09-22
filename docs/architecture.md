@@ -97,9 +97,14 @@ test harness.
 
 On macOS, transient capture, countdown, recording-control, ripple, and
 completion windows explicitly join other applications' full-screen Spaces.
-After applying the full-screen collection behavior they are reordered at their
-existing high window level without activating Kiri. In particular, a global
-capture shortcut pressed over a full-screen video must not switch back to
+A transparent, non-interactive native `NSPanel` parent supplies full-screen
+Space membership while the existing Tao child retains its delegate, WebView,
+and keyboard handling. The parent is released when that child is destroyed;
+resident feedback windows reuse one parent. Before synchronizing a reused
+parent’s frame, detach the child so AppKit does not move it twice. After
+applying the full-screen collection behavior, the windows are reordered at
+their existing high window level without activating Kiri. See ADR 0047.
+In particular, a global capture shortcut pressed over a full-screen video must not switch back to
 Kiri's ordinary Space merely to present the capture overlay. The overlay
 becomes normally interactive when clicked. Display coordinates use the fixed
 Core Graphics main-display baseline rather than the current key window's

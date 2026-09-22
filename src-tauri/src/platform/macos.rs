@@ -1,20 +1,24 @@
 //! macOS platform helpers (AppKit / CoreGraphics via objc2).
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 
 use anyhow::Result;
 use block2::RcBlock;
+use objc2::{rc::Retained, MainThreadOnly};
 use objc2_core_foundation::CFRunLoop;
 use tauri::{AppHandle, Manager};
 
 use objc2_app_kit::{
-    NSEvent, NSEventMask, NSRunningApplication, NSScreenSaverWindowLevel, NSWindow,
-    NSWindowCollectionBehavior, NSWorkspace,
+    NSBackingStoreType, NSColor, NSEvent, NSEventMask, NSPanel, NSRunningApplication,
+    NSScreenSaverWindowLevel, NSWindow, NSWindowCollectionBehavior, NSWindowOrderingMode,
+    NSWindowStyleMask, NSWorkspace,
 };
 use objc2_core_foundation::kCFRunLoopDefaultMode;
-use objc2_foundation::{NSArray, NSString, NSURL};
+use objc2_foundation::{MainThreadMarker, NSArray, NSRect, NSString, NSURL};
 
 use super::{ClickMonitorHandle, MicrophoneAccess, TransientWindowPolicy};
 
@@ -32,7 +36,73 @@ pub fn activate_application(pid: u32) {
     });
 }
 
-fn apply_transient_window_policy(ns_window: &NSWindow, policy: TransientWindowPolicy) {
+thread_local! {
+    // A regular NSWindow cannot join another application's native full-screen
+    // Space. An invisible NSPanel parent gives the existing Tao window that
+    // membership without replacing its class, delegate, content view or input
+    // handling. Parents are removed when their child window is destroyed.
+    static SPACE_PARENTS: RefCell<HashMap<isize, Retained<NSPanel>>> = RefCell::new(HashMap::new());
+}
+
+fn attach_space_parent(window: &tauri::WebviewWindow, ns_window: &NSWindow) {
+    let id = ns_window.windowNumber();
+    let existing = SPACE_PARENTS.with_borrow(|parents| parents.get(&id).cloned());
+    let created = existing.is_none();
+    let parent = existing.unwrap_or_else(|| {
+        let parent = NSPanel::initWithContentRect_styleMask_backing_defer(
+            NSPanel::alloc(MainThreadMarker::new().expect("AppKit main thread")),
+            NSRect::ZERO,
+            NSWindowStyleMask::NonactivatingPanel,
+            NSBackingStoreType::Buffered,
+            false,
+        );
+        // The registry owns the panel; close must not consume its retain.
+        unsafe { parent.setReleasedWhenClosed(false) };
+        parent.setOpaque(false);
+        parent.setBackgroundColor(Some(&NSColor::clearColor()));
+        parent.setHasShadow(false);
+        parent.setIgnoresMouseEvents(true);
+        parent.setHidesOnDeactivate(false);
+        SPACE_PARENTS.with_borrow_mut(|parents| parents.insert(id, parent.clone()));
+        parent
+    });
+    // Do not hold a registry borrow across AppKit calls: native notifications
+    // can re-enter window lifecycle callbacks on this same thread.
+    // Moving a parent also moves its child. A resident toast may already
+    // have been repositioned for another display: detach it first so that
+    // updating the parent does not apply the same displacement twice.
+    if !created {
+        parent.removeChildWindow(ns_window);
+    }
+    parent.setFrame_display(ns_window.frame(), false);
+    parent.setCollectionBehavior(ns_window.collectionBehavior());
+    parent.setLevel(ns_window.level());
+    parent.orderFrontRegardless();
+    unsafe { parent.addChildWindow_ordered(ns_window, NSWindowOrderingMode::Above) };
+    if created {
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                dispatch2::run_on_main(move |_| {
+                    let parent = SPACE_PARENTS.with_borrow_mut(|parents| parents.remove(&id));
+                    if let Some(parent) = parent {
+                        if let Some(children) = parent.childWindows() {
+                            for child in &children {
+                                parent.removeChildWindow(&child);
+                            }
+                        }
+                        parent.close();
+                    }
+                });
+            }
+        });
+    }
+}
+
+fn apply_transient_window_policy(
+    window: &tauri::WebviewWindow,
+    ns_window: &NSWindow,
+    policy: TransientWindowPolicy,
+) {
     ns_window.setCollectionBehavior(transient_window_behavior(
         ns_window.collectionBehavior(),
         policy,
@@ -48,6 +118,7 @@ fn apply_transient_window_policy(ns_window: &NSWindow, policy: TransientWindowPo
     // non-activating: it keeps the video/app in its full-screen Space instead
     // of switching the user back to Kiri's ordinary Space.
     if policy.full_screen_auxiliary {
+        attach_space_parent(window, ns_window);
         ns_window.orderFrontRegardless();
     }
 }
@@ -101,7 +172,7 @@ pub(super) fn configure_transient_window(
         let Some(ns_window) = (unsafe { (ns_window as *mut NSWindow).as_ref() }) else {
             return;
         };
-        apply_transient_window_policy(ns_window, policy);
+        apply_transient_window_policy(&window, ns_window, policy);
     });
 }
 
@@ -124,7 +195,7 @@ pub(super) fn show_window_without_activation(
         // Apply the same full-screen Space policy used by capture windows
         // before ordering passive feedback front. Otherwise the toast can be
         // created successfully but remain on another Space.
-        apply_transient_window_policy(ns_window, policy);
+        apply_transient_window_policy(&window, ns_window, policy);
         ns_window.orderFrontRegardless();
         true
     });
