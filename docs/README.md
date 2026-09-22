@@ -9,6 +9,8 @@ application or a durable product decision.
 
 ## Current sources of truth
 
+- [`qa/issue-21-windows/README.md`](qa/issue-21-windows/README.md) — native
+  Windows multi-display screenshot acceptance and remaining hardware limits.
 - [`architecture.md`](architecture.md) — runtime structure, data boundaries,
   and platform responsibilities.
 - [`../AGENTS.md`](../AGENTS.md) — product contract and repository rules.

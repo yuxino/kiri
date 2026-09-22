@@ -184,6 +184,8 @@ try:
         raise RuntimeError('Apply complete display layout: ' + str(result))
     time.sleep(2)
     primary = next(m for m in monitors() if m['device'] == primary['device'])
+    if not primary['primary'] or primary['rect'] != [0, 0, 2560, 1440]:
+        raise RuntimeError('The high-resolution test display did not become the actual primary')
     report['test_primary'] = primary
     app = subprocess.Popen([str(exe)])
     wait_for(lambda: Desktop(backend='uia').windows(process=app.pid, visible_only=True))

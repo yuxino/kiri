@@ -1,8 +1,6 @@
 name: Windows multi-display acceptance
 
 on:
-  push:
-    branches: [fix/issue-21-windows-display]
   workflow_dispatch:
     inputs:
       release_tag:
@@ -54,6 +52,12 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
           $env:KIRI_QA_EXE = Join-Path $install 'kiri.exe'
           python scripts/qa/windows-display-native.py
+      - name: Preserve application diagnostics even after a timeout
+        if: always()
+        run: |
+          $log = Join-Path $env:LOCALAPPDATA 'io.yuxino.kiri/logs/kiri.log'
+          if (Test-Path $log) { Copy-Item $log windows-display-review/kiri.log }
+          Get-Process kiri -ErrorAction SilentlyContinue | Select-Object Id, Responding, CPU, WorkingSet | ConvertTo-Json | Out-File windows-display-review/process.json
       - uses: actions/upload-artifact@v7
         if: always()
         with:
