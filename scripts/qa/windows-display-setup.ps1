@@ -29,7 +29,7 @@ Import-Certificate -FilePath $publisher -CertStoreLocation Cert:/LocalMachine/Tr
 # The driver reads this configuration from its documented default directory.
 New-Item -ItemType Directory -Force C:/VirtualDisplayDriver | Out-Null
 $settings = [xml](Get-Content (Join-Path $driver 'vdd_settings.xml'))
-$settings.vdd_settings.monitors.count = '2'
+$settings.SelectSingleNode('/vdd_settings/monitors/count').InnerText = '2'
 $settings.Save('C:/VirtualDisplayDriver/vdd_settings.xml')
 & (Join-Path $qa 'nefcon/x64/nefconc.exe') install (Join-Path $driver 'MttVDD.inf') 'Root\MttVDD' 2>&1 | Tee-Object windows-display-review/install.txt
 if ($LASTEXITCODE -ne 0) { throw "Virtual display installation failed: $LASTEXITCODE" }

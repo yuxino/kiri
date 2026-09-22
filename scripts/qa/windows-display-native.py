@@ -59,13 +59,15 @@ def monitors():
     return found
 
 
-def move_display(device, x, y, primary=False):
+def move_display(device, x, y, primary=False, resize=True):
     mode = DevMode(size=ctypes.sizeof(DevMode))
     if not u.EnumDisplaySettingsW(device, 0xffffffff, ctypes.byref(mode)):
         raise ctypes.WinError(ctypes.get_last_error())
     mode.x, mode.y = x, y
-    mode.width, mode.height, mode.frequency = 2560, 1440, 60
-    mode.fields = 0x20 | 0x80000 | 0x100000 | 0x400000  # position, width, height, frequency
+    mode.fields = 0x20  # position
+    if resize:
+        mode.width, mode.height, mode.frequency = 2560, 1440, 60
+        mode.fields |= 0x80000 | 0x100000 | 0x400000  # width, height, frequency
     result = u.ChangeDisplaySettingsExW(device, ctypes.byref(mode), None, 0x10 if primary else 0, None)
     if result != 0:
         raise RuntimeError('ChangeDisplaySettingsEx: ' + str(result))
@@ -172,6 +174,8 @@ try:
     # 1440p OS displays, retaining the original adapter as an additional screen.
     primary, secondary = virtual[:2]
     move_display(primary['device'], 0, 0, primary=True)
+    original = next(m for m in report['environment'] if m['primary'])
+    move_display(original['device'], 0, 1440, resize=False)
     primary = next(m for m in monitors() if m['device'] == primary['device'])
     report['test_primary'] = primary
     app = subprocess.Popen([str(exe)])
