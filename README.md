@@ -22,7 +22,7 @@ https://github.com/user-attachments/assets/367fe955-b396-4f98-b3f2-aa5cb41b6d37
 
 ## Features
 
-- **Screenshots**: select a window or region, then crop, draw, add text, or cover details with mosaic. Screenshots go to the clipboard and local library. Reopen new captures to edit their annotations.
+- **Screenshots**: select a window or region, then crop, draw, add text, or cover details with mosaic. Capture uses the display under the pointer, including another app’s native full-screen Space on macOS. Screenshots go to the clipboard and local library. Reopen new captures to edit their annotations.
 - **Text recognition**: copy text from the screen or a saved screenshot. OCR runs locally by default; optional remote OCR asks before each upload. Text History lets you search results and revisit the source image.
 - **Recording**: save a region as MP4 or a silent GIF, with optional system audio, microphone, pointer, and click highlights. Click the countdown ring or press Esc to cancel before recording. A five-second microphone check shows the input device and level without saving audio.
 - **Video editing**: cut and reorder parts of one video, change clip speed, add timed annotations or image stickers, and hide details with privacy masks. Edits save locally so you can reopen the source and continue. Export creates a separate MP4 and can be cancelled before the final save. See the [video editing guide](docs/video-editing.md) for controls, quality settings, and platform limits.

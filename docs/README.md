@@ -105,3 +105,5 @@ development.
 - [0043 — Editable video annotation objects](adr/0043-editable-video-annotation-objects.md)
 - [0044 — Completing an edit without losing the user's place](adr/0044-video-editing-completion-and-selection.md)
 - [0045 — Local video projects and cancellable export](adr/0045-local-video-projects-and-cancellable-export.md)
+
+- [0047 — Native panel parents for full-screen capture windows](adr/0047-macos-fullscreen-space-parents.md)
