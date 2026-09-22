@@ -57,7 +57,7 @@ try:
     if not held:
         raise RuntimeError("Could not reserve the test hotkey")
     start()
-    find("In Use")
+    find("Used by Another App")
     find("Change Shortcut").click_input()
     find(r"Press a new shortcut \(Esc to cancel\)")
     keyboard.send_keys("^%k")
