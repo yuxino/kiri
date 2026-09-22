@@ -1,0 +1,36 @@
+name: Windows multi-display acceptance
+
+on:
+  push:
+    branches: [fix/issue-21-windows-display]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-displays:
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prepare disposable native displays
+        timeout-minutes: 3
+        run: ./scripts/qa/windows-display-setup.ps1
+      - name: Inspect display topology
+        if: always()
+        run: |
+          New-Item -ItemType Directory -Force windows-display-review | Out-Null
+          Get-PnpDevice -Class Display | Format-List * | Out-File windows-display-review/devices.txt
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::AllScreens | Format-List * | Out-File windows-display-review/screens.txt
+          Copy-Item C:/Windows/INF/setupapi.dev.log windows-display-review/ -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-display-review
+          path: windows-display-review/
+          retention-days: 5
