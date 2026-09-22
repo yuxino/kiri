@@ -28,6 +28,18 @@ jobs:
           Add-Type -AssemblyName System.Windows.Forms
           [System.Windows.Forms.Screen]::AllScreens | Format-List * | Out-File windows-display-review/screens.txt
           Copy-Item C:/Windows/INF/setupapi.dev.log windows-display-review/ -ErrorAction SilentlyContinue
+      - name: Install published baseline and verify secondary captures
+        timeout-minutes: 5
+        run: |
+          python -m pip install pywinauto==0.6.9 Pillow==11.3.0
+          $installer = Join-Path $env:RUNNER_TEMP 'kiri-baseline.exe'
+          Invoke-WebRequest 'https://github.com/yuxino/kiri/releases/download/v1.6.2/kiri_1.6.2_x64-setup.exe' -OutFile $installer
+          if ((Get-FileHash $installer).Hash.ToLowerInvariant() -ne 'b8924fccd3f0524cd24e79ecc74a83fe55a526620fe7a5a536a54d1de3bc5c56') { throw 'Baseline checksum mismatch' }
+          $install = Join-Path $env:RUNNER_TEMP 'kiri-baseline'
+          $p = Start-Process $installer -ArgumentList @('/S', "/D=$install") -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
+          $env:KIRI_QA_EXE = Join-Path $install 'kiri.exe'
+          python scripts/qa/windows-display-native.py
       - uses: actions/upload-artifact@v7
         if: always()
         with:
