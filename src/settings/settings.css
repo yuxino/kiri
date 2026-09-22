@@ -144,7 +144,8 @@
 
 .kiri-shortcut-actions {
   justify-content: flex-end;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .kiri-shortcut-actions .kiri-button {

@@ -1,0 +1,53 @@
+[package]
+name = "global-hotkey"
+version = "0.8.0"
+description = "Global hotkeys for Desktop Applications"
+edition = "2021"
+keywords = ["windowing", "global", "global-hotkey", "hotkey"]
+license = "Apache-2.0 OR MIT"
+readme = "README.md"
+repository = "https://github.com/tauri-apps/global-hotkey"
+documentation = "https://docs.rs/global-hotkey"
+categories = ["gui"]
+rust-version = "1.77"
+
+[features]
+serde = ["dep:serde"]
+tracing = ["dep:tracing"]
+
+[dependencies]
+crossbeam-channel = "0.5"
+keyboard-types = "0.7"
+once_cell = "1"
+thiserror = "2"
+serde = { version = "1", optional = true, features = ["derive"] }
+tracing = { version = "0.1", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.0"
+objc2-app-kit = { version = "0.3.0", default-features = false, features = [
+  "std",
+  "NSEvent",
+] }
+
+[target.'cfg(target_os = "windows")'.dependencies.windows-sys]
+version = "0.59"
+features = [
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_Foundation",
+  "Win32_System_SystemServices",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_Shell",
+  "Win32_UI_Input_KeyboardAndMouse",
+]
+
+[target.'cfg(any(target_os = "linux", target_os = "dragonfly", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))'.dependencies]
+x11rb = { version = "0.13.1", features = ["xkb"] }
+xkeysym = "0.2.1"
+
+[dev-dependencies]
+winit = "0.30"
+tao = "0.30"
+eframe = "0.27"
+iced = "0.13.1"
+async-std = "1.12.0"

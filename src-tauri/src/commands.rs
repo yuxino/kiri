@@ -21,7 +21,6 @@ use crate::core::library_location::{
 };
 use crate::core::policy::{RecordingOptions, RecordingOutputFormat};
 use crate::core::recording_recovery::PendingRecording;
-use crate::core::shortcut::KIRI_CAPTURE;
 use crate::platform;
 #[cfg(target_os = "macos")]
 use crate::state::RecoveryAction;
@@ -4641,9 +4640,12 @@ pub struct ShortcutStatusDto {
     pub status: ShortcutRegistrationStatus,
 }
 
-fn shortcut_status(registered: bool) -> ShortcutStatusDto {
+fn shortcut_status(
+    binding: tauri_plugin_global_shortcut::Shortcut,
+    registered: bool,
+) -> ShortcutStatusDto {
     ShortcutStatusDto {
-        label: KIRI_CAPTURE.display_label(),
+        label: crate::shortcut_settings::label(binding),
         status: if registered {
             ShortcutRegistrationStatus::Enabled
         } else {
@@ -4663,9 +4665,10 @@ fn require_library_window(window: &WebviewWindow) -> Result<(), String> {
 #[tauri::command]
 pub fn get_shortcut_status(window: WebviewWindow) -> Result<ShortcutStatusDto, String> {
     require_library_window(&window)?;
-    Ok(shortcut_status(crate::capture_shortcut_is_registered(
-        window.app_handle(),
-    )))
+    Ok(shortcut_status(
+        crate::shortcut_settings::current(window.app_handle()),
+        crate::capture_shortcut_is_registered(window.app_handle()),
+    ))
 }
 
 #[tauri::command]
@@ -4677,7 +4680,20 @@ pub fn retry_shortcut(window: WebviewWindow) -> Result<ShortcutStatusDto, String
             log::warn!("[shortcut] retry failed: {error}");
         }
     }
-    Ok(shortcut_status(crate::capture_shortcut_is_registered(app)))
+    Ok(shortcut_status(
+        crate::shortcut_settings::current(app),
+        crate::capture_shortcut_is_registered(app),
+    ))
+}
+
+#[tauri::command]
+pub fn set_capture_shortcut(
+    window: WebviewWindow,
+    shortcut: Option<String>,
+) -> Result<ShortcutStatusDto, String> {
+    require_library_window(&window)?;
+    crate::shortcut_settings::replace(window.app_handle(), shortcut.as_deref())?;
+    get_shortcut_status(window)
 }
 
 #[tauri::command]
@@ -4822,7 +4838,7 @@ mod command_security_tests {
 
     #[test]
     fn shortcut_status_reflects_native_registration() {
-        let enabled = super::shortcut_status(true);
+        let enabled = super::shortcut_status(crate::shortcut_settings::default_binding(), true);
         assert_eq!(
             enabled.label,
             crate::core::shortcut::KIRI_CAPTURE.display_label()
@@ -4830,7 +4846,7 @@ mod command_security_tests {
         assert_eq!(enabled.status, ShortcutRegistrationStatus::Enabled);
         assert_eq!(serde_json::to_value(&enabled).unwrap()["status"], "enabled");
 
-        let occupied = super::shortcut_status(false);
+        let occupied = super::shortcut_status(crate::shortcut_settings::default_binding(), false);
         assert_eq!(
             occupied.label,
             crate::core::shortcut::KIRI_CAPTURE.display_label()

@@ -312,6 +312,7 @@ export const api = {
 
   micSupported: () => invoke<boolean>("mic_supported"),
   getShortcutStatus: () => invoke<ShortcutStatusDto>("get_shortcut_status"),
+  setCaptureShortcut: (shortcut: string | null) => invoke<ShortcutStatusDto>("set_capture_shortcut", { shortcut }),
   retryShortcut: () => invoke<ShortcutStatusDto>("retry_shortcut"),
   openReleasePage: () => invoke<void>("open_release_page"),
   openSettings: (action: string) => invoke<void>("open_settings", { action }),
