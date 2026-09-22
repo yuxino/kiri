@@ -3,6 +3,10 @@
 This directory contains only documentation that describes the current Tauri
 application or a durable product decision.
 
+## User guides
+
+- [Video editing](video-editing.md) · [视频剪辑](video-editing.zh-CN.md) — import, trim, annotate, save, and export a local video.
+
 ## Current sources of truth
 
 - [`architecture.md`](architecture.md) — runtime structure, data boundaries,
