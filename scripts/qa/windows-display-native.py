@@ -131,7 +131,7 @@ if '--fixture' in sys.argv:
     raise SystemExit(0)
 
 from PIL import ImageGrab, ImageChops, ImageStat
-from pywinauto import Desktop, keyboard, mouse
+from pywinauto import Desktop, keyboard
 
 out = Path('windows-display-review')
 out.mkdir(exist_ok=True)
@@ -197,11 +197,12 @@ try:
         ImageGrab.grab(bbox=tuple(expected), all_screens=True).save(out / f'{layout}-overlay.png')
         if actual != expected:
             raise RuntimeError(f'{layout}: overlay {actual} != monitor {expected}')
-        mouse.press(coords=(x + 120, y + 180))
+        u.SetCursorPos(x + 120, y + 180)
+        u.mouse_event(0x0002, 0, 0, 0, 0)
         for step in range(1, 21):
-            mouse.move(coords=(x + 120 + 28 * step, y + 180 + 10 * step))
+            u.SetCursorPos(x + 120 + 28 * step, y + 180 + 10 * step)
             time.sleep(.02)
-        mouse.release(coords=(x + 680, y + 380))
+        u.mouse_event(0x0004, 0, 0, 0, 0)
         time.sleep(.5)
         ImageGrab.grab(bbox=tuple(expected), all_screens=True).save(out / f'{layout}-selected.png')
         keyboard.send_keys('{ENTER}')
