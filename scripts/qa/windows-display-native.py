@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import struct
 import sys
 import time
 
@@ -36,6 +37,8 @@ u.ChangeDisplaySettingsExW.argtypes = [w.LPCWSTR, ctypes.POINTER(DevMode), w.HWN
 u.SetWindowPos.argtypes = [w.HWND, w.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, w.UINT]
 u.GetParent.argtypes = [w.HWND]
 u.GetParent.restype = w.HWND
+shcore = ctypes.WinDLL('shcore')
+shcore.GetDpiForMonitor.argtypes = [w.HANDLE, ctypes.c_int, ctypes.POINTER(w.UINT), ctypes.POINTER(w.UINT)]
 
 
 def monitors():
@@ -46,7 +49,10 @@ def monitors():
         if not u.GetMonitorInfoW(handle, ctypes.byref(info)):
             raise ctypes.WinError(ctypes.get_last_error())
         r = info.monitor
-        found.append({'device': info.device, 'rect': [r.left, r.top, r.right, r.bottom], 'primary': bool(info.flags & 1)})
+        dpi_x, dpi_y = w.UINT(), w.UINT()
+        if shcore.GetDpiForMonitor(handle, 0, ctypes.byref(dpi_x), ctypes.byref(dpi_y)) != 0:
+            raise RuntimeError('GetDpiForMonitor failed')
+        found.append({'device': info.device, 'rect': [r.left, r.top, r.right, r.bottom], 'primary': bool(info.flags & 1), 'dpi': dpi_x.value})
         return True
     if not u.EnumDisplayMonitors(None, None, callback, 0):
         raise ctypes.WinError(ctypes.get_last_error())
@@ -64,6 +70,45 @@ def move_display(device, x, y):
     if result != 0:
         raise RuntimeError('ChangeDisplaySettingsEx: ' + str(result))
     time.sleep(2)
+
+
+def set_scale(device, percent):
+    # Isolated QA only: the Windows DPI request packets are undocumented.
+    # Layouts: https://github.com/lihas/windows-DPI-scaling-sample
+    paths_count, modes_count = w.UINT(), w.UINT()
+    result = u.GetDisplayConfigBufferSizes(2, ctypes.byref(paths_count), ctypes.byref(modes_count))
+    if result:
+        raise RuntimeError('GetDisplayConfigBufferSizes: ' + str(result))
+    paths = ctypes.create_string_buffer(paths_count.value * 72)
+    modes = ctypes.create_string_buffer(modes_count.value * 64)
+    result = u.QueryDisplayConfig(2, ctypes.byref(paths_count), paths, ctypes.byref(modes_count), modes, None)
+    if result:
+        raise RuntimeError('QueryDisplayConfig: ' + str(result))
+    for i in range(paths_count.value):
+        identity = paths.raw[i * 72:i * 72 + 12]
+        name = ctypes.create_string_buffer(struct.pack('<II', 1, 84) + identity + bytes(64), 84)
+        if u.DisplayConfigGetDeviceInfo(name) != 0:
+            continue
+        if name.raw[20:].decode('utf-16-le').split('\0')[0] != device:
+            continue
+        request = ctypes.create_string_buffer(struct.pack('<iI', -3, 32) + identity + bytes(12), 32)
+        result = u.DisplayConfigGetDeviceInfo(request)
+        if result:
+            raise RuntimeError('Read display DPI: ' + str(result))
+        minimum, current, maximum = struct.unpack('<iii', request.raw[20:])
+        relative = [100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500].index(percent) + minimum
+        if not minimum <= relative <= maximum:
+            raise RuntimeError('Requested DPI is outside monitor limits')
+        request = ctypes.create_string_buffer(struct.pack('<iI', -4, 24) + identity + struct.pack('<i', relative), 24)
+        result = u.DisplayConfigSetDeviceInfo(request)
+        if result:
+            raise RuntimeError('Set display DPI: ' + str(result))
+        time.sleep(2)
+        actual = next(m['dpi'] for m in monitors() if m['device'] == device)
+        if actual != round(96 * percent / 100):
+            raise RuntimeError(f'Display DPI unchanged: {actual}, requested {percent}%')
+        return
+    raise RuntimeError('Display source not found for scaling')
 
 
 if '--fixture' in sys.argv:
@@ -127,8 +172,11 @@ try:
     app = subprocess.Popen([str(exe)])
     wait_for(lambda: Desktop(backend='uia').windows(process=app.pid, visible_only=True))
     time.sleep(2)
-    for layout, x, y in [('right', primary['rect'][2], 0), ('left', -1920, 0), ('above', 0, -1080)]:
+    layouts = [(f'{name}-{scale}', x, y, scale) for scale in [100, 150]
+               for name, x, y in [('right', primary['rect'][2], 0), ('left', -1920, 0), ('above', 0, -1080)]]
+    for layout, x, y, scale in layouts:
         move_display(secondary['device'], x, y)
+        set_scale(secondary['device'], scale)
         fixture = subprocess.Popen([sys.executable, __file__, '--fixture', str(x), str(y), '1920', '1080'])
         time.sleep(2)
         source = ImageGrab.grab(bbox=(x + 120, y + 180, x + 680, y + 380), all_screens=True).convert('RGB')
@@ -144,7 +192,9 @@ try:
         if actual != expected:
             raise RuntimeError(f'{layout}: overlay {actual} != monitor {expected}')
         mouse.press(coords=(x + 120, y + 180))
-        mouse.move(coords=(x + 680, y + 380), duration=.5)
+        for step in range(1, 21):
+            mouse.move(coords=(x + 120 + 28 * step, y + 180 + 10 * step))
+            time.sleep(.02)
         mouse.release(coords=(x + 680, y + 380))
         time.sleep(.5)
         ImageGrab.grab(bbox=tuple(expected), all_screens=True).save(out / f'{layout}-selected.png')
