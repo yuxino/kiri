@@ -1,7 +1,7 @@
 {
   "name": "kiri",
   "private": true,
-  "version": "1.6.0",
+  "version": "1.6.1",
   "packageManager": "pnpm@10.33.2",
   "type": "module",
   "scripts": {

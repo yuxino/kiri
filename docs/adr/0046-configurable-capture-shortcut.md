@@ -30,3 +30,7 @@ for retry or replacement instead of silently selecting another combination.
 Cover validation and serialization in unit tests, and check native registration,
 conflicts, restart persistence, and reset in the packaged application. Multi-display
 capture remains a separate investigation and is not implied fixed by this change.
+
+While the shortcut field is recording, the current native binding remains
+registered but confirms the existing choice instead of starting capture. This
+transient state ends on cancellation, blur, unmount, or loss of library focus.

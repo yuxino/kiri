@@ -4687,6 +4687,18 @@ pub fn retry_shortcut(window: WebviewWindow) -> Result<ShortcutStatusDto, String
 }
 
 #[tauri::command]
+pub fn set_capture_shortcut_editing(window: WebviewWindow, editing: bool) -> Result<(), String> {
+    require_library_window(&window)?;
+    if editing && !window.is_focused().unwrap_or(false) {
+        return Err("Could not change the capture shortcut.".into());
+    }
+    window
+        .state::<crate::shortcut_settings::CaptureBinding>()
+        .set_editing(editing);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn set_capture_shortcut(
     window: WebviewWindow,
     shortcut: Option<String>,

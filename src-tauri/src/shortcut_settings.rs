@@ -2,7 +2,7 @@
 use std::{
     io::Write,
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Mutex,
     },
 };
@@ -12,6 +12,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut}
 pub struct CaptureBinding {
     current: Mutex<Shortcut>,
     id: AtomicU32,
+    editing: AtomicBool,
 }
 
 impl CaptureBinding {
@@ -19,6 +20,7 @@ impl CaptureBinding {
         Self {
             current: Mutex::new(shortcut),
             id: AtomicU32::new(shortcut.id()),
+            editing: AtomicBool::new(false),
         }
     }
 
@@ -26,6 +28,14 @@ impl CaptureBinding {
     // Never acquire the replacement mutex from that callback (lock inversion).
     pub fn matches(&self, shortcut: &Shortcut) -> bool {
         self.id.load(Ordering::Acquire) == shortcut.id()
+    }
+
+    pub fn set_editing(&self, editing: bool) {
+        self.editing.store(editing, Ordering::Release);
+    }
+
+    pub fn is_editing(&self) -> bool {
+        self.editing.load(Ordering::Acquire)
     }
 }
 

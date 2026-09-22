@@ -313,6 +313,7 @@ export const api = {
   micSupported: () => invoke<boolean>("mic_supported"),
   getShortcutStatus: () => invoke<ShortcutStatusDto>("get_shortcut_status"),
   setCaptureShortcut: (shortcut: string | null) => invoke<ShortcutStatusDto>("set_capture_shortcut", { shortcut }),
+  setCaptureShortcutEditing: (editing: boolean) => invoke<void>("set_capture_shortcut_editing", { editing }),
   retryShortcut: () => invoke<ShortcutStatusDto>("retry_shortcut"),
   openReleasePage: () => invoke<void>("open_release_page"),
   openSettings: (action: string) => invoke<void>("open_settings", { action }),
@@ -381,6 +382,10 @@ export function onError(handler: (error: ErrorDto) => void): Promise<UnlistenFn>
 
 export function onLibraryChanged(handler: () => void): Promise<UnlistenFn> {
   return listen("library-changed", handler);
+}
+
+export function onCaptureShortcutConfirmed(handler: () => void): Promise<UnlistenFn> {
+  return listen("capture-shortcut-confirmed", handler);
 }
 
 export function onAssetContentChanged(handler: (assetId: string) => void): Promise<UnlistenFn> {

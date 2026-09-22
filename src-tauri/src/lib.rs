@@ -62,6 +62,13 @@ pub fn run() {
                             .try_state::<shortcut_settings::CaptureBinding>()
                             .is_some_and(|binding| binding.matches(shortcut))
                     {
+                        let binding = app.state::<shortcut_settings::CaptureBinding>();
+                        if binding.is_editing() {
+                            // Keep the native registration owned while recording
+                            // a replacement; the current key confirms itself.
+                            let _ = app.emit_to("library", "capture-shortcut-confirmed", ());
+                            return;
+                        }
                         log::info!("[shortcut] pressed: {:?}", shortcut);
                         schedule_capture_start(app, "shortcut");
                     }
@@ -154,6 +161,16 @@ pub fn run() {
                 _ => {}
             }
             if window.label() == "library" {
+                if matches!(
+                    event,
+                    tauri::WindowEvent::Focused(false)
+                        | tauri::WindowEvent::CloseRequested { .. }
+                        | tauri::WindowEvent::Destroyed
+                ) {
+                    if let Some(binding) = window.try_state::<shortcut_settings::CaptureBinding>() {
+                        binding.set_editing(false);
+                    }
+                }
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     log::info!("[window] library close requested; hiding resident window");
                     api.prevent_close();
@@ -235,6 +252,7 @@ pub fn run() {
             commands::get_shortcut_status,
             commands::retry_shortcut,
             commands::set_capture_shortcut,
+            commands::set_capture_shortcut_editing,
             commands::open_settings,
             commands::quit_app,
             commands::get_recording_options,
