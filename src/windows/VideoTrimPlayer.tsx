@@ -388,6 +388,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
   function reorderClip(from:number,to:number){
     commitAnnotation.current?.();const current=docRef.current,next=moveSegment(current.segments,from,to);if(next===current.segments)return;
     apply({...current,segments:next});setSelected(to);playbackIndex.current=to;setEffectId(null);setAnnotating(false);seek(next[to].start);
+    requestAnimationFrame(()=>track.current?.querySelector<HTMLButtonElement>(".kiri-video-clip-select[aria-pressed='true']")?.focus({preventScroll:true}));
   }
   function dragClip(event:PointerEvent<HTMLButtonElement>,index:number){
     if(busy||event.button!==0||!track.current)return;
@@ -396,7 +397,7 @@ export function VideoTrimPlayer(props: { id: string; src: string; editable: bool
     const target=event.currentTarget,rect=track.current.getBoundingClientRect(),origin=event.clientX;
     const entries=timelineSegments(docRef.current.segments),length=entries.length,extent=timelineDuration(docRef.current.segments);
     let moved=false,slot=index;
-    setSelected(index);target.setPointerCapture(event.pointerId);
+    setSelected(index);target.focus({preventScroll:true});target.setPointerCapture(event.pointerId);
     const move=(e:globalThis.PointerEvent)=>{
       if(!moved&&Math.abs(e.clientX-origin)<5)return;
       moved=true;setDraggedClip(index);setDragOffset(e.clientX-origin);
