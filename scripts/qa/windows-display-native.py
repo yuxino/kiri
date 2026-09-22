@@ -178,9 +178,15 @@ try:
         move_display(secondary['device'], x, y)
         set_scale(secondary['device'], scale)
         fixture = subprocess.Popen([sys.executable, __file__, '--fixture', str(x), str(y), '1920', '1080'])
-        time.sleep(2)
+        fixture_windows = wait_for(lambda: Desktop(backend='win32').windows(process=fixture.pid, visible_only=True))
+        fixture_window = fixture_windows[0]
+        fixture_window.move_window(x, y, 1920, 1080, repaint=True)
+        fixture_window.set_focus()
+        time.sleep(1)
         source = ImageGrab.grab(bbox=(x + 120, y + 180, x + 680, y + 380), all_screens=True).convert('RGB')
         source.save(out / f'{layout}-source.png')
+        if source.getpixel((5, 5)) != (250, 250, 250):
+            raise RuntimeError('Native fixture is not visible at its expected secondary display position')
         u.SetCursorPos(x + 900, y + 600)
         keyboard.send_keys('^+a')
         window = wait_for(overlay)
