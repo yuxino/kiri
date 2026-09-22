@@ -7,6 +7,7 @@ import { fmt, getLanguage, setLanguage, t, type KiriLanguage } from "../i18n";
 import {
   api,
   onLibraryChanged,
+  onCaptureShortcutConfirmed,
   type LibraryStatusDto,
   type OcrEngineRef,
   type OcrProviderProfileDto,
@@ -511,6 +512,59 @@ function GeneralSettingsSection() {
   const [libraryOperationError, setLibraryOperationError] = useState<string | null>(null);
   const [shortcutStatus, setShortcutStatus] = useState<ShortcutStatusDto | null>(null);
   const [shortcutBusy, setShortcutBusy] = useState(false);
+  const [recordingShortcut, setRecordingShortcut] = useState(false);
+  const [shortcutError, setShortcutError] = useState<string | null>(null);
+  const shortcutEditorGeneration = useRef(0);
+
+  const stopRecordingShortcut = useCallback(() => {
+    ++shortcutEditorGeneration.current;
+    setRecordingShortcut(false);
+    void api.setCaptureShortcutEditing(false).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    // Also clear an interrupted editor after a frontend reload.
+    void api.setCaptureShortcutEditing(false).catch(() => {});
+    const subscription = onCaptureShortcutConfirmed(stopRecordingShortcut);
+    window.addEventListener("blur", stopRecordingShortcut);
+    return () => {
+      ++shortcutEditorGeneration.current;
+      void api.setCaptureShortcutEditing(false).catch(() => {});
+      window.removeEventListener("blur", stopRecordingShortcut);
+      void subscription.then((dispose) => dispose()).catch(() => {});
+    };
+  }, [stopRecordingShortcut]);
+
+  const beginRecordingShortcut = async (button: HTMLButtonElement) => {
+    button.focus();
+    if (recordingShortcut) { stopRecordingShortcut(); return; }
+    const generation = ++shortcutEditorGeneration.current;
+    setShortcutError(null);
+    try {
+      await api.setCaptureShortcutEditing(true);
+      if (generation === shortcutEditorGeneration.current && document.activeElement === button) {
+        setRecordingShortcut(true);
+      }
+    } catch {
+      setShortcutError("Could not change the capture shortcut.");
+    }
+  };
+
+  const changeShortcut = async (shortcut: string | null) => {
+    if (shortcutBusy) return;
+    stopRecordingShortcut();
+    setShortcutBusy(true);
+    setShortcutError(null);
+    try {
+      setShortcutStatus(await api.setCaptureShortcut(shortcut));
+    } catch (error) {
+      setShortcutError(String(error));
+      const status = await api.getShortcutStatus().catch(() => null);
+      if (status) setShortcutStatus(status);
+    } finally {
+      setShortcutBusy(false);
+    }
+  };
   const libraryStatusGeneration = useRef(0);
 
   const loadLibraryStatus = useCallback(async (clearOperationErrorOnSuccess = false) => {
@@ -546,6 +600,7 @@ function GeneralSettingsSection() {
 
   const retryShortcut = async () => {
     if (shortcutBusy) return;
+    setShortcutError(null);
     setShortcutBusy(true);
     try {
       setShortcutStatus(await api.retryShortcut());
@@ -621,8 +676,35 @@ function GeneralSettingsSection() {
         <div className="kiri-shortcut-copy">
           <strong>{t("Capture Shortcut")}</strong>
           <span>{shortcutStatus?.label ?? "—"}</span>
+          {shortcutError && <span role="alert">{t(shortcutError)}</span>}
         </div>
         <div className="kiri-shortcut-actions">
+          <button
+            type="button"
+            className="kiri-button kiri-button--secondary"
+            disabled={shortcutBusy || !shortcutStatus}
+            aria-pressed={recordingShortcut}
+            onClick={(event) => void beginRecordingShortcut(event.currentTarget)}
+            onBlur={stopRecordingShortcut}
+            onKeyDown={(event) => {
+              if (!recordingShortcut || event.key === "Tab") return;
+              event.preventDefault();
+              event.stopPropagation();
+              if (event.key === "Escape") { stopRecordingShortcut(); return; }
+              if (event.repeat || event.nativeEvent.isComposing || /^(Control|Shift|Alt|Meta)$/.test(event.key)) return;
+              if (!/^(Key[A-Z]|Digit[0-9])$/.test(event.code) || !(event.ctrlKey || event.altKey || event.metaKey)) {
+                setShortcutError("Use Control, Alt, or Command with a letter or number.");
+                return;
+              }
+              const modifiers = [event.ctrlKey && "Control", event.altKey && "Alt", event.shiftKey && "Shift", event.metaKey && "Super"].filter(Boolean);
+              void changeShortcut([...modifiers, event.code].join("+"));
+            }}
+          >
+            {t(recordingShortcut ? "Press a new shortcut (Esc to cancel)" : "Change Shortcut")}
+          </button>
+          <button type="button" className="kiri-button kiri-button--secondary" disabled={shortcutBusy || !shortcutStatus} onClick={() => void changeShortcut(null)}>
+            {t("Restore Default Shortcut")}
+          </button>
           {shortcutStatus && (
             <span className="kiri-settings-badge" role="status" aria-live="polite">
               {t(shortcutStatus.status === "enabled" ? "Enabled" : "In Use")}

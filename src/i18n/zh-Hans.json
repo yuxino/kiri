@@ -562,5 +562,13 @@
   "Export cancelled. Your edit is still here.": "导出已取消，编辑内容仍然保留。",
   "Couldn't cancel the export. Try again or wait for it to finish.": "未能取消导出，请重试或等导出完成。",
   "Finishing…": "正在完成…",
-  "Cancel export": "取消导出"
+  "Cancel export": "取消导出",
+  "Change Shortcut": "修改快捷键",
+  "Restore Default Shortcut": "恢复默认快捷键",
+  "Press a new shortcut (Esc to cancel)": "按下新快捷键（Esc 取消）",
+  "Use Control, Alt, or Command with a letter or number.": "请使用 Control、Alt 或 Command 搭配字母或数字。",
+  "Invalid capture shortcut.": "截图快捷键无效。",
+  "Could not save the capture shortcut.": "无法保存截图快捷键。",
+  "This shortcut is unavailable. Choose another combination.": "此快捷键不可用，请选择其他组合。",
+  "Could not change the capture shortcut.": "无法修改截图快捷键。"
 }

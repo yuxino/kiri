@@ -53,7 +53,10 @@ unrestricted filesystem path.
 1. The native global shortcut asks Rust to start a capture session and records
    the previously focused application. Registration needs no TCC permission;
    a conflicting binding leaves Kiri running and is surfaced in Settings for
-   retry. Shortcut and tray requests acquire an owned scheduling permit before
+   retry or replacement. Settings can record a modified letter or digit and
+   restore the default. The candidate is registered before the old binding is
+   released; the native preference is atomically persisted and loaded on launch.
+   Shortcut and tray requests acquire an owned scheduling permit before
    dispatch, so key repeat cannot leave a burst of stale capture starts behind
    a slow or timed-out native freeze. Windows runs the complete startup on a
    dedicated thread: desktop capture and creation of a second WebView2

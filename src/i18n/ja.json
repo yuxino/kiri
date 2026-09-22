@@ -562,5 +562,13 @@
   "Export cancelled. Your edit is still here.": "書き出しをキャンセルしました。編集内容は保持されています。",
   "Couldn't cancel the export. Try again or wait for it to finish.": "書き出しをキャンセルできませんでした。再試行するか、完了をお待ちください。",
   "Finishing…": "完了処理中…",
-  "Cancel export": "書き出しをキャンセル"
+  "Cancel export": "書き出しをキャンセル",
+  "Change Shortcut": "ショートカットを変更",
+  "Restore Default Shortcut": "既定のショートカットに戻す",
+  "Press a new shortcut (Esc to cancel)": "新しいショートカットを押す（Esc でキャンセル）",
+  "Use Control, Alt, or Command with a letter or number.": "Control、Alt、Command のいずれかと英字または数字を組み合わせてください。",
+  "Invalid capture shortcut.": "キャプチャショートカットが無効です。",
+  "Could not save the capture shortcut.": "キャプチャショートカットを保存できませんでした。",
+  "This shortcut is unavailable. Choose another combination.": "このショートカットは使用できません。別の組み合わせを選んでください。",
+  "Could not change the capture shortcut.": "キャプチャショートカットを変更できませんでした。"
 }

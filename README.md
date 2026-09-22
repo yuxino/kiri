@@ -68,6 +68,8 @@ macOS development builds also require a stable signing identity. Run and build t
 
 ## Shortcuts
 
+The capture shortcut can be changed or restored in **Settings → General**. Use Control, Alt, or Command with a letter or number. If another application owns the new combination, Kiri keeps the previous binding. The following capture shortcut is the default.
+
 - **⇧⌘A** (macOS) / **Shift+Ctrl+A** (Windows): open Kiri
 - **Esc**: cancel capture; stop while recording
 - **Return**: confirm a screenshot

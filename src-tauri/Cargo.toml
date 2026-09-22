@@ -1,6 +1,6 @@
 [package]
 name = "kiri"
-version = "1.6.0"
+version = "1.6.1"
 description = "Kiri - a fast, local-first capture workspace"
 authors = ["yuxino"]
 edition = "2021"
@@ -176,11 +176,13 @@ keyring = { version = "3.6.3", default-features = false, features = ["windows-na
 # unrelated Cargo workspace in a parent directory.
 [workspace]
 resolver = "2"
-exclude = ["vendor/wry"]
+exclude = ["vendor/wry", "vendor/global-hotkey"]
 
 [patch.crates-io]
 # Tauri 2.11 requires Wry 0.55; carry its upstream Windows teardown fix.
 wry = { path = "vendor/wry" }
+# Native capture bindings must report macOS conflicts instead of sharing them.
+global-hotkey = { path = "vendor/global-hotkey" }
 
 [profile.release]
 opt-level = 3

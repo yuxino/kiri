@@ -562,5 +562,13 @@
   "Export cancelled. Your edit is still here.": "Export cancelled. Your edit is still here.",
   "Couldn't cancel the export. Try again or wait for it to finish.": "Couldn't cancel the export. Try again or wait for it to finish.",
   "Finishing…": "Finishing…",
-  "Cancel export": "Cancel export"
+  "Cancel export": "Cancel export",
+  "Change Shortcut": "Change Shortcut",
+  "Restore Default Shortcut": "Restore Default Shortcut",
+  "Press a new shortcut (Esc to cancel)": "Press a new shortcut (Esc to cancel)",
+  "Use Control, Alt, or Command with a letter or number.": "Use Control, Alt, or Command with a letter or number.",
+  "Invalid capture shortcut.": "Invalid capture shortcut.",
+  "Could not save the capture shortcut.": "Could not save the capture shortcut.",
+  "This shortcut is unavailable. Choose another combination.": "This shortcut is unavailable. Choose another combination.",
+  "Could not change the capture shortcut.": "Could not change the capture shortcut."
 }

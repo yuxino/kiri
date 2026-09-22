@@ -21,6 +21,7 @@ mod platform;
 mod protocol;
 mod record;
 mod remote_ocr;
+mod shortcut_settings;
 mod state;
 mod thumbnail;
 mod updates;
@@ -56,7 +57,18 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     use tauri_plugin_global_shortcut::ShortcutState;
-                    if event.state() == ShortcutState::Pressed {
+                    if event.state() == ShortcutState::Pressed
+                        && app
+                            .try_state::<shortcut_settings::CaptureBinding>()
+                            .is_some_and(|binding| binding.matches(shortcut))
+                    {
+                        let binding = app.state::<shortcut_settings::CaptureBinding>();
+                        if binding.is_editing() {
+                            // Keep the native registration owned while recording
+                            // a replacement; the current key confirms itself.
+                            let _ = app.emit_to("library", "capture-shortcut-confirmed", ());
+                            return;
+                        }
                         log::info!("[shortcut] pressed: {:?}", shortcut);
                         schedule_capture_start(app, "shortcut");
                     }
@@ -95,6 +107,9 @@ pub fn run() {
             let options = state::load_recording_options(app.handle());
             *state.saved_recording_options.lock().unwrap() = options;
             app.manage(state);
+            app.manage(shortcut_settings::CaptureBinding::new(
+                shortcut_settings::load(app.handle()),
+            ));
             show_library_window(app.handle(), "startup").map_err(anyhow::Error::msg)?;
 
             // A conflicting system-wide shortcut must not prevent Kiri from
@@ -146,6 +161,16 @@ pub fn run() {
                 _ => {}
             }
             if window.label() == "library" {
+                if matches!(
+                    event,
+                    tauri::WindowEvent::Focused(false)
+                        | tauri::WindowEvent::CloseRequested { .. }
+                        | tauri::WindowEvent::Destroyed
+                ) {
+                    if let Some(binding) = window.try_state::<shortcut_settings::CaptureBinding>() {
+                        binding.set_editing(false);
+                    }
+                }
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     log::info!("[window] library close requested; hiding resident window");
                     api.prevent_close();
@@ -226,6 +251,8 @@ pub fn run() {
             commands::set_language,
             commands::get_shortcut_status,
             commands::retry_shortcut,
+            commands::set_capture_shortcut,
+            commands::set_capture_shortcut_editing,
             commands::open_settings,
             commands::quit_app,
             commands::get_recording_options,
@@ -306,30 +333,20 @@ fn install_macos_app_icon() -> std::io::Result<()> {
 
 pub(crate) fn register_shortcut(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    let shortcut = capture_shortcut();
+    let shortcut = shortcut_settings::current(app);
     app.global_shortcut()
         .register(shortcut)
         .map_err(|e| tauri::Error::Anyhow(e.into()))?;
     log::info!(
         "[shortcut] registered {}",
-        crate::core::shortcut::KIRI_CAPTURE.display_label()
+        shortcut_settings::label(shortcut)
     );
     Ok(())
 }
 
-fn capture_shortcut() -> tauri_plugin_global_shortcut::Shortcut {
-    use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
-    // macOS: Command+Shift+A; Windows: Control+Shift+A.
-    #[cfg(target_os = "macos")]
-    let modifiers = Modifiers::SUPER | Modifiers::SHIFT;
-    #[cfg(not(target_os = "macos"))]
-    let modifiers = Modifiers::CONTROL | Modifiers::SHIFT;
-    Shortcut::new(Some(modifiers), Code::KeyA)
-}
-
 pub(crate) fn capture_shortcut_is_registered(app: &tauri::AppHandle) -> bool {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    app.global_shortcut().is_registered(capture_shortcut())
+    app.global_shortcut().is_registered(shortcut_settings::current(app))
 }
 
 /// Installs the global click monitor for the click ripple. The monitor uses

@@ -25,3 +25,26 @@ Windows desktop acceptance repeatedly cancels a real countdown by both click
 and Escape, then completes recording, pause, resume and stop. Failed runs retain
 the crash dump and matching symbols; the passing application must also complete
 the existing native video export tests.
+
+## macOS exclusive capture hotkeys
+
+`global-hotkey/` contains the crates.io global-hotkey 0.8.0 distribution with
+one source change in `src/platform_impl/macos/mod.rs`: pass
+`kEventHotKeyExclusive` (1) to `RegisterEventHotKey`. Upstream passes zero,
+which permits shared registrations and can report success even when an
+exclusive registration in another process prevents the expected behavior.
+Kiri needs registration failures to preserve the previous capture shortcut
+when a replacement conflicts (issue #21). Windows is unchanged.
+
+Original crate SHA-256:
+`8c386b0a4a70cb2d39fffd74480f985b6f0bfbcb934b6a6b6b7e630e448f242e`.
+Upstream source commit: `2a620bf3852008b568f6d36c2baedcc3dd0822f2`.
+
+One trailing whitespace line in the upstream packaging workflow is normalized.
+The original MIT and Apache-2.0 licenses are retained. Remove this patch when
+the upstream library exposes an exclusive-registration option, or adopts
+exclusive native registration. Do not modify the shared registry cache.
+
+Native acceptance uses a separate Carbon process holding an exclusive binding:
+restoring that default must fail while the custom shortcut remains enabled;
+after the helper exits, restoring the default must succeed.

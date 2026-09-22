@@ -20,9 +20,10 @@ Read it before editing, then read `docs/architecture.md`.
 Kiri is a local-first capture utility for macOS and Windows. Preserve these
 decisions:
 
-- The global capture shortcut is `⇧⌘A` on macOS and `Shift+Ctrl+A` on Windows.
+- The default global capture shortcut is `⇧⌘A` on macOS and `Shift+Ctrl+A` on Windows.
   Both use the platform's native global-hotkey registration; the shortcut does
-  not require Input Monitoring permission.
+  not require Input Monitoring permission. Settings may replace the binding
+  with a modified letter or digit and restore this default (ADR 0046).
 - The initial overlay offers Screenshot, Record, and OCR.
 - Window hover shows exactly one restrained monochrome outline without handles,
   dimensions, stacked borders, or a following tooltip. A click selects that
