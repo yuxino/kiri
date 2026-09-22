@@ -20,6 +20,12 @@ $driver = Join-Path $qa 'driver/VirtualDisplayDriver'
 $signature = Get-AuthenticodeSignature (Join-Path $driver 'mttvdd.cat')
 $signature | Format-List Status, StatusMessage, SignerCertificate | Out-File windows-display-review/driver-signature.txt
 if ($signature.Status -ne 'Valid') { throw 'Virtual display driver catalog signature is not valid' }
+# A valid Authenticode driver publisher still requires explicit installation
+# consent. Trust only this verified leaf publisher on the disposable runner;
+# never install a root certificate or disable Windows signature enforcement.
+$publisher = Join-Path $qa 'publisher.cer'
+[IO.File]::WriteAllBytes($publisher, $signature.SignerCertificate.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+Import-Certificate -FilePath $publisher -CertStoreLocation Cert:/LocalMachine/TrustedPublisher | Out-Null
 # The driver reads this configuration from its documented default directory.
 New-Item -ItemType Directory -Force C:/VirtualDisplayDriver | Out-Null
 Copy-Item (Join-Path $driver 'vdd_settings.xml') C:/VirtualDisplayDriver/vdd_settings.xml
