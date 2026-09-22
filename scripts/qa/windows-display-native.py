@@ -172,10 +172,12 @@ try:
     app = subprocess.Popen([str(exe)])
     wait_for(lambda: Desktop(backend='uia').windows(process=app.pid, visible_only=True))
     time.sleep(2)
-    layouts = [(f'{name}-{scale}', x, y, scale) for scale in [100, 150]
+    layouts = [(f'{name}-primary{primary_scale}-secondary{scale}', x, y, primary_scale, scale)
+               for primary_scale, scale in [(100, 100), (100, 125), (100, 150), (100, 200), (150, 100)]
                for name, x, y in [('right', primary['rect'][2], 0), ('left', -1920, 0), ('above', 0, -1080)]]
-    for layout, x, y, scale in layouts:
+    for layout, x, y, primary_scale, scale in layouts:
         move_display(secondary['device'], x, y)
+        set_scale(primary['device'], primary_scale)
         set_scale(secondary['device'], scale)
         fixture = subprocess.Popen([sys.executable, __file__, '--fixture', str(x), str(y), '1920', '1080'])
         fixture_windows = wait_for(lambda: Desktop(backend='win32').windows(process=fixture.pid, visible_only=True))
