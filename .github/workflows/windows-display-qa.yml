@@ -1,0 +1,72 @@
+name: Windows multi-display acceptance
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-display-qa.yml'
+      - 'scripts/qa/windows-display-*.py'
+      - 'scripts/qa/windows-display-*.ps1'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published Kiri version to verify
+        default: v1.6.2
+        required: true
+      installer_sha256:
+        description: Reviewed SHA-256 of that version's x64 NSIS installer
+        default: b8924fccd3f0524cd24e79ecc74a83fe55a526620fe7a5a536a54d1de3bc5c56
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  native-displays:
+    name: Published Windows version on native multi-display desktop
+    runs-on: windows-2025
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Prepare disposable native displays
+        timeout-minutes: 3
+        run: ./scripts/qa/windows-display-setup.ps1
+      - name: Inspect display topology
+        if: always()
+        run: |
+          New-Item -ItemType Directory -Force windows-display-review | Out-Null
+          Get-PnpDevice -Class Display | Format-List * | Out-File windows-display-review/devices.txt
+          Add-Type -AssemblyName System.Windows.Forms
+          [System.Windows.Forms.Screen]::AllScreens | Format-List * | Out-File windows-display-review/screens.txt
+          Copy-Item C:/Windows/INF/setupapi.dev.log windows-display-review/ -ErrorAction SilentlyContinue
+      - name: Install published version and verify secondary captures
+        timeout-minutes: 8
+        env:
+          KIRI_QA_TAG: ${{ inputs.release_tag || 'v1.6.2' }}
+          KIRI_QA_SHA256: ${{ inputs.installer_sha256 || 'b8924fccd3f0524cd24e79ecc74a83fe55a526620fe7a5a536a54d1de3bc5c56' }}
+        run: |
+          if ($env:KIRI_QA_TAG -notmatch '^v\d+\.\d+\.\d+$' -or $env:KIRI_QA_SHA256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'Invalid version or checksum' }
+          python -m pip install pywinauto==0.6.9 Pillow==11.3.0
+          $installer = Join-Path $env:RUNNER_TEMP 'kiri-baseline.exe'
+          $version = $env:KIRI_QA_TAG.Substring(1)
+          Invoke-WebRequest "https://github.com/yuxino/kiri/releases/download/$($env:KIRI_QA_TAG)/kiri_$($version)_x64-setup.exe" -OutFile $installer
+          if ((Get-FileHash $installer).Hash -ne $env:KIRI_QA_SHA256) { throw 'Installer checksum mismatch' }
+          $install = Join-Path $env:RUNNER_TEMP 'kiri-baseline'
+          $p = Start-Process $installer -ArgumentList @('/S', "/D=$install") -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
+          $env:KIRI_QA_EXE = Join-Path $install 'kiri.exe'
+          python scripts/qa/windows-display-native.py
+      - name: Preserve application diagnostics even after a timeout
+        if: always()
+        run: |
+          $log = Join-Path $env:LOCALAPPDATA 'io.yuxino.kiri/logs/kiri.log'
+          if (Test-Path $log) { Copy-Item $log windows-display-review/kiri.log }
+          Get-Process kiri -ErrorAction SilentlyContinue | Select-Object Id, Responding, CPU, WorkingSet | ConvertTo-Json | Out-File windows-display-review/process.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-display-review
+          path: windows-display-review/
+          retention-days: 5

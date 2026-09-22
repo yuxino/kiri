@@ -1,0 +1,817 @@
+{
+  "success": true,
+  "environment": [
+    {
+      "device": "\\\\.\\DISPLAY1",
+      "rect": [
+        0,
+        0,
+        1024,
+        768
+      ],
+      "primary": true,
+      "dpi": 96
+    },
+    {
+      "device": "\\\\.\\DISPLAY2",
+      "rect": [
+        1024,
+        0,
+        1824,
+        600
+      ],
+      "primary": false,
+      "dpi": 96
+    },
+    {
+      "device": "\\\\.\\DISPLAY3",
+      "rect": [
+        1824,
+        0,
+        2624,
+        600
+      ],
+      "primary": false,
+      "dpi": 96
+    }
+  ],
+  "checks": [
+    {
+      "layout": "right-primary100-secondary100",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            2560,
+            0,
+            5120,
+            1440
+          ],
+          "primary": false,
+          "dpi": 96
+        }
+      ],
+      "overlay": [
+        2560,
+        0,
+        5120,
+        1440
+      ],
+      "expected": [
+        2560,
+        0,
+        5120,
+        1440
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "left-primary100-secondary100",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            -2560,
+            0,
+            0,
+            1440
+          ],
+          "primary": false,
+          "dpi": 96
+        }
+      ],
+      "overlay": [
+        -2560,
+        0,
+        0,
+        1440
+      ],
+      "expected": [
+        -2560,
+        0,
+        0,
+        1440
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "above-primary100-secondary100",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            0,
+            -1440,
+            2560,
+            0
+          ],
+          "primary": false,
+          "dpi": 96
+        }
+      ],
+      "overlay": [
+        0,
+        -1440,
+        2560,
+        0
+      ],
+      "expected": [
+        0,
+        -1440,
+        2560,
+        0
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "right-primary100-secondary125",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            2560,
+            0,
+            5120,
+            1440
+          ],
+          "primary": false,
+          "dpi": 120
+        }
+      ],
+      "overlay": [
+        2560,
+        0,
+        5120,
+        1440
+      ],
+      "expected": [
+        2560,
+        0,
+        5120,
+        1440
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "left-primary100-secondary125",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            -2560,
+            0,
+            0,
+            1440
+          ],
+          "primary": false,
+          "dpi": 120
+        }
+      ],
+      "overlay": [
+        -2560,
+        0,
+        0,
+        1440
+      ],
+      "expected": [
+        -2560,
+        0,
+        0,
+        1440
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "above-primary100-secondary125",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            0,
+            -1440,
+            2560,
+            0
+          ],
+          "primary": false,
+          "dpi": 120
+        }
+      ],
+      "overlay": [
+        0,
+        -1440,
+        2560,
+        0
+      ],
+      "expected": [
+        0,
+        -1440,
+        2560,
+        0
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "right-primary100-secondary150",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            2560,
+            0,
+            5120,
+            1440
+          ],
+          "primary": false,
+          "dpi": 144
+        }
+      ],
+      "overlay": [
+        2560,
+        0,
+        5120,
+        1440
+      ],
+      "expected": [
+        2560,
+        0,
+        5120,
+        1440
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "left-primary100-secondary150",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            -2560,
+            0,
+            0,
+            1440
+          ],
+          "primary": false,
+          "dpi": 144
+        }
+      ],
+      "overlay": [
+        -2560,
+        0,
+        0,
+        1440
+      ],
+      "expected": [
+        -2560,
+        0,
+        0,
+        1440
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "above-primary100-secondary150",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            0,
+            -1440,
+            2560,
+            0
+          ],
+          "primary": false,
+          "dpi": 144
+        }
+      ],
+      "overlay": [
+        0,
+        -1440,
+        2560,
+        0
+      ],
+      "expected": [
+        0,
+        -1440,
+        2560,
+        0
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "right-primary100-secondary200",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            2560,
+            0,
+            5120,
+            1440
+          ],
+          "primary": false,
+          "dpi": 192
+        }
+      ],
+      "overlay": [
+        2560,
+        0,
+        5120,
+        1440
+      ],
+      "expected": [
+        2560,
+        0,
+        5120,
+        1440
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "left-primary100-secondary200",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            -2560,
+            0,
+            0,
+            1440
+          ],
+          "primary": false,
+          "dpi": 192
+        }
+      ],
+      "overlay": [
+        -2560,
+        0,
+        0,
+        1440
+      ],
+      "expected": [
+        -2560,
+        0,
+        0,
+        1440
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "above-primary100-secondary200",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            0,
+            -1440,
+            2560,
+            0
+          ],
+          "primary": false,
+          "dpi": 192
+        }
+      ],
+      "overlay": [
+        0,
+        -1440,
+        2560,
+        0
+      ],
+      "expected": [
+        0,
+        -1440,
+        2560,
+        0
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "right-primary150-secondary100",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 144
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            2560,
+            0,
+            5120,
+            1440
+          ],
+          "primary": false,
+          "dpi": 96
+        }
+      ],
+      "overlay": [
+        2560,
+        0,
+        5120,
+        1440
+      ],
+      "expected": [
+        2560,
+        0,
+        5120,
+        1440
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "left-primary150-secondary100",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 144
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            -2560,
+            0,
+            0,
+            1440
+          ],
+          "primary": false,
+          "dpi": 96
+        }
+      ],
+      "overlay": [
+        -2560,
+        0,
+        0,
+        1440
+      ],
+      "expected": [
+        -2560,
+        0,
+        0,
+        1440
+      ],
+      "pixel_mean_error": 0.0
+    },
+    {
+      "layout": "above-primary150-secondary100",
+      "monitors": [
+        {
+          "device": "\\\\.\\DISPLAY1",
+          "rect": [
+            0,
+            1440,
+            1024,
+            2208
+          ],
+          "primary": false,
+          "dpi": 96
+        },
+        {
+          "device": "\\\\.\\DISPLAY2",
+          "rect": [
+            0,
+            0,
+            2560,
+            1440
+          ],
+          "primary": true,
+          "dpi": 144
+        },
+        {
+          "device": "\\\\.\\DISPLAY3",
+          "rect": [
+            0,
+            -1440,
+            2560,
+            0
+          ],
+          "primary": false,
+          "dpi": 96
+        }
+      ],
+      "overlay": [
+        0,
+        -1440,
+        2560,
+        0
+      ],
+      "expected": [
+        0,
+        -1440,
+        2560,
+        0
+      ],
+      "pixel_mean_error": 0.0
+    }
+  ],
+  "executable_sha256": "f592ec46816420c0bf024df398691ed7f7c3447877d933e6086861dd08752262",
+  "test_primary": {
+    "device": "\\\\.\\DISPLAY2",
+    "rect": [
+      0,
+      0,
+      2560,
+      1440
+    ],
+    "primary": true,
+    "dpi": 120
+  }
+}
