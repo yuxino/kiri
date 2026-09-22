@@ -1,6 +1,11 @@
 name: Windows multi-display acceptance
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-display-qa.yml'
+      - 'scripts/qa/windows-display-*.py'
+      - 'scripts/qa/windows-display-*.ps1'
   workflow_dispatch:
     inputs:
       release_tag:
@@ -17,6 +22,7 @@ permissions:
 
 jobs:
   native-displays:
+    name: Published Windows version on native multi-display desktop
     runs-on: windows-2025
     timeout-minutes: 12
     steps:
