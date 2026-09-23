@@ -61,7 +61,8 @@ def monitors():
 
 def move_display(device, x, y, primary=False, resize=True, deferred=False, portrait=False, disconnect=False):
     mode = DevMode(size=ctypes.sizeof(DevMode))
-    if not u.EnumDisplaySettingsW(device, 0xffffffff, ctypes.byref(mode)):
+    if not (u.EnumDisplaySettingsW(device, 0xffffffff, ctypes.byref(mode))
+            or u.EnumDisplaySettingsW(device, 0xfffffffe, ctypes.byref(mode))):
         raise ctypes.WinError(ctypes.get_last_error())
     mode.x, mode.y = x, y
     mode.fields = 0x20  # position
