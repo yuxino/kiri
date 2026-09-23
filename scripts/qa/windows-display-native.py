@@ -234,6 +234,8 @@ try:
             if any(m['device'] == secondary['device'] for m in detached):
                 raise RuntimeError('Secondary display did not disconnect')
             report['detached_topology'] = detached
+            subprocess.run([str(Path(os.environ['WINDIR']) / 'System32' / 'DisplaySwitch.exe'), '/extend'], check=True)
+            wait_for(lambda: any(m['device'] == secondary['device'] for m in monitors()))
         if action != 'primary':
             move_display(secondary['device'], x, y, portrait=action == 'portrait')
         set_scale(primary['device'], primary_scale)
