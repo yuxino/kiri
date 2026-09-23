@@ -59,15 +59,19 @@ def monitors():
     return found
 
 
-def move_display(device, x, y, primary=False, resize=True, deferred=False):
+def move_display(device, x, y, primary=False, resize=True, deferred=False, portrait=False, disconnect=False):
     mode = DevMode(size=ctypes.sizeof(DevMode))
     if not u.EnumDisplaySettingsW(device, 0xffffffff, ctypes.byref(mode)):
         raise ctypes.WinError(ctypes.get_last_error())
     mode.x, mode.y = x, y
     mode.fields = 0x20  # position
     if resize:
-        mode.width, mode.height, mode.frequency = 2560, 1440, 60
-        mode.fields |= 0x80000 | 0x100000 | 0x400000  # width, height, frequency
+        mode.width, mode.height = (1440, 2560) if portrait else (2560, 1440)
+        mode.frequency, mode.orientation = 60, int(portrait)
+        mode.fields |= 0x80000 | 0x100000 | 0x400000 | 0x80
+    if disconnect:
+        mode.width = mode.height = 0
+        mode.fields = 0x20 | 0x80000 | 0x100000
     flags = (0x10 if primary else 0) | (0x10000001 if deferred else 0)
     result = u.ChangeDisplaySettingsExW(device, ctypes.byref(mode), None, flags, None)
     if result != 0:
@@ -125,7 +129,9 @@ if '--fixture' in sys.argv:
     canvas = tk.Canvas(root, bg='#ededed', highlightthickness=0)
     canvas.pack(fill='both', expand=True)
     canvas.create_rectangle(120, 180, 680, 380, fill='#fafafa', outline='')
-    canvas.create_text(150, 210, anchor='nw', text='SECONDARY DISPLAY\nKiri native screenshot verification\nLocal pixels stay on this display', font=('Arial', 20), fill='#202020')
+    case = os.environ.get('KIRI_QA_CASE', 'SECONDARY DISPLAY')
+    text_origin = (30, 30) if width == 560 else (150, 210)
+    canvas.create_text(*text_origin, anchor='nw', text=f'{case}\nKiri native screenshot verification\nLocal pixels stay on this display', font=('Arial', 20), fill='#202020')
     root.update()
     hwnd = u.GetParent(root.winfo_id())
     if not u.SetWindowPos(hwnd, None, x, y, width, height, 0x40):
@@ -168,6 +174,20 @@ def overlay():
     return None
 
 
+def empty_clipboard():
+    wait_for(lambda: u.OpenClipboard(None))
+    try:
+        if not u.EmptyClipboard():
+            raise ctypes.WinError(ctypes.get_last_error())
+    finally:
+        u.CloseClipboard()
+
+
+def clipboard_image():
+    copied = ImageGrab.grabclipboard()
+    return copied if hasattr(copied, 'size') else None
+
+
 try:
     virtual = [m for m in report['environment'] if not m['primary']]
     if len(virtual) < 2:
@@ -190,46 +210,84 @@ try:
     app = subprocess.Popen([str(exe)])
     wait_for(lambda: Desktop(backend='uia').windows(process=app.pid, visible_only=True))
     time.sleep(2)
-    layouts = [(f'{name}-primary{primary_scale}-secondary{scale}', x, y, primary_scale, scale)
+    layouts = [(f'{name}-primary{primary_scale}-secondary{scale}', x, y, primary_scale, scale, 'drag')
                for primary_scale, scale in [(100, 100), (100, 125), (100, 150), (100, 200), (150, 100)]
                for name, x, y in [('right', primary['rect'][2], 0), ('left', -2560, 0), ('above', 0, -1440)]]
-    for layout, x, y, primary_scale, scale in layouts:
-        move_display(secondary['device'], x, y)
+    if os.environ.get('KIRI_QA_SUITE') == 'extended':
+        layouts = [
+            ('dual-fractional-right', 2560, 0, 125, 150, 'drag'),
+            ('dual-scaled-left', -2560, 0, 200, 125, 'drag'),
+            ('fractional-above-cancel-retry', 0, -1440, 150, 175, 'cancel-retry'),
+            ('fractional-window-click', -2560, 0, 125, 150, 'window'),
+            ('portrait-right', 2560, 0, 100, 150, 'portrait'),
+            ('reconnected-left', -2560, 0, 100, 150, 'reconnect'),
+            ('negative-offset-edge', -2560, -720, 150, 125, 'edge'),
+            ('primary-after-secondary', 0, 0, 150, 125, 'primary'),
+            ('secondary-after-primary', 2560, 0, 150, 125, 'drag'),
+        ]
+    report['suite'] = os.environ.get('KIRI_QA_SUITE', 'baseline')
+    for layout, x, y, primary_scale, scale, action in layouts:
+        if action == 'reconnect':
+            move_display(secondary['device'], x, y, disconnect=True)
+            detached = monitors()
+            if any(m['device'] == secondary['device'] for m in detached):
+                raise RuntimeError('Secondary display did not disconnect')
+            report['detached_topology'] = detached
+        if action != 'primary':
+            move_display(secondary['device'], x, y, portrait=action == 'portrait')
         set_scale(primary['device'], primary_scale)
         set_scale(secondary['device'], scale)
-        fixture = subprocess.Popen([sys.executable, __file__, '--fixture', str(x), str(y), '2560', '1440'])
+        selected = next(m for m in monitors() if m['device'] == (primary if action == 'primary' else secondary)['device'])
+        expected = selected['rect']
+        if expected[:2] != [x, y]:
+            raise RuntimeError(f'{layout}: unexpected monitor position {expected}')
+        width, height = expected[2] - x, expected[3] - y
+        fixture_bounds = (x + 120, y + 180, 560, 200) if action == 'window' else (x, y, width, height)
+        fixture = subprocess.Popen([sys.executable, __file__, '--fixture', *map(str, fixture_bounds)],
+                                   env={**os.environ, 'KIRI_QA_CASE': layout})
         fixture_windows = wait_for(lambda: Desktop(backend='win32').windows(process=fixture.pid, visible_only=True))
         fixture_window = fixture_windows[0]
-        fixture_window.move_window(x, y, 2560, 1440, repaint=True)
+        fixture_window.move_window(*fixture_bounds, repaint=True)
         fixture_window.set_focus()
         time.sleep(1)
-        source = ImageGrab.grab(bbox=(x + 120, y + 180, x + 680, y + 380), all_screens=True).convert('RGB')
+        region = (width - 561, height - 201, width - 1, height - 1) if action == 'edge' else (120, 180, 680, 380)
+        source = ImageGrab.grab(bbox=(x + region[0], y + region[1], x + region[2], y + region[3]), all_screens=True).convert('RGB')
         source.save(out / f'{layout}-source.png')
-        if source.getpixel((5, 5)) != (250, 250, 250):
+        if source.getpixel((5, 5)) != ((237, 237, 237) if action in ('window', 'edge') else (250, 250, 250)):
             raise RuntimeError('Native fixture is not visible at its expected secondary display position')
         u.SetCursorPos(x + 900, y + 600)
         keyboard.send_keys('^+a')
         window = wait_for(overlay)
+        if action == 'cancel-retry':
+            handle = window.handle
+            keyboard.send_keys('{ESC}')
+            wait_for(lambda: not u.IsWindow(w.HWND(handle)))
+            keyboard.send_keys('^+a')
+            window = wait_for(overlay)
         rect = window.rectangle()
         actual = [rect.left, rect.top, rect.right, rect.bottom]
-        expected = [x, y, x + 2560, y + 1440]
-        report['checks'].append({'layout': layout, 'monitors': monitors(), 'overlay': actual, 'expected': expected})
+        report['checks'].append({'layout': layout, 'action': action, 'monitors': monitors(), 'overlay': actual, 'expected': expected})
         ImageGrab.grab(bbox=tuple(expected), all_screens=True).save(out / f'{layout}-overlay.png')
         if actual != expected:
             raise RuntimeError(f'{layout}: overlay {actual} != monitor {expected}')
-        u.SetCursorPos(x + 120, y + 180)
+        empty_clipboard()
+        left, top, right, bottom = region
+        u.SetCursorPos(x + left, y + top)
+        if action == 'window':
+            u.SetCursorPos(x + left + 30, y + top + 30)
+            time.sleep(.3)
         u.mouse_event(0x0002, 0, 0, 0, 0)
-        for step in range(1, 21):
-            u.SetCursorPos(x + 120 + 28 * step, y + 180 + 10 * step)
-            time.sleep(.02)
+        if action != 'window':
+            for step in range(1, 21):
+                u.SetCursorPos(x + left + (right - left) * step // 20,
+                               y + top + (bottom - top) * step // 20)
+                time.sleep(.02)
         u.mouse_event(0x0004, 0, 0, 0, 0)
         time.sleep(.5)
         ImageGrab.grab(bbox=tuple(expected), all_screens=True).save(out / f'{layout}-selected.png')
         keyboard.send_keys('{ENTER}')
-        time.sleep(2)
-        copied = ImageGrab.grabclipboard()
-        if not hasattr(copied, 'size'):
-            raise RuntimeError('Screenshot did not reach the clipboard')
+        copied = wait_for(clipboard_image)
+        wait_for(lambda: not u.IsWindow(w.HWND(window.handle)))
         copied = copied.convert('RGB')
         copied.save(out / f'{layout}-clipboard.png')
         if copied.size != source.size:

@@ -8,6 +8,11 @@ on:
       - 'scripts/qa/windows-display-*.ps1'
   workflow_dispatch:
     inputs:
+      suite:
+        description: Native scenarios to exercise
+        type: choice
+        options: [baseline, extended]
+        default: baseline
       release_tag:
         description: Published Kiri version to verify
         default: v1.6.2
@@ -44,6 +49,7 @@ jobs:
       - name: Install published version and verify secondary captures
         timeout-minutes: 8
         env:
+          KIRI_QA_SUITE: ${{ inputs.suite || 'baseline' }}
           KIRI_QA_TAG: ${{ inputs.release_tag || 'v1.6.2' }}
           KIRI_QA_SHA256: ${{ inputs.installer_sha256 || 'b8924fccd3f0524cd24e79ecc74a83fe55a526620fe7a5a536a54d1de3bc5c56' }}
         run: |
