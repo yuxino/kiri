@@ -9,6 +9,10 @@ no Windows application code was changed and issue #21 remains open.
 [Native CI run](https://github.com/yuxino/kiri/actions/runs/35692812700)
 · [Machine-readable results](report.json)
 
+[Additional scenarios verified on 2026-09-23](extended.md) cover dual fractional
+scales, portrait orientation, window clicks, cancel/retry, desktop-output
+reconnection, display edges and switching between the primary and secondary.
+
 The runner is Windows Server 2025 x64. Two OS-level virtual displays run at
 2560×1440; the runner's original 1024×768 display remains connected below the
 test primary. Windows, Kiri and GDI all enumerate and use these displays. A
@@ -74,6 +78,9 @@ reproduction is still needed before declaring that report resolved.
 
 使用已发布的 **v1.6.2 Windows 安装包**完成了上表全部 15 组原生截图验收。
 当前环境**未复现**原报告的故障，因此没有修改 Windows 应用代码，#21 继续保留。
+
+[2026-09-23 补充验收](extended.md)覆盖双屏不同缩放、竖屏、点击整窗、取消重试、
+桌面输出断开重连、屏幕边缘和主副屏切换。
 
 环境为 Windows Server 2025 x64：两个系统级 2560×1440 虚拟屏，原有
 1024×768 屏保留在测试主屏下方。测试覆盖右侧、左侧和上方布局，副屏
