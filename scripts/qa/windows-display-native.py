@@ -9,6 +9,7 @@ import subprocess
 import struct
 import sys
 import time
+import traceback
 
 if os.name != 'nt' or os.environ.get('GITHUB_ACTIONS') != 'true':
     raise SystemExit('Use an isolated Windows CI desktop')
@@ -61,8 +62,7 @@ def monitors():
 
 def move_display(device, x, y, primary=False, resize=True, deferred=False, portrait=False, disconnect=False):
     mode = DevMode(size=ctypes.sizeof(DevMode))
-    if not (u.EnumDisplaySettingsW(device, 0xffffffff, ctypes.byref(mode))
-            or u.EnumDisplaySettingsW(device, 0xfffffffe, ctypes.byref(mode))):
+    if not u.EnumDisplaySettingsW(device, 0xffffffff, ctypes.byref(mode)):
         raise ctypes.WinError(ctypes.get_last_error())
     mode.x, mode.y = x, y
     mode.fields = 0x20  # position
@@ -133,6 +133,8 @@ if '--fixture' in sys.argv:
     case = os.environ.get('KIRI_QA_CASE', 'SECONDARY DISPLAY')
     text_origin = (30, 30) if width == 560 else (150, 210)
     canvas.create_text(*text_origin, anchor='nw', text=f'{case}\nKiri native screenshot verification\nLocal pixels stay on this display', font=('Arial', 20), fill='#202020')
+    if width > 1000:
+        canvas.create_text(width - 540, height - 180, anchor='nw', text=f'{case}\nBOTTOM RIGHT EDGE', font=('Arial', 20), fill='#202020')
     root.update()
     hwnd = u.GetParent(root.winfo_id())
     if not u.SetWindowPos(hwnd, None, x, y, width, height, 0x40):
@@ -306,6 +308,7 @@ try:
     report['success'] = True
 except Exception as error:
     report['error'] = str(error)
+    report['traceback'] = traceback.format_exc()
     ImageGrab.grab(all_screens=True).save(out / 'failure-desktop.png')
 finally:
     for process in [fixture, app]:
