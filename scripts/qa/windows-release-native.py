@@ -7,7 +7,7 @@ import re
 import subprocess
 import time
 
-from pywinauto import Desktop, keyboard
+from pywinauto import Desktop, keyboard, mouse
 
 
 if os.name != "nt" or os.environ.get("GITHUB_ACTIONS") != "true":
@@ -54,7 +54,10 @@ def smoke(executable, update_button, label):
         find("Settings").click_input()
         # About follows General and OCR settings in the scrollable page.
         time.sleep(0.3)
-        keyboard.send_keys("{PGDN 6}")
+        window = desktop.windows(process=process.pid, visible_only=True)[0]
+        bounds = window.rectangle()
+        mouse.scroll(coords=(bounds.left + int(bounds.width() * 0.75),
+                             bounds.top + int(bounds.height() * 0.65)), wheel_dist=-12)
         find(update_button)
         report["checks"].append(f"{label} launches and shows the correct update route")
         keyboard.send_keys("^+a")
