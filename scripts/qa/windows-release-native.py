@@ -52,12 +52,27 @@ def smoke(executable, update_button, label):
     process = subprocess.Popen([str(executable)])
     try:
         find("Settings").click_input()
+        # About follows General and OCR settings in the scrollable page.
+        time.sleep(0.3)
+        keyboard.send_keys("{PGDN 6}")
         find(update_button)
         report["checks"].append(f"{label} launches and shows the correct update route")
         keyboard.send_keys("^+a")
         find("Screenshot")
         keyboard.send_keys("{ESC}")
         report["checks"].append(f"{label} opens and cancels native capture")
+    except Exception:
+        report["windows"] = []
+        for window in desktop.windows(process=process.pid, visible_only=True):
+            try:
+                report["windows"].append([
+                    {"text": control.window_text(), "visible": control.is_visible(),
+                     "enabled": control.is_enabled()}
+                    for control in window.descendants()
+                ])
+            except Exception:
+                pass
+        raise
     finally:
         stop()
 
@@ -76,13 +91,6 @@ try:
     report["success"] = True
 except Exception as error:
     report["error"] = str(error)[:1500]
-    report["windows"] = []
-    if process and process.poll() is None:
-        for window in desktop.windows(process=process.pid, visible_only=True):
-            try:
-                report["windows"].append([control.window_text() for control in window.descendants()])
-            except Exception:
-                pass
 finally:
     stop()
     (output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
