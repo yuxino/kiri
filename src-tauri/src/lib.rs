@@ -260,6 +260,7 @@ pub fn run() {
             commands::get_annotation_appearance,
             commands::set_annotation_appearance,
             updates::open_release_page,
+            updates::is_portable_build,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

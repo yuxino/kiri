@@ -42,6 +42,8 @@ Use **Settings → About → Check for Updates** for routine updates. Download p
 - **macOS 14+**: download the Universal `.dmg` for Apple silicon and Intel, then drag `Kiri.app` to Applications. Capture requires **Screen & System Audio Recording**; **Input Monitoring** is needed only for click highlights. Microphone recording requires macOS 15+.
 - **Windows 11 (x64)**: an x64 installer is available. See the [roadmap](ROADMAP.md) for the remaining full capture-flow device acceptance. Run the `.exe` installer; screen capture needs no extra system permission, and microphone access follows Windows privacy settings. The installer is not Authenticode-signed, so SmartScreen may warn.
 
+For Windows without installation, download `Kiri-<version>-Windows-x64-Portable.zip`, extract it, and run `kiri.exe`. This is an extract-and-run build: Kiri still keeps its library and settings in your Windows user profile, so moving the ZIP does not move that data. The portable build opens Releases for manual ZIP updates; its in-app NSIS installer update is unavailable.
+
 The Windows installer follows your system language (English, Simplified Chinese or Japanese). Installation, update and uninstall messages are localized; you can choose Kiri's interface language separately in Settings. Its half-body Kiri artwork and shared presentation are maintained in [desktop-installer](https://github.com/yuxino/desktop-installer).
 
 macOS releases use the project's maintained local self-signed identity, not Developer ID signing or Apple notarization. If the first launch is blocked, Control-click `Kiri.app` and choose **Open**, or select **Open Anyway** in System Settings → Privacy & Security.

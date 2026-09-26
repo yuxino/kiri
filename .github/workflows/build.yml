@@ -119,9 +119,9 @@ jobs:
           path: ${{ runner.temp }}/kiri-video-export-review/
           retention-days: 5
           if-no-files-found: warn
-      - name: Compile Windows app for pull requests
+      - name: Build Windows installer for pull requests
         if: github.event_name == 'pull_request'
-        run: pnpm tauri build --no-bundle
+        run: pnpm tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
       - uses: tauri-apps/tauri-action@v0
         if: github.event_name == 'push'
         env:
@@ -130,6 +130,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           args: --bundles nsis
+      - name: Package and verify portable Windows build
+        shell: pwsh
+        run: ./scripts/package-windows-portable.ps1
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -141,6 +144,25 @@ jobs:
       - name: Verify configurable shortcuts on the actual desktop
         timeout-minutes: 3
         run: python scripts/qa/shortcut-native.py
+      - name: Install and smoke-test both Windows packages
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $installers = @(Get-ChildItem src-tauri/target/release/bundle/nsis -Filter '*-setup.exe')
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer" }
+          $install = Join-Path $env:RUNNER_TEMP 'kiri-installed-review'
+          $installerProcess = Start-Process $installers[0].FullName -ArgumentList @('/S', "/D=$install") -PassThru -Wait
+          if ($installerProcess.ExitCode -ne 0) { throw "NSIS installation failed: $($installerProcess.ExitCode)" }
+          $env:KIRI_QA_PORTABLE_EXE = Join-Path $env:RUNNER_TEMP 'kiri-portable-verify/kiri.exe'
+          $env:KIRI_QA_INSTALLED_EXE = Join-Path $install 'kiri.exe'
+          python scripts/qa/windows-release-native.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-release-review
+          path: windows-release-review/
+          retention-days: 5
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v7
         if: always()
         with:

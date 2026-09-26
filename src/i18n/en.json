@@ -202,6 +202,7 @@
   "Check, download, and install updates only when you choose each step.": "Check, download, and install updates only when you choose each step.",
   "Version %@": "Version %@",
   "Updates are checked only when you choose to check.": "Updates are checked only when you choose to check.",
+  "Portable version: download the latest ZIP from Releases to update.": "Portable version: download the latest ZIP from Releases to update.",
   "Check for Updates": "Check for Updates",
   "Checking…": "Checking…",
   "Kiri %@ is up to date.": "Kiri %@ is up to date.",

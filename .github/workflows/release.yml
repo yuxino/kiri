@@ -58,16 +58,6 @@ jobs:
           const delimiter = randomUUID();
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `body<<${delimiter}\n${notes}\n${delimiter}\n`);
           NODE
-      - name: Build portable Windows package
-        shell: pwsh
-        run: |
-          pnpm tauri build --no-bundle
-          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
-          $portableDir = Join-Path $env:RUNNER_TEMP "kiri-portable"
-          New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
-          Copy-Item "src-tauri/target/release/kiri.exe" (Join-Path $portableDir "kiri.exe")
-          Compress-Archive -Path (Join-Path $portableDir "*") -DestinationPath "Kiri-$version-Windows-x64-Portable.zip" -Force
-
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -83,8 +73,36 @@ jobs:
           uploadUpdaterSignatures: true
           args: --bundles nsis
 
+      - name: Package and verify portable Windows build
+        shell: pwsh
+        run: ./scripts/package-windows-portable.ps1
+
+      - name: Install and smoke-test both Windows packages
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          python -m pip install pywinauto==0.6.9
+          $installers = @(Get-ChildItem src-tauri/target/release/bundle/nsis -Filter '*-setup.exe')
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer" }
+          $install = Join-Path $env:RUNNER_TEMP 'kiri-installed-review'
+          $installerProcess = Start-Process $installers[0].FullName -ArgumentList @('/S', "/D=$install") -PassThru -Wait
+          if ($installerProcess.ExitCode -ne 0) { throw "NSIS installation failed: $($installerProcess.ExitCode)" }
+          $env:KIRI_QA_PORTABLE_EXE = Join-Path $env:RUNNER_TEMP 'kiri-portable-verify/kiri.exe'
+          $env:KIRI_QA_INSTALLED_EXE = Join-Path $install 'kiri.exe'
+          python scripts/qa/windows-release-native.py
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-release-review
+          path: windows-release-review/
+          retention-days: 5
+          if-no-files-found: warn
+
       - name: Upload portable package to draft release
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.ref_name }}" "Kiri-*-Windows-x64-Portable.zip" --clobber
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          gh release upload "${{ github.ref_name }}" "Kiri-$version-Windows-x64-Portable.zip" --clobber

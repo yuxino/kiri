@@ -202,6 +202,7 @@
   "Check, download, and install updates only when you choose each step.": "仅在你逐步确认后检查、下载和安装更新。",
   "Version %@": "版本 %@",
   "Updates are checked only when you choose to check.": "只有你点击检查时，Kiri 才会联网检查更新。",
+  "Portable version: download the latest ZIP from Releases to update.": "绿色版请到 Releases 下载新版 ZIP，解压后手动替换程序。",
   "Check for Updates": "检查更新",
   "Checking…": "正在检查…",
   "Kiri %@ is up to date.": "Kiri %@ 已是最新版本。",
