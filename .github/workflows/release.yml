@@ -58,6 +58,16 @@ jobs:
           const delimiter = randomUUID();
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `body<<${delimiter}\n${notes}\n${delimiter}\n`);
           NODE
+      - name: Build portable Windows package
+        shell: pwsh
+        run: |
+          pnpm tauri build --no-bundle
+          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $portableDir = Join-Path $env:RUNNER_TEMP "kiri-portable"
+          New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
+          Copy-Item "src-tauri/target/release/kiri.exe" (Join-Path $portableDir "kiri.exe")
+          Compress-Archive -Path (Join-Path $portableDir "*") -DestinationPath "Kiri-$version-Windows-x64-Portable.zip" -Force
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -72,3 +82,9 @@ jobs:
           uploadUpdaterJson: true
           uploadUpdaterSignatures: true
           args: --bundles nsis
+
+      - name: Upload portable package to draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" "Kiri-*-Windows-x64-Portable.zip" --clobber
