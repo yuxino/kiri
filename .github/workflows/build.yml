@@ -121,7 +121,7 @@ jobs:
           if-no-files-found: warn
       - name: Build Windows installer for pull requests
         if: github.event_name == 'pull_request'
-        run: pnpm tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
+        run: pnpm tauri build --bundles nsis --config src-tauri/tauri.pr-windows.conf.json
       - uses: tauri-apps/tauri-action@v0
         if: github.event_name == 'push'
         env:
