@@ -211,11 +211,12 @@ function updateDetails(update: Update): UpdateDetails {
 
 function AboutSettingsSection() {
   const [currentVersion, setCurrentVersion] = useState("");
+  const isWindows = /Windows/i.test(navigator.userAgent);
+  const [isPortable, setIsPortable] = useState<boolean | null>(isWindows ? null : false);
   const [updateState, setUpdateState] = useState<UpdateState>({ kind: "idle" });
   const updateRef = useRef<Update | null>(null);
   const operationRef = useRef(false);
   const mountedRef = useRef(true);
-  const isWindows = /Windows/i.test(navigator.userAgent);
 
   const finishOperation = () => {
     operationRef.current = false;
@@ -234,6 +235,11 @@ function AboutSettingsSection() {
         if (active) setCurrentVersion(version);
       })
       .catch(() => {});
+    if (isWindows) {
+      void api.isPortableBuild()
+        .then((portable) => { if (active) setIsPortable(portable); })
+        .catch(() => { if (active) setIsPortable(true); });
+    }
     return () => {
       active = false;
       mountedRef.current = false;
@@ -246,6 +252,7 @@ function AboutSettingsSection() {
   }, []);
 
   const checkForUpdates = async () => {
+    if (isPortable !== false) return;
     if (operationRef.current) return;
     operationRef.current = true;
     setUpdateState({ kind: "checking" });
@@ -303,6 +310,7 @@ function AboutSettingsSection() {
   };
 
   const installUpdate = async () => {
+    if (isPortable !== false) return;
     if (operationRef.current) return;
     const update = updateRef.current;
     if (!update) {
@@ -350,7 +358,9 @@ function AboutSettingsSection() {
     }
   };
 
-  let status = t("Updates are checked only when you choose to check.");
+  let status = t(isPortable
+    ? "Portable version: download the latest ZIP from Releases to update."
+    : "Updates are checked only when you choose to check.");
   if (updateState.kind === "checking") {
     status = t("Checking…");
   } else if (updateState.kind === "upToDate") {
@@ -391,6 +401,8 @@ function AboutSettingsSection() {
   const busy = ["checking", "downloading", "verifying", "installing", "relaunching"].includes(updateState.kind);
 
   const runPrimaryAction = () => {
+    if (isPortable) return void openRecoveryPage();
+    if (isPortable === null) return;
     if (busy) return;
     if (updateState.kind === "available") return void downloadUpdate();
     if (updateState.kind === "downloaded") return void installUpdate();
@@ -404,7 +416,7 @@ function AboutSettingsSection() {
     return void checkForUpdates();
   };
 
-  const buttonLabel = updateState.kind === "checking"
+  const buttonLabel = isPortable ? t("Open Releases Page") : updateState.kind === "checking"
     ? t("Checking…")
     : updateState.kind === "downloading" || updateState.kind === "verifying"
       ? t(updateState.kind === "verifying" ? "Verifying update signature…" : "Downloading…")
@@ -426,9 +438,9 @@ function AboutSettingsSection() {
         <div>
           <h2 id="about-settings-title">{t("About")}</h2>
           <p>
-            {t(
-              "Check, download, and install updates only when you choose each step.",
-            )}
+            {t(isPortable
+              ? "Portable version: download the latest ZIP from Releases to update."
+              : "Check, download, and install updates only when you choose each step.")}
           </p>
         </div>
       </div>
@@ -466,7 +478,7 @@ function AboutSettingsSection() {
           <button
             type="button"
             className="kiri-button kiri-button--secondary kiri-update-button"
-            disabled={busy}
+            disabled={busy || isPortable === null}
             aria-describedby="kiri-update-status"
             onClick={runPrimaryAction}
           >

@@ -6,6 +6,21 @@
 const RELEASE_PAGE: &str = "https://github.com/yuxino/kiri/releases/latest";
 
 #[tauri::command]
+pub fn is_portable_build() -> bool {
+    #[cfg(windows)]
+    {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join("kiri.portable")))
+            .is_some_and(|marker| marker.is_file())
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
 pub fn open_release_page() -> Result<(), String> {
     open_external_url(RELEASE_PAGE).map_err(|error| {
         log::warn!("[updates] could not open release page: {error}");

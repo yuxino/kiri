@@ -202,6 +202,7 @@
   "Check, download, and install updates only when you choose each step.": "確認、ダウンロード、インストールは各手順を選んだときだけ実行します。",
   "Version %@": "バージョン %@",
   "Updates are checked only when you choose to check.": "確認を選んだときだけアップデートをオンラインで確認します。",
+  "Portable version: download the latest ZIP from Releases to update.": "ポータブル版の更新は Releases から最新の ZIP をダウンロードしてください。",
   "Check for Updates": "アップデートを確認",
   "Checking…": "確認中…",
   "Kiri %@ is up to date.": "Kiri %@ は最新です。",

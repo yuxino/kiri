@@ -74,9 +74,11 @@ test("CI signs updater artifacts without exposing a private key", () => {
 // Run the actual update component's handlers with isolated IPC and hook state.
 // No network, installer or user library is touched by these regressions.
 const { createLibraryHarness, nodes, deferred, settleRequests } = await import('./helpers/library-render-harness.mjs');
-function updaterHarness(windows = true) {
+function updaterHarness(windows = true, portable = false) {
   const pending = deferred();
   const installs = [];
+  let checks = 0;
+  let releaseOpens = 0;
   let progress;
   let restarts = 0;
   const update = { version: '9.9.9', currentVersion: '1.5.0', body: 'Release notes',
@@ -92,16 +94,21 @@ function updaterHarness(windows = true) {
     const t = value => value, fmt = (value, arg) => value.replace('%@', arg);
     ${settings.slice(settings.indexOf('type UpdateDetails ='), settings.indexOf('function GeneralSettingsSection'))}
     export { AboutSettingsSection };`;
-  const harness = createLibraryHarness({ check: async () => update, getVersion: async () => '1.5.0',
+  const harness = createLibraryHarness({ check: async () => { checks++; return update; },
+    getVersion: async () => '1.5.0', isPortableBuild: async () => portable,
+    openReleasePage: async () => { releaseOpens++; },
     relaunch: async () => { restarts++; } }, source);
   const component = harness.mount('AboutSettingsSection');
   const render = () => component.render();
   const button = () => nodes(render()).find(node => node?.type === 'button');
-  return { pending, installs, render, button, progress: event => progress(event), restarts: () => restarts };
+  return { pending, installs, render, button, progress: event => progress(event),
+    restarts: () => restarts, checks: () => checks, releaseOpens: () => releaseOpens };
 }
 
 test('Windows download reports bytes and cannot install until verification succeeds', async () => {
   const h = updaterHarness();
+  h.button();
+  await settleRequests();
   h.button().props.onClick(); await settleRequests();
   h.button().props.onClick();
   h.progress({ event: 'Started', data: { contentLength: 4 * 1024 * 1024 } });
@@ -122,6 +129,8 @@ test('Windows download reports bytes and cannot install until verification succe
 
 test('unknown download size stays indeterminate and failed verification never enables installation', async () => {
   const h = updaterHarness();
+  h.button();
+  await settleRequests();
   h.button().props.onClick(); await settleRequests(); h.button().props.onClick();
   h.progress({ event: 'Started', data: {} });
   h.progress({ event: 'Progress', data: { chunkLength: 1024 * 1024 } });
@@ -143,4 +152,17 @@ test('macOS installation still waits for its explicit restart action', async () 
   assert.ok(nodes(h.button()).includes('Restart and Finish Update'));
   h.button().props.onClick(); await settleRequests();
   assert.equal(h.restarts(), 1);
+});
+
+test('Windows portable build opens Releases and never checks or installs NSIS updates', async () => {
+  const h = updaterHarness(true, true);
+  assert.equal(h.button().props.disabled, true);
+  await settleRequests();
+  assert.ok(nodes(h.render()).includes('Portable version: download the latest ZIP from Releases to update.'));
+  assert.ok(nodes(h.button()).includes('Open Releases Page'));
+  h.button().props.onClick();
+  await settleRequests();
+  assert.equal(h.releaseOpens(), 1);
+  assert.equal(h.checks(), 0);
+  assert.deepEqual(h.installs, []);
 });
