@@ -49,4 +49,7 @@ async def main():
    await context.close();await browser.close()
  finally:
   server.shutdown();server.server_close()
-if __name__=='__main__':asyncio.run(main())
+if __name__=='__main__':
+ asyncio.run(main())
+ import test_image_editing
+ asyncio.run(test_image_editing.main())

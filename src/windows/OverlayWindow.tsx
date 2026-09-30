@@ -486,16 +486,16 @@ export function OverlayWindow() {
     [],
   );
 
-  // Esc is a window-level capture action. Register it separately in the
-  // capture phase so focused text/number controls cannot consume it before
-  // the overlay closes, while leaving their other keys (notably Return)
-  // available to the normal bubbling shortcut handler below.
+  // Escape first cancels an annotation edit, then the capture. The capture
+  // phase keeps the window action available from number controls as well.
   useEffect(() => {
     const onEscape = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (e.isComposing || e.keyCode === 229) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       if (completionLock.locked) return;
+      if (phaseRef.current === "annotating" && canvasRef.current?.cancelTextEditing()) return;
       cancel();
     };
     window.addEventListener("keydown", onEscape, true);

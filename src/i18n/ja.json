@@ -605,5 +605,9 @@
   "Pin on Top": "最前面に固定",
   "Could not change window pinning on this desktop.": "このデスクトップではウィンドウの固定を切り替えられませんでした。",
   "Pinned screenshot": "固定したスクリーンショット",
-  "Could not pin this screenshot.": "このスクリーンショットを固定できませんでした。"
+  "Could not pin this screenshot.": "このスクリーンショットを固定できませんでした。",
+  "Shift + Enter: new line · Enter: done · Esc: cancel edit": "Shift + Enter：改行 · Enter：完了 · Esc：編集を取消",
+  "Save changes before closing?": "閉じる前に変更を保存しますか？",
+  "Your image has unsaved changes. Save them, discard them, or keep editing.": "画像に未保存の変更があります。保存、破棄、または編集を続けられます。",
+  "Save & close": "保存して閉じる"
 }

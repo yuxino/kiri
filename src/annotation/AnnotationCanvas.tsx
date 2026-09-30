@@ -7,6 +7,7 @@ import React, {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -48,6 +49,7 @@ export interface AnnotationCanvasHandle {
   clearAnnotations(): void;
   deleteSelection(): void;
   commitTextEditing(): void;
+  cancelTextEditing(): boolean;
   editSelectedText(): void;
   clearSelection(): void;
   cancelInteraction(): boolean;
@@ -153,7 +155,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       onTextDraftChange,
       onMarkCreated,
       mosaicShape = "brush",
-      textEscapeCancelsEdit = false,
+      textEscapeCancelsEdit = true,
       commitTextOnToolChange = true,
       onDocumentChange,
       onFrame,
@@ -1157,6 +1159,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         commitTextEditing: () => {
           if (!interactionsDisabled()) commitText();
         },
+        cancelTextEditing: () => {
+          if (interactionsDisabled() || !editingRef.current) return false;
+          return cancelInteraction();
+        },
         editSelectedText:()=>{if(!interactionsDisabled()&&selectedIndexRef.current!==null)editText(selectedIndexRef.current);},
         clearSelection:()=>{if(!interactionsDisabled()){finishAppearanceAdjustment();selectMark(null);}},
         cancelInteraction,
@@ -1273,6 +1279,9 @@ function TextEditor(props: {
     nativeUndo,
   } = props;
   const ref = useRef<HTMLTextAreaElement>(null);
+  const hintId = useId();
+  const hintHeight = 32 * editing.uiScale;
+  const hintTop = editing.rect.y + editing.rect.height + 4 * editing.uiScale;
 
   // Spec §6.6 resizeTextEditor: min 120×34, grows with text/font, clamped
   // to the right/bottom edges of the region.
@@ -1320,9 +1329,11 @@ function TextEditor(props: {
   ]);
 
   return (
+    <>
     <textarea
       ref={ref}
       aria-label={t("Text content")}
+      aria-describedby={hintId}
       disabled={disabled}
       value={editing.text}
       placeholder={t("Type something…")}
@@ -1331,6 +1342,11 @@ function TextEditor(props: {
       autoCapitalize="off"
       onChange={(e) => onTextChange(e.target.value)}
       onKeyDown={(e) => {
+        // IME uses Enter/Escape to confirm or cancel its own composition.
+        if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
+          e.stopPropagation();
+          return;
+        }
         if (e.key === "Escape") {
           e.preventDefault();
           onCancel();
@@ -1371,6 +1387,20 @@ function TextEditor(props: {
         pointerEvents: "auto",
       }}
     />
+    <div id={hintId} style={{
+      position: "absolute",
+      left: Math.min(editing.rect.x, Math.max(0, bounds.width - 280 * editing.uiScale)),
+      top: hintTop + hintHeight <= bounds.height ? hintTop : Math.max(0, editing.rect.y - hintHeight - 4 * editing.uiScale),
+      maxWidth: Math.min(280 * editing.uiScale, bounds.width),
+      boxSizing: "border-box",
+      padding: `${3 * editing.uiScale}px ${6 * editing.uiScale}px`,
+      borderRadius: 5 * editing.uiScale,
+      background: "rgba(0,0,0,.8)",
+      color: "#eee",
+      font: `${10 * editing.uiScale}px/${13 * editing.uiScale}px var(--kiri-font-ui)`,
+      pointerEvents: "none",
+    }}>{t("Shift + Enter: new line · Enter: done · Esc: cancel edit")}</div>
+    </>
   );
 }
 

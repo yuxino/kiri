@@ -58,6 +58,8 @@ Press **⇧⌘A** on macOS or **Shift+Ctrl+A** on Windows / Linux X11, then sele
 
 Choose Screenshot, Record, or OCR. **Enter** confirms a screenshot; **Esc** cancels capture. Screenshots go to your clipboard and local library. You can change the capture shortcut in Settings on macOS, Windows, and X11.
 
+While typing an annotation, Ctrl/Cmd+Z undoes text and Shift+Enter adds a line. Esc leaves the text edit first; a second Esc cancels capture. Closing an edited saved image offers Save, Discard, or Keep editing when changes are unsaved.
+
 On GNOME Wayland, if the first capture shows no permission dialog, open Kiri's Library and choose **Request Access** in the error banner. Allow screenshot access in GNOME's dialog, then retry Capture. Kiri discards the authorization image. See the [Linux guide](docs/linux.md).
 
 ## Privacy

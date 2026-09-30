@@ -605,5 +605,9 @@
   "Pin on Top": "重新置顶",
   "Could not change window pinning on this desktop.": "当前桌面无法切换窗口置顶状态。",
   "Pinned screenshot": "置顶截图",
-  "Could not pin this screenshot.": "无法置顶这张截图。"
+  "Could not pin this screenshot.": "无法置顶这张截图。",
+  "Shift + Enter: new line · Enter: done · Esc: cancel edit": "Shift + Enter：换行 · Enter：完成 · Esc：取消编辑",
+  "Save changes before closing?": "关闭前保存修改？",
+  "Your image has unsaved changes. Save them, discard them, or keep editing.": "图片有未保存的修改。可以保存、放弃，或继续编辑。",
+  "Save & close": "保存并关闭"
 }

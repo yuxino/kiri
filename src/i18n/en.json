@@ -605,5 +605,9 @@
   "Pin on Top": "Pin on Top",
   "Could not change window pinning on this desktop.": "Could not change window pinning on this desktop.",
   "Pinned screenshot": "Pinned screenshot",
-  "Could not pin this screenshot.": "Could not pin this screenshot."
+  "Could not pin this screenshot.": "Could not pin this screenshot.",
+  "Shift + Enter: new line · Enter: done · Esc: cancel edit": "Shift + Enter: new line · Enter: done · Esc: cancel edit",
+  "Save changes before closing?": "Save changes before closing?",
+  "Your image has unsaved changes. Save them, discard them, or keep editing.": "Your image has unsaved changes. Save them, discard them, or keep editing.",
+  "Save & close": "Save & close"
 }
