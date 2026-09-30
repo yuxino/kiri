@@ -1,0 +1,33 @@
+{
+  "source_duration_s": 154.156667,
+  "gif_exports": [
+    {
+      "file": "20260930-215839-a5cd8307-9e2e-42ea-a075-c5e9a9f2d6e8.gif",
+      "sha256": "bfc2ea91624e8c2936f9daef7c5da964a25d24fb3156fc0e29567f5fa77ee6e0",
+      "size": [
+        560,
+        300
+      ],
+      "frames": 1850,
+      "delays_ms": {
+        "80": 1850
+      },
+      "duration_s": 148.0
+    },
+    {
+      "file": "20260930-220120-135583ff-a9ff-4722-8c49-28dc6058ab92.gif",
+      "sha256": "bfc2ea91624e8c2936f9daef7c5da964a25d24fb3156fc0e29567f5fa77ee6e0",
+      "size": [
+        560,
+        300
+      ],
+      "frames": 1850,
+      "delays_ms": {
+        "80": 1850
+      },
+      "duration_s": 148.0
+    }
+  ],
+  "candidate_merge_sha": "a8bdb4ea423a13416bb1dd8b8c8eeb3ee701b866",
+  "package_sha256": "9ca27cdd8a917385b6f73d8e6586a7b699b49b5d4b932c2127832b1a46c745ca"
+}
