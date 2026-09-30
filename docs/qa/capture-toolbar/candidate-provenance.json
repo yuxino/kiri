@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "repository": "yuxino/kiri",
+  "workflow_path": ".github/workflows/build.yml",
+  "run_id": 36712386915,
+  "run_attempt": 1,
+  "source_sha": "a8bdb4ea423a13416bb1dd8b8c8eeb3ee701b866",
+  "package": {
+    "filename": "kiri_1.6.6_amd64.deb",
+    "sha256": "9ca27cdd8a917385b6f73d8e6586a7b699b49b5d4b932c2127832b1a46c745ca"
+  }
+}
