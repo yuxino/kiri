@@ -1,0 +1,57 @@
+{
+  "result": "PASS for requested compact-toolbar focused regression",
+  "head": "d6cf7e46efa2527911eeb17989de12b3f09b6107",
+  "provenance_source_sha": "8b4106d61eb13839bf9a0833d71d08a484dfe3cd",
+  "deb_sha256": "62e19e40a4176348a18cd69489c72b1b1e97badd594f71663cef160f999f02ae",
+  "run": "https://github.com/yuxino/kiri/actions/runs/36718721006",
+  "artifact_id": 11098335211,
+  "environment": "Debian13 x86_64 Xfce X11; fresh isolated compact profile; DUMMY0 1364x1024+0+0, DUMMY1 800x600+1364+0; scale1; English",
+  "selection": {
+    "start": [
+      650,
+      420
+    ],
+    "end": [
+      790,
+      580
+    ],
+    "expected_png": [
+      140,
+      160
+    ]
+  },
+  "checks": {
+    "default_toolbar": "PASS: approximately464px wide, one compact row, Cancel and Done fully visible above selection",
+    "more_panel": "PASS: separate parameter row fully in viewport above selection",
+    "more_keyboard": "PASS: AX verified keyboard focus on More; Enter closes panel and Space opens it, overlay remains",
+    "size_enter": "PASS: width140 and height160 entered through real fields; Return retains overlay and applies exact dimensions",
+    "text": "PASS: transparent/dark, font size and colors all visible above selection",
+    "mosaic": "PASS: Pixel/Blur, strength1/2/3, brush and colors all visible; Blur selectable",
+    "mouse_done": "PASS: mouse clicked Done at local747,339; saved PNG140x160",
+    "layout_restored": "PASS: xrandr shows DUMMY1 inactive and DUMMY0/root1364x1024; native desktop inventory confirms"
+  },
+  "limits": [
+    "Virtual dual-resolution X11 only, not physical mixed-DPI or Wayland",
+    "No claim of #54 text-editing fix; only parameter layout checked",
+    "Initial accessibility-invoked More action did not establish keyboard focus; Enter saved that preliminary capture. Focused-keyboard test then explicitly verified via Tab/ShiftTab and passed. Final expected output was separately saved with mouse Done."
+  ],
+  "images": [
+    {
+      "filename": "default-800x600.png",
+      "sha256": "fa83188cd9c812d3863cef118876682198ef1a6f234ea1b61543c19421128018"
+    },
+    {
+      "filename": "more-expanded-800x600.png",
+      "sha256": "7e844047f4ac3706a92dfce8396e1a0acfb0042a117028c143036257f41af5bb"
+    },
+    {
+      "filename": "text-parameters-800x600.png",
+      "sha256": "0055b93c795d2bd8f98b27f1f0719352e59a01390399ec437d4935827d93840e"
+    },
+    {
+      "filename": "mosaic-parameters-800x600.png",
+      "sha256": "0c54e2e1b40b56b4b0d72c7fc4582e8035f5c4c255a5b17901c9f45f22cb3ed4"
+    }
+  ],
+  "saved_png_sha256": "88d6b4563b55e081803322bdafdf08792b90fe01ee91140137f5cf5bf7c94b0a"
+}

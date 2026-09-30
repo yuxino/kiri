@@ -1,0 +1,56 @@
+Screen 0: minimum 64 x 64, current 2164 x 1024, maximum 32767 x 32767
+DUMMY0 connected 1364x1024+0+0 0mm x 0mm
+   1364x1024_60.00  60.01*+
+   1280x1024     85.02    75.02    60.02  
+   1280x960      85.00    60.00  
+   1280x800      59.81  
+   1152x864      75.00  
+   1280x720      59.86  
+   1024x768      85.00    75.03    70.07    60.00  
+   1024x576      59.90  
+   832x624       74.55  
+   960x540       59.63  
+   800x600       85.14    72.19    75.00    60.32    56.25  
+   864x486       59.92  
+   640x480       85.01    75.00    72.81    59.94  
+   720x405       59.51  
+   720x400       85.04  
+   640x400       85.08  
+   640x360       59.84    59.32  
+   640x350       85.08  
+DUMMY1 connected 800x600+1364+0 0mm x 0mm
+   1364x1024_60.00  60.01 +
+   1280x1024     85.02    75.02    60.02  
+   1280x960      85.00    60.00  
+   1280x800      59.81  
+   1152x864      75.00  
+   1280x720      59.86  
+   1024x768      85.00    75.03    70.07    60.00  
+   1024x576      59.90  
+   832x624       74.55  
+   960x540       59.63  
+   800x600       85.14*   72.19    75.00    60.32    56.25    85.14* 
+   864x486       59.92  
+   640x480       85.01    75.00    72.81    59.94  
+   720x405       59.51  
+   720x400       85.04  
+   640x400       85.08  
+   640x360       59.84    59.32  
+   640x350       85.08  
+DUMMY2 disconnected
+DUMMY3 disconnected
+DUMMY4 disconnected
+DUMMY5 disconnected
+DUMMY6 disconnected
+DUMMY7 disconnected
+DUMMY8 disconnected
+DUMMY9 disconnected
+DUMMY10 disconnected
+DUMMY11 disconnected
+DUMMY12 disconnected
+DUMMY13 disconnected
+DUMMY14 disconnected
+DUMMY15 disconnected
+Monitors: 2
+ 0: +DUMMY0 1364/361x1024/271+0+0  DUMMY0
+ 1: +DUMMY1 800/212x600/159+1364+0  DUMMY1
