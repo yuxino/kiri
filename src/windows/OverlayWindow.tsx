@@ -48,6 +48,7 @@ import { AnnotationInteractionLock } from "../annotation/interaction-lock.js";
 import { KiriIcon, type IconName } from "../components/KiriIcons";
 import { RemoteOcrConsent } from "../ocr/RemoteOcrConsent";
 import { kiriResourceUrl } from "../lib/kiri-resource-url.js";
+import { captureToolbarPosition } from "./toolbar-layout.js";
 
 type Phase =
   | "mode-select"
@@ -778,21 +779,6 @@ export function OverlayWindow() {
     [completionLock, discardPreparedOcr, runOcr],
   );
 
-  // --- toolbar placement (spec §7.6) ---
-  // Defaults to 10pt below the selection, centered; flips above when the
-  // bottom would overflow; x/y clamped with an 8pt margin.
-  const toolbarAnchor = useMemo(() => {
-    if (!selection) return { x: 0, y: 0 };
-    const below = selection.y + selection.height + 10;
-    const above = selection.y - 10;
-    return {
-      x: selection.x + selection.width / 2,
-      // Spec §7.6: below the selection by default; flip above when the
-      // bottom edge would overflow (48 = toolbar height, 8 = margin).
-      y: below + 48 + 8 > bounds.height ? above : below,
-    };
-  }, [selection, bounds]);
-
   // --- render ---
   const selectingRect = drag && drag.moved && !resizeHandle ? normalized(drag.start, drag.current) : null;
   const displayRect = selection ?? selectingRect;
@@ -1145,9 +1131,9 @@ export function OverlayWindow() {
 
       {/* Toolbar — appears as soon as a region is chosen (spec §7.1); the
           region stays adjustable until a tool is picked, which locks it. */}
-      {(annotating || (phase === "selecting" && selection)) && (
+      {selection && (annotating || phase === "selecting") && (
         <Toolbar
-          anchor={toolbarAnchor}
+          selection={selection}
           bounds={bounds}
           tool={tool}
           setTool={(next) => {
@@ -1787,7 +1773,7 @@ function ToggleRow(props: {
 }
 
 interface ToolbarProps {
-  anchor: { x: number; y: number };
+  selection: Rect;
   bounds: Rect;
   tool: Tool;
   setTool(tool: Tool): void;
@@ -1818,9 +1804,21 @@ const TOOLS: { tool: Tool; icon: IconName; title: string }[] = [
   { tool: "mosaic", icon: "square.grid.3x3.fill", title: "Mosaic (M)" },
 ];
 
+const toolbarRowStyle: React.CSSProperties = {
+  display: "flex",
+  flexWrap: "wrap",
+  width: "max-content",
+  maxWidth: "100%",
+  boxSizing: "border-box",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 3,
+  padding: "6px 8px",
+};
+
 function Toolbar(props: ToolbarProps) {
   const {
-    anchor,
+    selection,
     bounds,
     tool,
     setTool,
@@ -1845,6 +1843,8 @@ function Toolbar(props: ToolbarProps) {
   // converts them using the display scale.
   const [sizeW, setSizeW] = useState("");
   const [sizeH, setSizeH] = useState("");
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  useEffect(() => setDetailsOpen(tool !== "select"), [tool]);
   const applySize = () => {
     const w = Math.round(Number(sizeW));
     const h = Math.round(Number(sizeH));
@@ -1870,33 +1870,24 @@ function Toolbar(props: ToolbarProps) {
             ? { min: 12, max: 120, value: appearance.mosaicBrushDiameter, onChange: (v: number) => setAppearance({ ...appearance, mosaicBrushDiameter: v }) }
             : null;
 
-  const toolbarHeight = 48;
   const barRef = useRef<HTMLDivElement>(null);
-  const [barWidth, setBarWidth] = useState(420);
-  // Measure the real toolbar width so the centering clamp keeps the whole
-  // bar on screen (spec §7.6: translate, never shrink or wrap).
-  useEffect(() => {
+  const [barSize, setBarSize] = useState({ width: 420, height: 48 });
+  // Narrow viewports wrap controls; measure both dimensions after each reflow.
+  useLayoutEffect(() => {
     const el = barRef.current;
     if (!el) return;
-    const measure = () => setBarWidth(el.offsetWidth || 420);
+    const measure = () => setBarSize((previous) => {
+      const width = el.offsetWidth;
+      const height = el.offsetHeight;
+      return width === previous.width && height === previous.height
+        ? previous : { width, height };
+    });
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [tool, appearance]);
-  // Spec §7.6: centered on the selection's midX; clamp so the bar's left
-  // and right edges stay ≥8pt inside the screen. y is already resolved.
-  const left = Math.min(
-    Math.max(8, anchor.x - barWidth / 2),
-    Math.max(8, bounds.x + bounds.width - barWidth - 8),
-  );
-  // Mode selector sits at the top-center (16 + ~44pt tall). Keep the
-  // toolbar BELOW that zone so the two HUDs never overlap: minimum top is
-  // 70 (mode selector zone), maximum keeps the bar inside the screen.
-  const top = Math.min(
-    Math.max(96, anchor.y),
-    Math.max(96, bounds.y + bounds.height - toolbarHeight - 8),
-  );
+  }, []);
+  const { left, top } = captureToolbarPosition(selection, bounds, barSize);
 
   const sep = <div style={{ width: 1, height: 26, background: "rgba(255,255,255,0.14)", margin: "0 3px", flexShrink: 0 }} />;
 
@@ -1904,7 +1895,7 @@ function Toolbar(props: ToolbarProps) {
     <>
       <div
         ref={barRef}
-        className="kiri-hud"
+        className="kiri-capture-toolbar"
         aria-disabled={disabled}
         onPointerDown={(e) => e.stopPropagation()}
         style={{
@@ -1912,150 +1903,161 @@ function Toolbar(props: ToolbarProps) {
           left,
           top,
           display: "flex",
+          flexDirection: "column",
+          width: "max-content",
+          maxWidth: Math.max(0, bounds.width - 16),
+          boxSizing: "border-box",
           alignItems: "center",
-          gap: 3,
-          padding: "6px 8px",
+          gap: 6,
           boxShadow: "none",
           opacity: disabled ? 0.62 : 1,
           transition: "opacity 0.12s ease-out",
         }}
       >
-        <ToolButton icon="xmark" title={t("Cancel capture · Esc")} onClick={onCancel} />
-        {sep}
-        {TOOLS.map(({ tool: t2, icon, title }) => (
-          <ToolButton
-            key={t2}
-            icon={icon}
-            title={t(title)}
-            active={tool === t2}
-            onClick={() => setTool(t2)}
-          />
-        ))}
-        {sep}
-        {/* Context row */}
-        {tool === "text" ? (
-          <SegmentedControl
-            segments={[
-              { icon: "square.dashed", label: t("Transparent"), title: t("No background") },
-              { icon: "moon.fill", label: t("Dark"), title: t("Dark background") },
-            ]}
-            value={appearance.textBackgroundStyle === "transparent" ? 0 : 1}
-            onChange={(index) =>
-              setAppearance({
-                ...appearance,
-                textBackgroundStyle: (["transparent", "dark"] as TextBackgroundStyle[])[index],
-              })
-            }
-          />
-        ) : tool === "mosaic" ? (
-          <>
-            <SegmentedControl
-              segments={[
-                { label: t("Pixel"), title: t("Pixel mosaic") },
-                { label: t("Blur"), title: t("Gaussian blur") },
-              ]}
-              value={appearance.mosaicStyle === "pixel" ? 0 : 1}
-              onChange={(index) =>
-                setAppearance({
-                  ...appearance,
-                  mosaicStyle: (["pixel", "blur"] as MosaicStyle[])[index],
-                })
-              }
+        <div className="kiri-hud" style={toolbarRowStyle}>
+          <ToolButton icon="xmark" title={t("Cancel capture · Esc")} onClick={onCancel} />
+          {sep}
+          {TOOLS.map(({ tool: t2, icon, title }) => (
+            <ToolButton
+              key={t2}
+              icon={icon}
+              title={t(title)}
+              active={tool === t2}
+              onClick={() => setTool(t2)}
             />
-            <SegmentedControl
-              width={24}
-              segments={[
-                { label: "1", title: t("Soft") },
-                { label: "2", title: t("Standard") },
-                { label: "3", title: t("Strong") },
-              ]}
-              value={appearance.mosaicIntensity === "soft" ? 0 : appearance.mosaicIntensity === "standard" ? 1 : 2}
-              onChange={(index) =>
-                setAppearance({
-                  ...appearance,
-                  mosaicIntensity: (["soft", "standard", "strong"] as MosaicIntensity[])[index],
-                })
-              }
-            />
-          </>
-        ) : null}
-        {slider && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <input
-              type="range"
-              className="kiri-range"
-              aria-label={t(tool === "text" ? "Font" : tool === "mosaic" || tool === "pen" ? "Brush" : "Line")}
-              min={slider.min}
-              max={slider.max}
-              value={slider.value}
-              onChange={(e) => {
-                const value = Math.round(Number(e.target.value));
-                slider.onChange(value);
-                // Live preview for the selected text mark (spec §6.6).
-                if (tool === "text") onTextFontLive?.(value);
-              }}
-              onPointerDown={() => {
-                if (tool === "text") onTextFontBegin?.();
-              }}
-              onPointerUp={() => {
-                if (tool === "text") onTextFontEnd?.();
-              }}
-              onPointerLeave={() => {
-                if (tool === "text") onTextFontEnd?.();
-              }}
-            />
-            <span className="kiri-toolbar-value">{slider.value}</span>
+          ))}
+          {sep}
+          <ToolButton icon="arrow.uturn.backward" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={onUndo} />
+          <ToolButton icon="arrow.uturn.forward" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={onRedo} />
+          <ToolButton icon="slider.horizontal.3" title={t("More Actions")} active={detailsOpen} expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)} />
+          {sep}
+          <ToolButton icon="checkmark" title={t("Done — Copy to clipboard · Return")} primary onClick={onDone} />
+        </div>
+        {detailsOpen && (
+          <div className="kiri-hud" style={toolbarRowStyle}>
+            {/* Context row */}
+            {tool === "text" ? (
+              <SegmentedControl
+                segments={[
+                  { icon: "square.dashed", label: t("Transparent"), title: t("No background") },
+                  { icon: "moon.fill", label: t("Dark"), title: t("Dark background") },
+                ]}
+                value={appearance.textBackgroundStyle === "transparent" ? 0 : 1}
+                onChange={(index) =>
+                  setAppearance({
+                    ...appearance,
+                    textBackgroundStyle: (["transparent", "dark"] as TextBackgroundStyle[])[index],
+                  })
+                }
+              />
+            ) : tool === "mosaic" ? (
+              <>
+                <SegmentedControl
+                  segments={[
+                    { label: t("Pixel"), title: t("Pixel mosaic") },
+                    { label: t("Blur"), title: t("Gaussian blur") },
+                  ]}
+                  value={appearance.mosaicStyle === "pixel" ? 0 : 1}
+                  onChange={(index) =>
+                    setAppearance({
+                      ...appearance,
+                      mosaicStyle: (["pixel", "blur"] as MosaicStyle[])[index],
+                    })
+                  }
+                />
+                <SegmentedControl
+                  width={24}
+                  segments={[
+                    { label: "1", title: t("Soft") },
+                    { label: "2", title: t("Standard") },
+                    { label: "3", title: t("Strong") },
+                  ]}
+                  value={appearance.mosaicIntensity === "soft" ? 0 : appearance.mosaicIntensity === "standard" ? 1 : 2}
+                  onChange={(index) =>
+                    setAppearance({
+                      ...appearance,
+                      mosaicIntensity: (["soft", "standard", "strong"] as MosaicIntensity[])[index],
+                    })
+                  }
+                />
+              </>
+            ) : null}
+            {slider && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                <input
+                  type="range"
+                  className="kiri-range"
+                  aria-label={t(tool === "text" ? "Font" : tool === "mosaic" || tool === "pen" ? "Brush" : "Line")}
+                  min={slider.min}
+                  max={slider.max}
+                  value={slider.value}
+                  onChange={(e) => {
+                    const value = Math.round(Number(e.target.value));
+                    slider.onChange(value);
+                    // Live preview for the selected text mark (spec §6.6).
+                    if (tool === "text") onTextFontLive?.(value);
+                  }}
+                  onPointerDown={() => {
+                    if (tool === "text") onTextFontBegin?.();
+                  }}
+                  onPointerUp={() => {
+                    if (tool === "text") onTextFontEnd?.();
+                  }}
+                  onPointerLeave={() => {
+                    if (tool === "text") onTextFontEnd?.();
+                  }}
+                />
+                <span className="kiri-toolbar-value">{slider.value}</span>
+              </div>
+            )}
+            {slider && sep}
+            {COLOR_PRESETS.map((preset) => (
+              <ColorSwatch
+                key={preset}
+                color={COLOR_HEX[preset]}
+                label={t(COLOR_LABELS[preset])}
+                selected={appearance.colorPreset === preset}
+                onClick={() => setAppearance({ ...appearance, colorPreset: preset })}
+              />
+            ))}
+            {canSetSize && sep}
+            {canSetSize && (
+              /* Quick pixel-size entry — confirm before resizing the selection. */
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 3,
+                  padding: "2px 4px",
+                  flexShrink: 0,
+                }}
+              >
+                <input
+                  type="number"
+                  min={1}
+                  value={sizeW}
+                  onChange={(e) => setSizeW(e.target.value)}
+                  onKeyDown={onSizeInputKeyDown}
+                  placeholder={t("Width (px)").charAt(0)}
+                  title={t("Width (px)")}
+                  style={sizeInputStyle}
+                />
+                <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 11 }}>×</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={sizeH}
+                  onChange={(e) => setSizeH(e.target.value)}
+                  onKeyDown={onSizeInputKeyDown}
+                  placeholder={t("Height (px)").charAt(0)}
+                  title={t("Height (px)")}
+                  style={sizeInputStyle}
+                />
+                <ToolButton icon="checkmark" title={t("Apply size")} onClick={applySize} />
+              </div>
+            )}
           </div>
         )}
-        {sep}
-        {COLOR_PRESETS.map((preset) => (
-          <ColorSwatch
-            key={preset}
-            color={COLOR_HEX[preset]}
-            label={t(COLOR_LABELS[preset])}
-            selected={appearance.colorPreset === preset}
-            onClick={() => setAppearance({ ...appearance, colorPreset: preset })}
-          />
-        ))}
-        {sep}
-        <ToolButton icon="arrow.uturn.backward" title={t("Undo (⌘Z)")} disabled={!canUndo} onClick={onUndo} />
-        <ToolButton icon="arrow.uturn.forward" title={t("Redo (⇧⌘Z)")} disabled={!canRedo} onClick={onRedo} />
-        {sep}
-        {canSetSize && (
-          /* Quick pixel-size entry — confirm before resizing the selection. */
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 3,
-              padding: "2px 4px",
-            }}
-          >
-            <input
-              type="number"
-              min={1}
-              value={sizeW}
-              onChange={(e) => setSizeW(e.target.value)}
-              onKeyDown={onSizeInputKeyDown}
-              placeholder={t("Width (px)").charAt(0)}
-              title={t("Width (px)")}
-              style={sizeInputStyle}
-            />
-            <span style={{ color: "rgba(255,255,255,0.55)", fontSize: 11 }}>×</span>
-            <input
-              type="number"
-              min={1}
-              value={sizeH}
-              onChange={(e) => setSizeH(e.target.value)}
-              onKeyDown={onSizeInputKeyDown}
-              placeholder={t("Height (px)").charAt(0)}
-              title={t("Height (px)")}
-              style={sizeInputStyle}
-            />
-            <ToolButton icon="checkmark" title={t("Apply size")} onClick={applySize} />
-          </div>
-        )}
-        <ToolButton icon="checkmark" title={t("Done — Copy to clipboard · Return")} primary onClick={onDone} />
       </div>
     </>
   );
@@ -2066,6 +2068,7 @@ function ToolButton(props: {
   label?: string;
   title?: string;
   active?: boolean;
+  expanded?: boolean;
   primary?: boolean;
   disabled?: boolean;
   onClick(): void;
@@ -2078,6 +2081,13 @@ function ToolButton(props: {
       title={props.title}
       aria-label={props.title}
       aria-pressed={props.active}
+      aria-expanded={props.expanded}
+      onKeyDown={(event) => {
+        // Disclosure activation must not reach the overlay's Return-to-save shortcut.
+        if (props.expanded !== undefined && (event.key === "Enter" || event.key === " ")) {
+          event.stopPropagation();
+        }
+      }}
       onClick={props.onClick}
       disabled={props.disabled}
     >

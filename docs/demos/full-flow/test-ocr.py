@@ -49,4 +49,8 @@ async def main():
    await context.close();await browser.close()
  finally:
   server.shutdown();server.server_close()
-if __name__=='__main__':asyncio.run(main())
+if __name__=='__main__':
+ asyncio.run(main())
+ # Existing renderer CI entry point also checks the screenshot toolbar.
+ from test_toolbar import main as toolbar_main
+ asyncio.run(toolbar_main())

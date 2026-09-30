@@ -56,7 +56,7 @@ macOS needs **Screen & System Audio Recording** permission; click highlights als
 
 Press **⇧⌘A** on macOS or **Shift+Ctrl+A** on Windows / Linux X11, then select a window or drag a region. On Wayland, use the Capture button or bind `kiri --capture` in desktop settings.
 
-Choose Screenshot, Record, or OCR. **Enter** confirms a screenshot; **Esc** cancels capture. Screenshots go to your clipboard and local library. You can change the capture shortcut in Settings on macOS, Windows, and X11.
+Choose Screenshot, Record, or OCR. **Enter** confirms a screenshot; **Esc** cancels capture. Screenshots go to your clipboard and local library. Screenshot tools, Cancel and Done stay on a compact bar. More Actions reveals colors and exact-size inputs; drawing tools reveal their appearance controls. Both groups stay within the active display. You can change the capture shortcut in Settings on macOS, Windows, and X11.
 
 On GNOME Wayland, if the first capture shows no permission dialog, open Kiri's Library and choose **Request Access** in the error banner. Allow screenshot access in GNOME's dialog, then retry Capture. Kiri discards the authorization image. See the [Linux guide](docs/linux.md).
 
