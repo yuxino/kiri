@@ -27,7 +27,9 @@
     ],
     "screenshot_sha256": "5d783fd3f3df5ca93d154a9e8cb53195dd3236fd35e9351580fcf3a148533762",
     "passed": true,
-    "original_display_restored": "Verified desktop root 1364x1024 after automatic restore; original DUMMY1 was disabled by restore command"
+    "original_display_restored": "Verified desktop root 1364x1024 after automatic restore; original DUMMY1 was disabled by restore command",
+    "screenshot_media_type": "image/jpeg",
+    "original_screenshot_filename_note": "Both original screenshot files were named .png but contain JPEG bytes; repository evidence uses .jpg names without modifying their bytes."
   },
   "limits": [
     "Virtual mixed resolution only; not physical mixed DPI",
