@@ -1,0 +1,23 @@
+{
+  "native": false,
+  "passed": [
+    "native textarea undo/redo routing",
+    "Shift+Enter multiline",
+    "localized hint",
+    "composition event routing only",
+    "first Escape retains capture and marks",
+    "second Escape cancels",
+    "Enter commits text and completes capture",
+    "clean editor close",
+    "Cmd/Ctrl+W from focused text",
+    "dirty text keep editing",
+    "cancel text restores clean baseline",
+    "native close event guard",
+    "undo to baseline",
+    "Save As cancel is no-op",
+    "failed save retains dialog and marks",
+    "save then close",
+    "discard then close",
+    "Save As baseline"
+  ]
+}

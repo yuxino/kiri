@@ -1,0 +1,8 @@
+{
+  "native": false,
+  "reproduced": [
+    "text undo exits input and removes whole annotation",
+    "first Escape closes capture",
+    "dirty image closes without prompt"
+  ]
+}
