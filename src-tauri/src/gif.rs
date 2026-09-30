@@ -256,14 +256,13 @@ pub fn video_first_frame(video: &Path, max_long_edge: u32) -> Result<Vec<u8>> {
 
 /// Exports a Windows MP4 to a looping GIF without FFmpeg.
 #[cfg(windows)]
-pub fn export_gif(video: &Path, max_long_edge: u32, fps: u32) -> Result<PathBuf> {
+pub fn export_gif(video: &Path, max_long_edge: u32, fps: u32) -> Result<(PathBuf, f64)> {
     use image::codecs::gif::{GifEncoder, Repeat};
     use image::imageops::FilterType;
     use image::{Delay, Frame};
 
-    if fps == 0 {
-        bail!("GIF frame rate must be greater than zero");
-    }
+    let mut clock = crate::core::gif_timing::GifFrameClock::new(fps)
+        .context("GIF frame rate must be between 1 and 60")?;
     let reader = WindowsVideoReader::open(video)?;
     let (output_width, output_height) =
         scaled_dimensions(reader.width, reader.height, max_long_edge);
@@ -274,7 +273,6 @@ pub fn export_gif(video: &Path, max_long_edge: u32, fps: u32) -> Result<PathBuf>
         encoder
             .set_repeat(Repeat::Infinite)
             .context("could not configure GIF looping")?;
-        let delay = Delay::from_numer_denom_ms(1_000, fps);
         let frame_interval = 10_000_000i64 / i64::from(fps);
         let mut next_timestamp = None;
         let mut encoded_frames = 0u64;
@@ -292,7 +290,12 @@ pub fn export_gif(video: &Path, max_long_edge: u32, fps: u32) -> Result<PathBuf>
                 );
             }
             encoder
-                .encode_frame(Frame::from_parts(rgba, 0, 0, delay))
+                .encode_frame(Frame::from_parts(
+                    rgba,
+                    0,
+                    0,
+                    Delay::from_numer_denom_ms(clock.next_delay_ms(), 1),
+                ))
                 .context("could not encode a GIF frame")?;
             encoded_frames = encoded_frames.saturating_add(1);
             let mut next = next_timestamp.unwrap_or(timestamp);
@@ -310,7 +313,7 @@ pub fn export_gif(video: &Path, max_long_edge: u32, fps: u32) -> Result<PathBuf>
         let _ = std::fs::remove_file(&out_path);
         return Err(error).context("Kiri could not create the GIF file.");
     }
-    Ok(out_path)
+    Ok((out_path, clock.duration_seconds()))
 }
 
 #[cfg(test)]
@@ -329,7 +332,7 @@ mod tests {
     #[ignore = "requires KIRI_TEST_MP4 to point at a local H.264 MP4 fixture"]
     fn windows_media_foundation_export_smoke() {
         let fixture = std::env::var_os("KIRI_TEST_MP4").expect("KIRI_TEST_MP4 is not set");
-        let gif = export_gif(Path::new(&fixture), 720, 12).unwrap();
+        let (gif, _) = export_gif(Path::new(&fixture), 720, 12).unwrap();
         let bytes = std::fs::read(&gif).unwrap();
         assert!(bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"));
         println!("native GIF fixture: {}", gif.display());

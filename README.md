@@ -32,7 +32,7 @@ https://github.com/user-attachments/assets/367fe955-b396-4f98-b3f2-aa5cb41b6d37
 
 - **Capture and annotate** a window or region. Crop, draw, add text, or apply mosaic; reopen saved screenshots to edit them. Drag a selected line's endpoints or body to adjust it without changing tools. Pin a saved screenshot as a resizable reference above other windows.
 - **Copy text** from your screen or saved images with local OCR. Correct saved recognition in Text History and restore the original text when needed.
-- **Record** a region as MP4 or GIF. On macOS and Windows, include system audio, microphone, and a visible red click highlight.
+- **Record** a region as MP4 or GIF. GIF export preserves playback timing and reports the encoded duration. On macOS and Windows, include system audio, microphone, and a visible red click highlight.
 - **Edit videos** on macOS and Windows: trim, reorder, change speed, and add annotations or privacy masks.
 - **Keep everything together** in a local library with imports, search, tags, favorites, and recoverable Trash. Paste an image from the clipboard to annotate or recognize it, or export selected captures to a folder without moving the originals.
 

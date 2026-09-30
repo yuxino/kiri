@@ -395,7 +395,7 @@ mod tests {
                     &[255, 0, 0, 255]
                 });
             }
-            for frame_index in 0..3 {
+            for frame_index in 0..60 {
                 assert!(encoder.append_video(&frame, frame_index).unwrap());
             }
             let audio = vec![0_u8; 4_800 * 4];
@@ -408,7 +408,7 @@ mod tests {
 
         let (width, height, duration) = probe_media(&video).unwrap();
         assert_eq!((width, height), (64, 64));
-        assert!(duration.is_some_and(|seconds| seconds >= 0.19));
+        assert!(duration.is_some_and(|seconds| seconds >= 3.9));
         assert!(has_audio_track(&video).unwrap());
 
         let thumbnail = video_first_frame_png(&video, 64).unwrap();
@@ -428,6 +428,22 @@ mod tests {
         assert!(gif_duration.is_some_and(|seconds| seconds > 0.0));
         let bytes = std::fs::read(&gif).unwrap();
         assert!(bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"));
+        use image::AnimationDecoder;
+        let frames = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes))
+            .unwrap()
+            .into_frames()
+            .collect_frames()
+            .unwrap();
+        let encoded_seconds: f64 = frames
+            .iter()
+            .map(|frame| {
+                let (numerator, denominator) = frame.delay().numer_denom_ms();
+                f64::from(numerator) / f64::from(denominator) / 1000.0
+            })
+            .sum();
+        assert!((encoded_seconds - frames.len() as f64 / 12.0).abs() <= 0.005_000_001);
+        assert!((gif_duration.unwrap() - encoded_seconds).abs() < 0.000_001);
+        assert!((encoded_seconds - duration.unwrap()).abs() < 1.0 / 12.0 + 0.01);
         let _ = std::fs::remove_file(gif);
     }
 }

@@ -929,12 +929,11 @@ pub fn export_gif(
     max_long_edge: u32,
     fps: u32,
 ) -> Result<(PathBuf, i64, i64, Option<f64>)> {
-    if !(1..=60).contains(&fps) {
-        bail!("The GIF frame rate is invalid.");
-    }
+    let mut clock = crate::core::gif_timing::GifFrameClock::new(fps)
+        .ok_or_else(|| anyhow!("The GIF frame rate is invalid."))?;
     let (width, height, duration) =
         probe_video(video).ok_or_else(|| anyhow!("Could not inspect the source video."))?;
-    let duration = duration
+    let _duration = duration
         .filter(|duration| duration.is_finite() && *duration > 0.0)
         .ok_or_else(|| anyhow!("The source video has no positive duration."))?;
     let (width, height) =
@@ -981,7 +980,7 @@ pub fn export_gif(
                 rgba,
                 0,
                 0,
-                image::Delay::from_numer_denom_ms(1000, fps),
+                image::Delay::from_numer_denom_ms(clock.next_delay_ms(), 1),
             ))?;
             frame_count += 1;
         }
@@ -999,7 +998,7 @@ pub fn export_gif(
         out_path,
         i64::from(width),
         i64::from(height),
-        Some(duration),
+        Some(clock.duration_seconds()),
     ))
 }
 
@@ -1274,7 +1273,7 @@ mod tests {
         assert_eq!((image.width(), image.height()), (32, 24));
         let pixel = image.to_rgb8().get_pixel(0, 0).0;
         assert!(pixel[0] > 220 && pixel[2] < 30);
-        let (gif, width, height, _) = export_gif(&merged, 32, 12).unwrap();
+        let (gif, width, height, gif_duration) = export_gif(&merged, 32, 12).unwrap();
         let staged_gif = temp.path().join("merged.gif");
         std::fs::rename(gif, &staged_gif).unwrap();
         assert_eq!((width, height), (32, 24));
@@ -1288,6 +1287,16 @@ mod tests {
             "Expected one second of GIF frames, got {}",
             frames.len()
         );
+        let gif_seconds: f64 = frames
+            .iter()
+            .map(|frame| {
+                let (numerator, denominator) = frame.delay().numer_denom_ms();
+                f64::from(numerator) / f64::from(denominator) / 1000.0
+            })
+            .sum();
+        assert!((gif_seconds - frames.len() as f64 / 12.0).abs() <= 0.005_000_001);
+        assert!((gif_duration.unwrap() - gif_seconds).abs() < 0.000_001);
+        assert!((gif_seconds - duration).abs() < 1.0 / 12.0 + 0.01);
         std::fs::write(temp.path().join("metadata.txt"), format!("width=64\nheight=48\nduration={duration}\nsegment_colors={colors:?}\ngif_frames={}\n", frames.len())).unwrap();
     }
 

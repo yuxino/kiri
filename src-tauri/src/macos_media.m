@@ -8,6 +8,7 @@
 
 #include <math.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -621,7 +622,7 @@ bool kiri_macos_export_gif(
 ) {
     @autoreleasepool {
         @try {
-            if (maxLongEdge == 0 || fps == 0) {
+            if (maxLongEdge == 0 || fps == 0 || fps > 60) {
                 kiri_write_error(errorBuffer, errorCapacity, @"The GIF configuration is invalid.");
                 return false;
             }
@@ -653,7 +654,8 @@ bool kiri_macos_export_gif(
                 MAX(1, round(sourceHeight * scale))
             );
             double rawFrameCount = ceil(seconds * (double)fps);
-            if (!isfinite(rawFrameCount) || rawFrameCount < 1 || rawFrameCount > (double)NSUIntegerMax) {
+            if (!isfinite(rawFrameCount) || rawFrameCount < 1 ||
+                rawFrameCount > (double)NSUIntegerMax || rawFrameCount > (double)(UINT64_MAX / 100)) {
                 kiri_write_error(errorBuffer, errorCapacity, @"The GIF would contain too many frames.");
                 return false;
             }
@@ -681,15 +683,25 @@ bool kiri_macos_export_gif(
             generator.maximumSize = targetSize;
             generator.requestedTimeToleranceBefore = kCMTimeZero;
             generator.requestedTimeToleranceAfter = CMTimeMake(1, fps);
-            NSDictionary *frameProperties = @{
-                (NSString *)kCGImagePropertyGIFDictionary: @{
-                    (NSString *)kCGImagePropertyGIFDelayTime: @(1.0 / (double)fps),
-                },
-            };
+            // GIF stores centiseconds: distribute the fractional remainder
+            // over elapsed time instead of quantizing every frame separately.
+            uint32_t gifRemainder = fps / 2;
+            uint64_t encodedTicks = 0;
             size_t outputWidth = 0;
             size_t outputHeight = 0;
             for (NSUInteger frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
                 @autoreleasepool {
+                    gifRemainder += 100;
+                    uint32_t delayTicks = gifRemainder / fps;
+                    gifRemainder %= fps;
+                    encodedTicks += delayTicks;
+                    double delaySeconds = (double)delayTicks / 100.0;
+                    NSDictionary *frameProperties = @{
+                        (NSString *)kCGImagePropertyGIFDictionary: @{
+                            (NSString *)kCGImagePropertyGIFDelayTime: @(delaySeconds),
+                            (NSString *)kCGImagePropertyGIFUnclampedDelayTime: @(delaySeconds),
+                        },
+                    };
                     double requestedSeconds = MIN(seconds - 0.001, (double)frameIndex / (double)fps);
                     CMTime requestedTime = CMTimeMakeWithSeconds(MAX(0, requestedSeconds), 600);
                     NSError *frameError = nil;
@@ -726,7 +738,7 @@ bool kiri_macos_export_gif(
             }
             *width = (int64_t)outputWidth;
             *height = (int64_t)outputHeight;
-            *duration = seconds;
+            *duration = (double)encodedTicks / 100.0;
             return true;
         } @catch (NSException *exception) {
             kiri_write_error(errorBuffer, errorCapacity, exception.reason);

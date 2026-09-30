@@ -1617,8 +1617,8 @@ fn export_gif_file(
 
     #[cfg(windows)]
     {
-        let _ = app;
-        let gif_path = crate::gif::export_gif(source_path, max_long_edge, fps)
+        let _ = (app, source_duration);
+        let (gif_path, encoded_duration) = crate::gif::export_gif(source_path, max_long_edge, fps)
             .map_err(|error| error.to_string())?;
         let (width, height) = if _source_width > 0 && _source_height > 0 {
             (_source_width as u32, _source_height as u32)
@@ -1630,7 +1630,7 @@ fn export_gif_file(
             gif_path,
             i64::from(width),
             i64::from(height),
-            source_duration,
+            Some(encoded_duration),
         ))
     }
 
