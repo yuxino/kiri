@@ -433,13 +433,18 @@ def inspect_recording(path, references, expected_active_seconds, wall_seconds, p
             errors = {stage: frame_error(frame, reference) for stage, reference in references.items()}
             closest = min(errors, key=lambda stage: errors[stage][0])
             mean, changed = errors[closest]
+            w, h = frame.size
+            edges = ((0, 0, w, 2), (0, h - 2, w, h), (0, 0, 2, h), (w - 2, 0, w, h))
+            edge_error = max(frame_error(frame.crop(edge), references[closest].crop(edge))[0] for edge in edges)
             # H.264 is lossy; a small mean error and a strict outlier-pixel
             # budget admit text-edge ringing but reject control/toast overlays.
-            if closest == "paused" or mean > 3.5 or changed > 0.008:
+            if closest == "paused" or mean > 3.5 or changed > 0.008 or edge_error > 8:
                 frame.save(output / "unexpected-recording-frame.png")
                 ImageChops.difference(frame, references[closest]).save(output / "recording-frame-difference.png")
                 raise RuntimeError(f"Unexpected MP4 frame: nearest={closest}, "
-                                   f"mean error={mean:.3f}, changed pixels={changed:.4%}")
+                                   f"mean error={mean:.3f}, changed pixels={changed:.4%}, edge error={edge_error:.3f}")
+            if sum(counts.values()) == 0:
+                frame.save(output / "recording-frame-zero.png")
             if counts[closest] == 0:
                 frame.save(output / f"recording-first-{closest}-frame.png")
             counts[closest] += 1
@@ -460,6 +465,8 @@ def inspect_recording(path, references, expected_active_seconds, wall_seconds, p
         "paused_seconds": round(paused_seconds, 3),
         "wall_seconds": round(wall_seconds, 3), "decoded_frames": counts,
         "paused_pattern_frames": 0, "unexpected_frames": 0,
+        "frame_zero_included": True,
+        "selection_edges_checked_on_every_frame": True,
         "maximum_frame_mean_error": round(largest_mean, 4),
         "maximum_frame_changed_fraction": round(largest_changed, 5),
     }
@@ -566,6 +573,16 @@ try:
     drag_region(recording_region)
     click_control("MP4")
     screenshot("recording-options.png")
+    # Exercise the startup race: no countdown must still unmap the selection
+    # before the very first captured frame. The decoder below checks all frames.
+    countdown, _ = wait_for_control("3-second countdown")
+    if countdown.get_state_set().contains(Atspi.StateType.CHECKED):
+        click_control("3-second countdown")
+    def countdown_is_off():
+        control = visible_control("3-second countdown")
+        return control and not control[0].get_state_set().contains(Atspi.StateType.CHECKED)
+    wait_for("countdown disabled", countdown_is_off)
+    report["recording_countdown_enabled"] = False
     staged_before = recording_files(".kiri-media-*.mp4")
     click_control("Start Recording")
     # Pointer stays outside the selected region, including during countdown.

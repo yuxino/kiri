@@ -3304,7 +3304,14 @@ pub async fn start_recording_flow(
         }
     }
 
-    let (screen_frame, backing_scale, return_pid, was_kiri_frontmost, overlay_labels) = {
+    let (
+        screen_frame,
+        backing_scale,
+        return_pid,
+        was_kiri_frontmost,
+        overlay_labels,
+        recording_session_id,
+    ) = {
         let state = app.state::<AppState>();
         let _transition = state.library_transition.lock().unwrap();
         {
@@ -3351,6 +3358,7 @@ pub async fn start_recording_flow(
             session.return_pid,
             session.was_kiri_frontmost,
             session.overlay_labels,
+            recording.session_id,
         )
     };
 
@@ -3362,6 +3370,9 @@ pub async fn start_recording_flow(
         move || -> Result<(), String> {
             for label in &overlay_labels {
                 if let Some(window) = app.get_webview_window(label) {
+                    #[cfg(target_os = "linux")]
+                    platform::linux::hide_window_for_capture(&window)
+                        .map_err(|error| error.to_string())?;
                     let _ = window.close();
                 }
             }
@@ -3372,7 +3383,26 @@ pub async fn start_recording_flow(
         }
     };
     #[cfg(target_os = "linux")]
-    linux_run_on_main(&app, present_recording_ui)?;
+    if let Err(error) = linux_run_on_main(&app, present_recording_ui) {
+        // Hide failure must not leave an armed recorder or stale overlay. The
+        // session ID prevents a late failure from cancelling a replacement.
+        for label in &overlay_labels {
+            if let Some(window) = app.get_webview_window(label) {
+                let _ = window.close();
+            }
+        }
+        let still_current = app
+            .state::<AppState>()
+            .recording
+            .lock()
+            .unwrap()
+            .pending_start_is_current(recording_session_id);
+        if still_current {
+            let _ = cancel_recording_flow(app.clone(), recording_session_id).await;
+            emit_error(&app, "Could not start screen recording.".into(), None);
+        }
+        return Err(error);
+    }
     #[cfg(not(target_os = "linux"))]
     present_recording_ui()?;
 
@@ -3387,7 +3417,7 @@ pub async fn start_recording_flow(
 
     if !options.uses_countdown {
         // No countdown requested: start recording immediately.
-        return begin_recording(app, None).await;
+        return begin_recording(app, Some(recording_session_id)).await;
     }
 
     // React reveals/focuses the window after mounting its controls. Do not
@@ -4056,11 +4086,15 @@ pub async fn begin_recording(app: AppHandle, session_id: Option<uuid::Uuid>) -> 
         let configuration = configuration.clone();
         move || -> Result<(), String> {
             if let Some(window) = app.get_webview_window("countdown") {
+                #[cfg(target_os = "linux")]
+                platform::linux::hide_window_for_capture(&window)
+                    .map_err(|error| error.to_string())?;
                 let _ = window.close();
             }
             #[cfg(target_os = "linux")]
             if let Some(window) = app.get_webview_window("toast") {
-                let _ = window.hide();
+                platform::linux::hide_window_for_capture(&window)
+                    .map_err(|error| error.to_string())?;
             }
             #[cfg(not(target_os = "linux"))]
             create_control_panel(&app, &configuration)?;

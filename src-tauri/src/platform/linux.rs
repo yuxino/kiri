@@ -32,6 +32,24 @@ pub fn is_wayland_session() -> bool {
             .is_ok_and(|session| session.eq_ignore_ascii_case("wayland"))
 }
 
+/// Recording must not race queued Tauri/Tao close/visibility requests. Called
+/// on GTK's main thread: unmap the native widget now, then wait for the display
+/// server to process our requests before a recorder can capture its first frame.
+pub fn hide_window_for_capture(window: &tauri::WebviewWindow) -> Result<()> {
+    if !gtk::is_initialized_main_thread() {
+        return Err(anyhow!("Capture windows must be hidden on the GTK main thread."));
+    }
+    let native = window
+        .gtk_window()
+        .context("Could not access the capture window.")?;
+    native.hide();
+    native.display().sync();
+    if native.is_visible() || native.is_mapped() {
+        return Err(anyhow!("The capture window is still visible."));
+    }
+    Ok(())
+}
+
 /// Clipboard commands may run in an IPC worker as well as on the GTK thread.
 /// Never move GTK objects between threads or acquire the main context on a
 /// worker: an unowned main context can otherwise run an invocation there.
