@@ -8,6 +8,7 @@ import argparse
 import io
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 import subprocess
@@ -50,6 +51,7 @@ report = {
         "LIBGL_ALWAYS_SOFTWARE", "WEBKIT_DISABLE_COMPOSITING_MODE", "RUST_LOG", "RUST_BACKTRACE"
     )},
     "ui_ready": [],
+    "capture_overlay_geometry": [],
     "checks": [],
     "not_tested": ["GNOME Wayland and portal consent", "real audio devices", "multiple monitors", "fractional scaling"],
 }
@@ -114,6 +116,28 @@ def overlay():
     return None
 
 
+def check_overlay_geometry(window, evidence, phase):
+    # Query the client window in root coordinates, not its WM frame or a
+    # parent-relative position. A decorated first map can otherwise leave a
+    # borderless full-size overlay shifted by the removed title bar/border.
+    result = command("xwininfo", "-id", str(window))
+    actual = {}
+    for key, label in (("x", "Absolute upper-left X"), ("y", "Absolute upper-left Y"),
+                       ("width", "Width"), ("height", "Height")):
+        match = re.search(rf"^\s*{re.escape(label)}:\s*(-?\d+)\s*$", result.stdout, re.MULTILINE)
+        if match is None:
+            raise RuntimeError(f"Cannot read capture overlay {key} from xwininfo: {result.stdout}")
+        actual[key] = int(match.group(1))
+    sample = {"phase": phase, "elapsed_seconds": round(time.monotonic() - evidence["started"], 3),
+              "actual": actual}
+    evidence["samples"].append(sample)
+    if actual != evidence["expected"]:
+        (output / "failure-overlay-xwininfo.txt").write_text(result.stdout, encoding="utf-8")
+        raise RuntimeError(f"Capture overlay geometry at {phase} on attempt {evidence['attempt']}: "
+                           f"got {actual}, expected {evidence['expected']}; "
+                           "see capture_overlay_geometry and failure-overlay-xwininfo.txt")
+
+
 def screenshot(name):
     picture = ImageGrab.grab().convert("RGB")
     picture.save(output / name)
@@ -164,11 +188,25 @@ def show_fixture():
 
 def open_capture():
     source = ImageGrab.grab().convert("RGB")
+    # linux-native.sh creates one Xvfb monitor at the root origin and scale 1;
+    # its real captured desktop dimensions are the required overlay bounds.
+    evidence = {"attempt": len(report["capture_overlay_geometry"]) + 1,
+                "expected": {"x": 0, "y": 0, "width": source.width, "height": source.height},
+                "started": time.monotonic(), "samples": []}
+    report["capture_overlay_geometry"].append(evidence)
     command("xdotool", "key", "--clearmodifiers", "ctrl+shift+a")
     window = wait_for("mapped full-display capture overlay", overlay)
+    evidence["window"] = window
+    check_overlay_geometry(window, evidence, "first observed visible map")
     # A mapped native window says nothing about WebKit readiness. Require a
     # real accessible control plus painted pixels differing from the source.
     wait_for_control("Screenshot", source=source)
+    check_overlay_geometry(window, evidence, "painted Screenshot control")
+    # Sample before any click/drag so a later configure request cannot conceal
+    # an initially offset overlay or introduce a visible geometry jump.
+    for index in range(5):
+        pause(0.1)
+        check_overlay_geometry(window, evidence, f"stable sample {index + 1}")
     return window
 
 
@@ -504,13 +542,15 @@ try:
     compare(screenshot("source-independent-after.png"), source_before_probe,
             "Source must repaint independently of the driver")
     report["checks"].append("public source repaints an X11 Expose while its driver is blocked")
-    open_capture()
-    screenshot("capture-overlay.png")
-    command("xdotool", "key", "--clearmodifiers", "Escape")
-    wait_for("Escape closes the overlay", lambda: overlay() is None)
-    if assets():
-        raise RuntimeError("Cancelled capture unexpectedly saved an asset")
-    report["checks"].append("native global shortcut opens capture; Escape cancels without saving")
+    for attempt in range(3):
+        open_capture()
+        screenshot("capture-overlay.png" if attempt == 0 else f"capture-overlay-reopen-{attempt + 1}.png")
+        command("xdotool", "key", "--clearmodifiers", "Escape")
+        wait_for("Escape closes the overlay", lambda: overlay() is None)
+        if assets():
+            raise RuntimeError("Cancelled capture unexpectedly saved an asset")
+    report["checks"].append("native global shortcut opens capture three times; Escape cancels without saving")
+    report["checks"].append("capture overlay matches the root display at first observed visible map, painted readiness, and five stability samples before interaction")
 
     # Real WebKitGTK key input: verifies browser history and GTK key routing,
     # rather than treating an unprevented DOM key as proof of native Undo.
