@@ -6,6 +6,7 @@ import type { AssetDto } from "../lib/ipc";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, isEditorRevisionMismatch } from "../lib/ipc";
 import { t } from "../i18n";
+import { isTextComposition } from "../annotation/text-composition.js";
 import type { Rect } from "../annotation/geom";
 import {
   COLOR_HEX,
@@ -201,6 +202,7 @@ export function EditorWindow(props: { id: string }) {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (isTextComposition(e)) return;
       if (completionLock.locked) {
         e.preventDefault();
         e.stopPropagation();

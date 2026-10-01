@@ -13,6 +13,7 @@ import React, {
   useState,
 } from "react";
 import type { Point, Rect } from "./geom";
+import { handleTextEditorKey, setTextComposition } from "./text-composition.js";
 import type { ColorPreset } from "./model";
 import { clampPoint, hitTestHandle } from "./geom";
 import {
@@ -1340,31 +1341,13 @@ function TextEditor(props: {
       spellCheck={false}
       autoCorrect="off"
       autoCapitalize="off"
+      onCompositionStart={(e) => setTextComposition(e.currentTarget, true)}
+      onCompositionEnd={(e) => setTextComposition(e.currentTarget, false)}
+      onBlur={(e) => setTextComposition(e.currentTarget, false)}
       onChange={(e) => onTextChange(e.target.value)}
       onKeyDown={(e) => {
-        // IME uses Enter/Escape to confirm or cancel its own composition.
-        if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) {
-          e.stopPropagation();
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          onCancel();
-        } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
-          if(nativeUndo){e.stopPropagation();return;}
-          // Spec §10.1: undo/redo commit the text edit first, then act on
-          // the canvas history (never the textarea's native undo).
-          e.preventDefault();
-          onCommit();
-          if (e.shiftKey) onRedo();
-          else onUndo();
-        } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-          e.preventDefault();
-          onCommit();
-          // Spec §6.6: Return commits the text and completes the capture.
-          onFinish?.();
-        }
-        e.stopPropagation();
+        handleTextEditorKey(e, { cancel: onCancel, commit: onCommit,
+          undo: onUndo, redo: onRedo, finish: onFinish }, nativeUndo);
       }}
       style={{
         position: "absolute",

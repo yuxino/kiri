@@ -1,7 +1,9 @@
 /** Video-only shortcuts must run before the inline text editor stops bubbling. */
+import { isTextComposition } from "../annotation/text-composition.js";
+
 export function installVideoProjectShortcuts(target,actions) {
   const onKey=event=>{
-    if(event.defaultPrevented||event.isComposing||event.keyCode===229||
+    if(event.defaultPrevented||isTextComposition(event)||
       (!event.metaKey&&!event.ctrlKey)||event.altKey||event.shiftKey)return;
     const key=event.key.toLowerCase();
     const action=key==="s"?actions.save:key==="w"?actions.close:undefined;

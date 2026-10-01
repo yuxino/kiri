@@ -15,6 +15,7 @@ import {
 } from "../lib/ipc";
 import { t } from "../i18n";
 import MicrophoneCheck from "./MicrophoneCheck";
+import { isTextComposition } from "../annotation/text-composition.js";
 import type { Point, Rect } from "../annotation/geom";
 import {
   ALL_HANDLES,
@@ -492,7 +493,7 @@ export function OverlayWindow() {
   useEffect(() => {
     const onEscape = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (e.isComposing || e.keyCode === 229) return;
+      if (isTextComposition(e)) return;
       e.preventDefault();
       e.stopImmediatePropagation();
       if (completionLock.locked) return;
@@ -506,6 +507,7 @@ export function OverlayWindow() {
   // --- keyboard ---
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (isTextComposition(e)) return;
       if (completionLock.locked) {
         e.preventDefault();
         e.stopPropagation();

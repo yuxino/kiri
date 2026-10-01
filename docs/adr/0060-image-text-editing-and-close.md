@@ -41,3 +41,16 @@ and Save & close on the exact packaged application.
 用户已确认图片编辑窗口权限修复；新增独立 image-close 能力，仅 editor-* 调用窗口
 获得 destroy，不加入默认能力。这是调用窗口边界，不能误称为目标 label 限制；
 应用关闭路径只调用当前窗口。未保存与保存失败保护保持不变，exact 包仍须原生实测。
+
+## Composition lifecycle guards — 2026-10-01
+
+The inline textarea tracks composition start/end and clears its marker on blur.
+The key guard combines that marker with isComposing and keyCode 229, so a
+confirming key whose WebView flags are false is still owned by the IME while
+composition is active. Screenshot capture-phase Escape, saved-image shortcuts
+and video project capture-phase save/close use the same guard. Native text
+undo remains the textarea default; this does not add a replacement text history.
+
+Pure key-dispatch tests establish event ownership, not real input-method or
+WebKit undo acceptance. Replay Chinese/Japanese composition and native Undo on
+the exact package before claiming those paths passed.
