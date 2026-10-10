@@ -53,7 +53,7 @@ Choose one of seven UI languages in **Settings → General → Language**. Your 
 
 Renaming a library item also renames its saved file and keeps its file type. Use **Copy File** in the context menu to paste the file into a folder; **Copy** continues to copy image pixels for chats and editors.
 
-Select an existing annotation to change its style. Mosaic offers freehand, rectangle, and ellipse shapes, with pixel or blur effects and adjustable strength. Use Watermark (W) to type directly on the image, then choose a single mark or a tiled pattern and adjust opacity, angle, and spacing. Watermarks remain editable after saving.
+Select an existing annotation to change its style. Mosaic offers freehand, rectangle, and ellipse shapes, with pixel or blur effects and adjustable strength. Use Watermark (W) to type a tiled pattern directly on the image and adjust opacity, angle, and spacing. Select the tool again to continue editing existing content, including after saving.
 
 Captures stay local. Remote OCR is optional and asks before each upload. Linux setup, MP4 audio recording, Wayland shortcuts, and platform limits are covered in the [Linux guide](docs/linux.md).
 

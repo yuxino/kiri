@@ -363,10 +363,14 @@ export function EditorWindow(props: { id: string }) {
   function selectTool(next: EditorTool) {
     if (readOnlyRef.current || qrRequestRef.current) return;
     canvasRef.current?.finishAppearanceAdjustment();
+    if (next === "watermark") {
+      setTool(next);
+      canvasRef.current?.editWatermark();
+      return;
+    }
     canvasRef.current?.commitTextEditing();
     if (next !== "select") canvasRef.current?.clearSelection();
     setTool(next);
-    if (next === "watermark") canvasRef.current?.editWatermark();
     if (next === "crop" && document) {
       setCropSelection((current) => current ?? fullCropRect(document));
     }

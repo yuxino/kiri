@@ -36,6 +36,21 @@ async def assert_actions(page):
     assert all(row["visible"] and row["inside"] for row in result), result
 
 
+async def assert_properties(page):
+    """Every normal property control is visible without a hidden partial row."""
+    result = await page.evaluate("""() => {
+      const panel=document.querySelector('.kiri-image-editor-properties');
+      const r=panel.getBoundingClientRect();
+      return [...panel.querySelectorAll('button,input')].map(e=>{
+        const q=e.getBoundingClientRect();return {title:e.ariaLabel||e.title||e.textContent,
+          inside:q.width>0&&q.height>0&&q.left>=r.left-1&&q.right<=r.right+1&&
+            q.top>=r.top-1&&q.bottom<=r.bottom+1,
+          hit:document.elementFromPoint(q.x+q.width/2,q.y+q.height/2)?.closest('button,input')===e};
+      });
+    }""")
+    assert all(row["inside"] and row["hit"] for row in result), result
+
+
 async def editor_cases(browser, report):
     for language in LANGUAGES:
         dictionary = json.loads((ROOT / "src/i18n" / f"{language}.json").read_text())
@@ -56,8 +71,14 @@ async def editor_cases(browser, report):
                 assert await editor.input_value() == "Watermark abcdef"
                 assert await editor.evaluate("e=>getComputedStyle(e).backgroundColor") == "rgba(0, 0, 0, 0)"
                 assert await rect(page, "canvas") == before, "Editing must not move the image"
-                await page.get_by_role("button", name=dictionary["Single"], exact=True).click()
+                assert await page.locator('.kiri-image-editor-properties .kiri-annotation-choices').count() == 0
+                await assert_properties(page)
+                await page.get_by_role("button", name=dictionary["Watermark (W)"], exact=True).click()
                 assert await editor.input_value() == "Watermark abcdef"
+                assert await page.get_by_role("button", name=dictionary["Undo (⌘Z)"], exact=True).is_disabled(), "Repeated tool entry must keep the uncommitted native draft"
+                await page.get_by_role("button", name=dictionary["Edit watermark"], exact=True).click()
+                assert await editor.input_value() == "Watermark abcdef"
+                assert await page.evaluate("document.activeElement === document.querySelector('textarea')")
                 await page.locator('input[type=number][aria-label="' + dictionary["Opacity"] + '"]').fill("55")
                 await page.locator('input[type=number][aria-label="' + dictionary["Opacity"] + '"]').press("Enter")
                 await page.get_by_role("button", name=dictionary["Select (V)"], exact=True).click()
@@ -66,11 +87,25 @@ async def editor_cases(browser, report):
                 await page.wait_for_function("__annotationToolsQa.exports.length===1")
                 mark = await page.evaluate("__annotationToolsQa.document.marks[0]")
                 assert mark["kind"] == "watermark" and mark["text"] == "Watermark abcdef", mark
-                assert mark["mode"] == "single" and mark["opacity"] == .55, mark
+                assert mark["mode"] == "tiled" and mark["opacity"] == .55, mark
+                await page.get_by_role("button", name=dictionary["Watermark (W)"], exact=True).click()
+                await editor.wait_for()
+                assert await editor.input_value() == mark["text"]
+                assert await page.evaluate("document.activeElement === document.querySelector('textarea')")
+                await page.keyboard.press("ArrowRight")
+                await page.keyboard.type(" second edit")
+                await page.keyboard.press("Enter")
+                await page.get_by_role("button", name=dictionary["Save As…"], exact=True).click()
+                await page.wait_for_function("__annotationToolsQa.exports.length===2")
+                marks = await page.evaluate("__annotationToolsQa.document.marks")
+                assert len(marks) == 1 and marks[0]["id"] == mark["id"], marks
+                assert marks[0]["text"] == "Watermark abcdef second edit", marks
+                assert await rect(page, "canvas") == before
                 assert not errors, errors
                 if width == 320:
                     await page.screenshot(path=str(OUT / f"editor-{language}-320.png"))
-                report["editor"].append({"language": language, "width": width, "passed": True})
+                report["editor"].append({"language": language, "width": width, "passed": True,
+                                         "completeProperties": True, "tiledOnly": True, "secondEdit": True})
             finally:
                 await context.close()
 
@@ -166,14 +201,28 @@ async def callout_pointer_case(browser, report):
         editor = page.locator("textarea")
         await editor.wait_for()
         await page.keyboard.type("Callout drag test")
-        track = await page.locator('input[type=range][aria-label="Number size"]').bounding_box()
-        await page.mouse.move(track["x"] + track["width"] * .3, track["y"] + track["height"] / 2)
+        slider = page.locator('input[type=range][aria-label="Number size"]')
+        track = await slider.bounding_box()
+        limits = await slider.evaluate("""e => ({min: Number(e.min), max: Number(e.max),
+          thumb: parseFloat(getComputedStyle(e, '::-webkit-slider-thumb').width)})""")
+        # The thumb travels between its own half-widths. A percentage of the
+        # entire flex-sized element does not identify a fixed range value.
+        def slider_x(value):
+            return track["x"] + limits["thumb"] / 2 + (track["width"] - limits["thumb"]) * (value - limits["min"]) / (limits["max"] - limits["min"])
+        await page.mouse.move(slider_x(38), track["y"] + track["height"] / 2)
         await page.mouse.down()
-        await page.mouse.move(track["x"] + track["width"] * .82, track["y"] + track["height"] / 2, steps=8)
+        await page.mouse.move(slider_x(66), track["y"] + track["height"] / 2, steps=8)
         await page.mouse.up()
         assert await editor.input_value() == "Callout drag test"
-        assert await page.locator('input[type=range][aria-label="Number size"]').input_value() == "66"
-        assert await page.locator('input[type=range][aria-label="Number size"]').evaluate("e=>getComputedStyle(e).outlineStyle") == "none"
+        try:
+            await page.wait_for_function("document.querySelector('input[type=range][aria-label=\"Number size\"]').value === '66'", timeout=1000)
+        except Exception:
+            report["calloutSliderFailure"] = {"track": track, "limits": limits,
+                "actual": await slider.input_value(), "target": 66}
+            await page.screenshot(path=str(OUT / "callout-slider-failure.png"))
+            raise
+        assert await slider.input_value() == "66"
+        assert await slider.evaluate("e=>getComputedStyle(e).outlineStyle") == "none"
         assert await page.get_by_role("button", name="Move description", exact=True).count() == 0
         save = page.get_by_role("button", name="Save As…", exact=True)
         await save.click()
@@ -250,7 +299,33 @@ async def anchored_label_case(browser, report):
         await dot.click()
         restored = await dot.bounding_box()
         assert abs(restored["x"] - before["x"]) < .5 and abs(restored["y"] - before["y"]) < .5
-        report["anchoredLabel"] = {"passed": True, "fixedDot": True, "roundTrip": True, "unchangedText": True}
+        direction = await dot.get_attribute("aria-label")
+        x, y = restored["x"] + restored["width"] / 2, restored["y"] + restored["height"] / 2
+        await page.mouse.move(x, y)
+        await page.mouse.down()
+        await page.mouse.move(x + 20, y + 10, steps=5)
+        await page.mouse.up()
+        assert await dot.get_attribute("aria-label") == direction, "Dragging the dot must not flip"
+        assert await dot.bounding_box() == restored, "Dragging the dot must not move the annotation"
+        await page.get_by_role("button", name="Save As…", exact=True).click()
+        await page.wait_for_function("__annotationToolsQa.exports.length===2")
+        initial = await page.evaluate("__annotationToolsQa.document.marks[0]")
+        scale = box["width"] / 960
+        x = box["x"] + (initial["rect"]["x"] + initial["rect"]["width"] / 2) * scale
+        y = box["y"] + (initial["rect"]["y"] + initial["rect"]["height"] / 2) * scale
+        await page.mouse.move(x, y)
+        await page.mouse.down()
+        await page.mouse.move(x + 25, y + 15, steps=5)
+        await page.mouse.up()
+        assert await page.locator("textarea").count() == 0, "The active label tool must drag directly"
+        await page.get_by_role("button", name="Save As…", exact=True).click()
+        await page.wait_for_function("__annotationToolsQa.exports.length===3")
+        moved = await page.evaluate("__annotationToolsQa.document.marks[0]")
+        assert moved["id"] == initial["id"] and moved["text"] == initial["text"]
+        assert abs(moved["rect"]["x"] - initial["rect"]["x"] - 25 / scale) < 1
+        assert abs(moved["rect"]["y"] - initial["rect"]["y"] - 15 / scale) < 1
+        report["anchoredLabel"] = {"passed": True, "fixedDot": True, "roundTrip": True,
+                                    "unchangedText": True, "dotDragSuppressed": True, "activeToolDrag": True}
     finally:
         await context.close()
 

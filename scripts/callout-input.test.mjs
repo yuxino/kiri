@@ -4,6 +4,7 @@ import {readFileSync} from "node:fs";
 import {createLibraryHarness, nodes} from "./helpers/library-render-harness.mjs";
 import ts from "typescript";
 import * as layout from "../src/annotation/text-layout.js";
+import * as calloutLayout from "../src/annotation/callout-layout.js";
 import * as composition from "../src/annotation/text-composition.js";
 
 const canvasSource = readFileSync(new URL("../src/annotation/AnnotationCanvas.tsx", import.meta.url), "utf8");
@@ -15,13 +16,14 @@ import {t} from "../i18n";
 import {COLOR_HEX} from "./model";
 import {textFont} from "./render";
 import {fitTextEditorFrame, layoutTextLines, TEXT_TAB_SIZE, textEditorInsets} from "./text-layout.js";
+import {calloutLabelSize, repairCalloutLabelHeight} from "./callout-layout.js";
 import {handleTextEditorKey, isTextComposition, setTextComposition} from "./text-composition.js";
 ${editor.getText(tree)}
 export {TextEditor};`;
 
 function input(text = "", options = {}) {
   let value = "";
-  const writes = [], changes = [], commands = [], moves = [];
+  const writes = [], changes = [], commands = [], moves = [], rects = [];
   const textarea = {
     style: {},
     getBoundingClientRect() {return {left: node.props.style.left, top: node.props.style.top,
@@ -46,19 +48,20 @@ function input(text = "", options = {}) {
   };
   const h = createLibraryHarness({}, source, {
     modules: {"./model": {COLOR_HEX: {cherry: "#f53b58"}}, "./text-composition.js": composition,
-      "./text-layout.js": layout, "./render": {textFont: size => `600 ${size}px sans-serif`}},
+      "./text-layout.js": layout, "./render": {textFont: size => `600 ${size}px sans-serif`},
+      "./callout-layout.js": calloutLayout},
     attachRef(node) {if (node.type === "textarea") node.props.ref(textarea);},
-    document: {createElement: () => ({getContext: () => ({measureText: text => ({width: text.length * 9})})})},
+    document: {createElement: () => ({getContext: () => ({measureText: text => ({width: options.measureText?.(text) ?? text.length * 9})})})},
   });
   let finishes = 0;
   const props = {editing: {id: 1, index: 0, text, callout: {}, rect: {x: 130, y: 80, width: 160, height: 41},
     maxWidth: 280, uiScale: 1, fontSize: 18, color: "cherry", background: "transparent"},
     bounds: {width: 640, height: 360}, disabled: false, onTextChange: text => changes.push(text),
-    onRectChange() {}, onCommit: () => finishes++, onCancel: () => finishes++, onUndo() {}, onRedo() {}, nativeUndo: true,
+    onRectChange: rect => rects.push(rect), onCommit: () => finishes++, onCancel: () => finishes++, onUndo() {}, onRedo() {}, nativeUndo: true,
     onMoveCallout: (event, first) => moves.push({clientX: event.clientX, clientY: event.clientY, first}), ...options};
   const component = h.mount("TextEditor", props);
   let node = nodes(component.render()).find(node => node?.type === "textarea");
-  return {textarea, writes, changes, commands, moves, finishes: () => finishes,
+  return {textarea, writes, changes, commands, moves, rects, finishes: () => finishes,
     render(text, patch = {}) {node = nodes(component.render({...props, editing: {...props.editing, text, ...patch}})).find(node => node?.type === "textarea"); return node;},
     buttons() {return nodes(component.render()).filter(node => node?.type === "button");},
     pointer(name, clientX, clientY, options = {}) {
@@ -150,6 +153,32 @@ test("callout padding includes its border without narrowing the rendered text ar
   const node = h.render("saved");
   assert.equal(node.props.style.padding, 8);
   assert.equal(2 * (node.props.style.padding + 1), 18);
+});
+
+test("an unchanged callout with a short saved frame repairs height without resetting native input or IME", () => {
+  const text = "Dev drag abcdef\n中文保存测试", rect = {x: 130, y: 80, width: 118, height: 49};
+  const measureText = value => [...value].reduce((width, ch) => width + (/\p{Script=Han}/u.test(ch) ? 14 : 7.4), 0);
+  const editing = {id: 1, index: 0, text, callout: {text, fontSize: 14}, rect,
+    maxWidth: 280, uiScale: 1, fontSize: 14, color: "cherry", background: "transparent"};
+  const h = input(text, {editing, measureText});
+  const height = Math.ceil(layout.layoutTextLines(text, rect.width - 14, measureText).length * 14 * 1.25 + 14);
+  assert.deepEqual(h.rects, [{...rect, height}]);
+  h.textarea.selectionStart = 3; h.textarea.selectionEnd = 5; h.compose(true);
+  h.render(text, {rect: {...rect, height}});
+  assert.deepEqual(h.rects, [{...rect, height}], "the repaired frame must settle without a sizing loop");
+  assert.equal(h.textarea.value, text); assert.deepEqual(h.writes, [text]);
+  assert.equal(h.textarea.selectionStart, 3); assert.equal(h.textarea.selectionEnd, 5);
+  assert.equal(composition.isTextComposition({target: h.textarea}), true);
+});
+
+test("the native editor keeps all repaired description lines inside the bottom edge", () => {
+  const text = "Dev drag abcdef\n中文保存测试", rect = {x: 130, y: 320, width: 118, height: 30};
+  const measureText = value => [...value].reduce((width, ch) => width + (/\p{Script=Han}/u.test(ch) ? 14 : 7.4), 0);
+  const h = input(text, {measureText, editing: {id: 1, index: 0, text, callout: {text, fontSize: 14}, rect,
+    maxWidth: 280, uiScale: 1, fontSize: 14, color: "cherry", background: "transparent"}});
+  const height = Math.ceil(layout.layoutTextLines(text, rect.width - 14, measureText).length * 14 * 1.25 + 14);
+  assert.deepEqual(h.rects, [{...rect, y: 360 - height, height}]);
+  assert.equal(h.textarea.value, text); assert.deepEqual(h.writes, [text]);
 });
 
 test("native Undo returning to the original prop cannot leave stale echoes or rewrite the input", () => {

@@ -12,9 +12,11 @@ export function useAnnotationAppearance(): [AppearanceSettings, (next: Appearanc
   const [loaded, setLoaded] = useState(false);
   const loadedRef = useRef(false);
   const activeRef = useRef(false);
-  const publish = useCallback(() => setAppearanceState(updates.current.current), []);
+  // Legacy preferences can still contain "single". New watermark tools only
+  // offer tiling; reading preferences does not migrate any saved annotation.
+  const publish = useCallback(() => setAppearanceState({...updates.current.current, watermarkMode: "tiled"}), []);
   const setAppearance = useCallback((next: AppearanceSettings) => {
-    updates.current.update(next, appearance);
+    updates.current.update({...next, watermarkMode: "tiled"}, appearance);
     publish();
   }, [appearance, publish]);
 

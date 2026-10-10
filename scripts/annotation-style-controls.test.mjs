@@ -75,7 +75,8 @@ test("watermark reads independent color and percentage, preserving saved large v
   assert.equal(values.watermarkOpacity, 32); assert.equal(values.watermarkFontSize, 256); assert.equal(values.watermarkSpacing, 700);
   const html = controls(watermark);
   assert.match(html, /Edit watermark/); assert.match(html, /value="256"/); assert.match(html, /value="32"/);
-  assert.doesNotMatch(html, /textarea|type="text"|Spacing/);
+  assert.doesNotMatch(html, /textarea|type="text"|Watermark layout|>Single<|>Tiled</);
+  assert.match(html, /Spacing/); assert.match(html, /value="700"/);
   assert.match(controls({...watermark, mode: "tiled"}), /value="700"/);
 });
 

@@ -258,7 +258,12 @@ and 0089.
 Capture and saved-image editing share context-sensitive property controls.
 Selection reads the mark's properties without modifying preferences; explicit
 changes update that selection with one history entry per gesture. Fixed-height
-saved-image rows keep canvas coordinates stable during selection and typing.
+saved-image rows reserve complete controls for each viewport width and keep
+canvas coordinates stable during selection and typing. Existing text and label
+bubbles drag directly with Select, Text, or Label active; double-click or the
+explicit edit action opens their text editor. Numbered descriptions share
+measurement with the saved renderer, including a small rounding margin. Old
+short description frames gain sufficient height when edited. See ADR 0090.
 Mosaic shapes are available in both windows; document-origin pixel grids and
 effect ordering keep existing same-style stronger coverage stable as strokes grow
 or overlap, including a draft stroke.
@@ -269,7 +274,10 @@ Watermarks render after ordinary marks and reuse the native inline text editor.
 Cropping translates a tiled anchor without changing its phase, including when
 the anchor leaves the canvas. JavaScript and Rust bound visible tile density and
 text length before accepting an edit. The existing flat-image fallback protects
-older applications from silently rewriting unsupported content. See ADR 0088.
+older applications from silently rewriting unsupported content. New watermarks
+are tiled; the tool and edit button reuse the selected or last existing watermark
+and keep a live draft focused. Older single watermarks retain their stored layout
+until their text or styling is changed. See ADRs 0088 and 0090.
 
 ## Managed library flow
 

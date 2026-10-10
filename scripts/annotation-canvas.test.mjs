@@ -6,6 +6,7 @@ import { createLibraryHarness, nodes } from "./helpers/library-render-harness.mj
 import * as project from "../src/annotation/project.js";
 import * as crop from "../src/annotation/crop.js";
 import * as layout from "../src/annotation/text-layout.js";
+import * as calloutLayout from "../src/annotation/callout-layout.js";
 import * as composition from "../src/annotation/text-composition.js";
 import * as watermarkGeometry from "../src/annotation/watermark-geometry.js";
 
@@ -119,6 +120,138 @@ test("label font changes remain a single edit and keep its fixed point and visib
   h.ref.current.undo();h.component.render();assert.deepEqual(h.changes.at(-1),[label]);
 });
 
+for (const tool of ["text", "label"]) {
+  for (const mark of [text, label]) {
+    for (const selected of [false, true]) {
+      test(`${tool} tool directly drags ${mark.labelDirection ? "a label" : "plain text"} on the first ${selected ? "selected" : "unselected"} gesture`, async () => {
+        const h = annotation(documentWith([mark]), {tool, selectedMarkId: selected ? mark.id : null});
+        const start = {x: mark.rect.x + mark.rect.width / 2, y: mark.rect.y + mark.rect.height / 2};
+        h.pointer("onPointerDown", start.x, start.y, {detail: 0});
+        assert.equal(nodes(h.component.render()).some(node => node?.type?.name === "TextEditor"), false,
+          "a pointer press must not open the native editor before deciding whether it is a drag");
+        h.pointer("onPointerMove", start.x + 30, start.y + 20);
+        const moved = model.translateMark(mark, {x: 30, y: 20}, {x: 0, y: 0, width: 640, height: 360});
+        assert.deepEqual(h.frames.at(-1).marks, [moved]);
+        assert.deepEqual(h.changes, [], "a live drag does not commit a document edit");
+        h.pointer("onPointerCancel", start.x + 30, start.y + 20);
+        assert.deepEqual(h.frames.at(-1).marks, [mark]);
+        assert.deepEqual(h.changes, []);
+        h.pointer("onPointerDown", start.x, start.y, {detail: 0});
+        h.pointer("onPointerMove", start.x + 30, start.y + 20);
+        h.pointer("onPointerUp", start.x + 30, start.y + 20);
+        assert.equal(h.changes.length, 1);
+        assert.deepEqual(h.changes[0], [moved]);
+        h.ref.current.undo(); h.component.render(); assert.deepEqual(h.changes.at(-1), [mark]);
+        h.ref.current.redo(); h.component.render(); assert.deepEqual(h.changes.at(-1), [moved]);
+        assert.deepEqual((await h.ref.current.exportResult()).document.marks, [moved]);
+        h.component.unmount();
+      });
+    }
+
+    test(`${tool} tool selects ${mark.labelDirection ? "a label" : "plain text"} on a click and edits on a native double click`, async () => {
+      let finishes = 0;
+      const h = annotation(documentWith([mark]), {tool, onFinishOnBlankDoubleClick: () => finishes++});
+      const point = {x: mark.rect.x + mark.rect.width / 2, y: mark.rect.y + mark.rect.height / 2};
+      h.pointer("onPointerDown", point.x, point.y, {detail: 0});
+      h.pointer("onPointerUp", point.x, point.y, {detail: 0});
+      h.mouse("onClick", point.x, point.y, 1);
+      assert.equal(nodes(h.component.render()).some(node => node?.type?.name === "TextEditor"), false);
+      assert.deepEqual(h.changes, [], "selection is not a document edit");
+      h.pointer("onPointerDown", point.x, point.y, {detail: 0});
+      h.pointer("onPointerUp", point.x, point.y, {detail: 0});
+      h.mouse("onClick", point.x, point.y, 2);
+      h.mouse("onDoubleClick", point.x, point.y, 2);
+      const editor = nodes(h.component.render()).find(node => node?.type?.name === "TextEditor");
+      assert.equal(editor?.props.editing.id, mark.id);
+      assert.equal(editor.props.editing.text, mark.text);
+      assert.equal(finishes, 0);
+      assert.deepEqual((await h.ref.current.exportResult()).document.marks, [mark]);
+      h.ref.current.editSelectedText(); h.component.render();
+      assert.equal(nodes(h.component.render()).find(node => node?.type?.name === "TextEditor")?.props.editing.id, mark.id,
+        "the explicit Edit text action still reopens the selected text");
+      h.component.unmount();
+    });
+
+    test(`${tool} tool resizes selected ${mark.labelDirection ? "label" : "text"} handles outside its body`, () => {
+      const h = annotation(documentWith([mark]), {tool, selectedMarkId: mark.id});
+      const bounds = model.selectionBounds(mark);
+      const point = {x: bounds.x + bounds.width + 8, y: bounds.y + bounds.height};
+      assert.equal(model.markIndexAt([mark], point), null, "the resize hit is outside the normal body target");
+      h.pointer("onPointerDown", point.x, point.y);
+      h.pointer("onPointerMove", point.x + 30, point.y + 20);
+      assert.equal(nodes(h.component.render()).some(node => node?.type?.name === "TextEditor"), false);
+      assert.equal(h.frames.at(-1).marks.length, 1);
+      assert.notDeepEqual(h.frames.at(-1).marks[0], mark);
+      h.pointer("onPointerUp", point.x + 30, point.y + 20);
+      assert.equal(h.changes.length, 1);
+      h.ref.current.undo(); h.component.render(); assert.deepEqual(h.changes.at(-1), [mark]);
+      h.component.unmount();
+    });
+  }
+
+  test(`${tool} tool creates on blank canvas and moves the newly committed text without replacing the old selection`, async () => {
+    let finishes = 0;
+    const h = annotation(documentWith([text]), {tool, selectedMarkId: text.id, onFinishOnBlankDoubleClick: () => finishes++});
+    h.pointer("onPointerDown", 360, 180, {detail: 0});
+    h.pointer("onPointerUp", 360, 180, {detail: 0});
+    h.mouse("onDoubleClick", 360, 180, 2);
+    let editor = nodes(h.component.render()).find(node => node?.type?.name === "TextEditor");
+    assert.equal(editor.props.editing.index, null);
+    assert.equal(editor.props.editing.labelDirection, tool === "label" ? appearance.labelDirection : undefined);
+    editor.props.onTextChange("中文 label abc"); h.component.render();
+    h.ref.current.commitTextEditing(); h.component.render();
+    const [old, created] = (await h.ref.current.exportResult()).document.marks;
+    assert.deepEqual(old, text); assert.notEqual(created.id, text.id); assert.equal(finishes, 0);
+    const point = {x: created.rect.x + created.rect.width / 2, y: created.rect.y + created.rect.height / 2};
+    h.pointer("onPointerDown", point.x, point.y, {detail: 0});
+    h.pointer("onPointerMove", point.x + 20, point.y + 15);
+    h.pointer("onPointerUp", point.x + 20, point.y + 15);
+    const saved = (await h.ref.current.exportResult()).document;
+    assert.deepEqual(saved.marks[0], text);
+    assert.deepEqual(saved.marks[1], model.translateMark(created, {x: 20, y: 15}, {x: 0, y: 0, width: 640, height: 360}));
+    const reopened = annotation(saved, {tool});
+    const next = saved.marks[1], nextPoint = {x: next.rect.x + next.rect.width / 2, y: next.rect.y + next.rect.height / 2};
+    reopened.pointer("onPointerDown", nextPoint.x, nextPoint.y, {detail: 0});
+    reopened.pointer("onPointerMove", nextPoint.x + 10, nextPoint.y + 10);
+    reopened.pointer("onPointerUp", nextPoint.x + 10, nextPoint.y + 10);
+    assert.deepEqual(reopened.changes.at(-1)[1], model.translateMark(next, {x: 10, y: 10}, {x: 0, y: 0, width: 640, height: 360}));
+    h.component.unmount(); reopened.component.unmount();
+  });
+}
+
+test("dragging the direction dot never flips or moves its label, while click and keyboard activation still flip once", () => {
+  const h = annotation(documentWith([label]), {tool: "label"});
+  const button = dotButton(h), target = {setPointerCapture() {}};
+  const event = (x, y, overrides = {}) => ({clientX: x, clientY: y, pointerId: 2, button: 0, detail: 1,
+    currentTarget: target, stopPropagation() {}, preventDefault() {}, ...overrides});
+  button.props.onPointerDown(event(100, 100));
+  button.props.onPointerMove(event(108, 100));
+  button.props.onPointerUp(event(100, 100));
+  button.props.onClick(event(100, 100)); h.component.render();
+  assert.deepEqual(h.changes, [], "returning to the press point must not turn a drag into a click");
+  button.props.onPointerDown(event(100, 100));
+  button.props.onPointerUp(event(104, 100));
+  button.props.onClick(event(104, 100)); h.component.render();
+  assert.deepEqual(h.changes, [], "the released position also suppresses flips when no move event arrived");
+  button.props.onPointerDown(event(100, 100));
+  button.props.onPointerCancel(event(100, 100));
+  button.props.onClick(event(100, 100)); h.component.render();
+  assert.deepEqual(h.changes, []);
+  button.props.onPointerDown(event(100, 100));
+  button.props.onPointerUp(event(101, 100));
+  button.props.onClick(event(101, 100)); h.component.render();
+  assert.equal(h.changes.length, 1); assertPoint(dotOf(h.changes.at(-1)[0]), dotOf(label));
+  button.props.onPointerDown(event(100, 100));
+  button.props.onPointerMove(event(110, 100));
+  button.props.onPointerCancel(event(110, 100));
+  button.props.onClick(event(0, 0, {detail: 0})); h.component.render();
+  assert.equal(h.changes.length, 2, "keyboard activation is independent of a cancelled pointer gesture");
+  assertPoint(dotOf(h.changes.at(-1)[0]), dotOf(label));
+  assert.equal(h.changes.at(-1)[0].labelDirection, label.labelDirection);
+  assert.equal(h.changes.at(-1)[0].text, label.text);
+  h.component.unmount();
+});
+
 function annotation(initialDocument, options = {}) {
   const exports = [], frames = [], creations = [], ref = {current: null}, changes = [];
   function canvas() {
@@ -140,6 +273,7 @@ function annotation(initialDocument, options = {}) {
     modules: {
       "./geom": geom, "./model": model, "./project.js": project, "./crop.js": crop,
       "./text-layout.js": layout, "./text-composition.js": composition,
+      "./callout-layout.js": calloutLayout,
       "./watermark-geometry.js": watermarkGeometry,
       "./render": {textFont: size => `600 ${size}px sans-serif`, renderAll(r, marks, options) {
         if (!r.exporting) frames.push({marks: structuredClone(marks), options: structuredClone(options)});
@@ -199,7 +333,8 @@ test("the watermark entry opens native inline input, previews all styling and co
   assert.equal(preview.kind, "watermark");
   assert.equal(preview.text, "中文 input\nEnglish");
   assert.equal(preview.opacity, .45); assert.equal(preview.rotation, 15);
-  assert.equal(preview.mode, "single"); assert.equal(preview.spacing, 100); assert.equal(preview.color, "white");
+  assert.equal(preview.mode, "tiled", "explicit watermark edits use the tiled-only workflow");
+  assert.equal(preview.spacing, 100); assert.equal(preview.color, "white");
   assert.deepEqual(selections.at(-1), preview, "the HUD receives a watermark, not a plain-text surrogate");
   const saved = await h.ref.current.exportResult();
   assert.deepEqual(saved.document.marks, [preview]);
@@ -247,6 +382,123 @@ test("native double click edits an existing watermark and tiled copies do not in
     {x: 80, y: 60}), 0, "only the watermark's primary anchor participates in hit testing");
 });
 
+test("the watermark tool reopens saved text from any tiled copy instead of adding an empty mark", async () => {
+  const h = annotation(documentWith([watermark]), {tool: "watermark"});
+  // This point is far outside the editable primary anchor, as are most tiles.
+  h.pointer("onPointerDown", 540, 300); h.pointer("onPointerUp", 540, 300);
+  const input = watermarkEditor(h);
+  assert.equal(input.props.editing.id, watermark.id);
+  assert.equal(input.props.editing.text, watermark.text);
+  input.props.onTextChange("二次编辑\nWatermark content"); h.component.render();
+  h.ref.current.updateSelectionAppearance({watermarkOpacity: 47, watermarkSpacing: 120}, true); h.component.render();
+  assert.equal(watermarkEditor(h).props.editing.text, "二次编辑\nWatermark content");
+  watermarkEditor(h).props.onCommit(); h.component.render();
+  assert.equal(watermarkEditor(h), undefined, "Return's commit callback closes only this editor");
+  const saved = await h.ref.current.exportResult();
+  assert.equal(saved.document.marks.length, 1);
+  assert.equal(saved.document.marks[0].id, watermark.id);
+  assert.equal(saved.document.marks[0].text, "二次编辑\nWatermark content");
+  assert.equal(saved.document.marks[0].opacity, .47);
+  const reopened = annotation(project.parseAnnotationDocument(JSON.parse(JSON.stringify(saved.document))), {tool: "watermark"});
+  reopened.ref.current.editWatermark(); reopened.component.render();
+  assert.equal(watermarkEditor(reopened).props.editing.text, saved.document.marks[0].text);
+  assert.deepEqual((await reopened.ref.current.exportResult()).document.marks, saved.document.marks);
+  h.component.unmount(); reopened.component.unmount();
+});
+
+test("repeated watermark actions retain the same native draft and explicitly selected watermark", async () => {
+  const last = {...watermark, id: 94, text: "last watermark", rect: {...watermark.rect, x: 340}};
+  const h = annotation(documentWith([watermark, last]), {selectedMarkId: watermark.id, tool: "watermark"});
+  let focused = 0, mounted = false;
+  h.live.parentElement = {querySelector: selector => {assert.equal(selector, "textarea"); return mounted ? {focus() {focused++;}} : null;}};
+  h.ref.current.editWatermark(); h.component.render();
+  mounted = true;
+  assert.equal(watermarkEditor(h).props.editing.id, watermark.id, "the inspector edits its selected object before the last watermark");
+  watermarkEditor(h).props.onTextChange("selected 中文 watermark"); h.component.render();
+  for (let i = 0; i < 3; i++) {
+    h.ref.current.editWatermark(); h.component.render();
+    h.pointer("onPointerDown", 560, 300); h.pointer("onPointerUp", 560, 300);
+    assert.equal(watermarkEditor(h).props.editing.id, watermark.id);
+    assert.equal(watermarkEditor(h).props.editing.text, "selected 中文 watermark");
+    assert.deepEqual(h.changes, [], "repeated entries neither commit the draft nor add empty marks");
+  }
+  assert.equal(focused, 6, "the already-mounted native input regains focus without remounting");
+  const saved = await h.ref.current.exportResult();
+  assert.equal(saved.document.marks.length, 2);
+  assert.equal(saved.document.marks[0].text, "selected 中文 watermark");
+  assert.deepEqual(saved.document.marks[1], last);
+  h.component.unmount();
+
+  const empty = annotation(documentWith([]), {appearance: {...appearance, watermarkMode: "single"}, tool: "watermark"});
+  empty.ref.current.editWatermark(); empty.component.render();
+  const id = watermarkEditor(empty).props.editing.id;
+  for (let i = 0; i < 3; i++) {
+    empty.ref.current.editWatermark(); empty.component.render();
+    empty.pointer("onPointerDown", 520, 280); empty.pointer("onPointerUp", 520, 280);
+    assert.equal(watermarkEditor(empty).props.editing.id, id);
+    assert.equal(watermarkEditor(empty).props.editing.watermark.mode, "tiled");
+  }
+  assert.deepEqual((await empty.ref.current.exportResult()).document.marks, []);
+  assert.deepEqual(empty.changes, []);
+  empty.component.unmount();
+});
+
+test("a batched commit and reentry focuses the existing watermark input without clearing its text", async () => {
+  const h = annotation(documentWith([watermark]), {tool: "watermark"});
+  h.ref.current.editWatermark(); h.component.render();
+  watermarkEditor(h).props.onTextChange("batched 中文 draft"); h.component.render();
+  let focused = 0;
+  h.live.parentElement = {querySelector: () => ({focus() {focused++;}})};
+  // Mirror the old window-level tool callback, with no React render in between.
+  h.ref.current.commitTextEditing(); h.ref.current.clearSelection(); h.ref.current.editWatermark(); h.component.render();
+  assert.equal(focused, 1);
+  assert.equal(watermarkEditor(h).props.editing.id, watermark.id);
+  assert.equal(watermarkEditor(h).props.editing.text, "batched 中文 draft");
+  assert.equal((await h.ref.current.exportResult()).document.marks.length, 1);
+  h.component.unmount();
+});
+
+test("old single watermarks remain readable and unchanged until a real text or appearance edit", async () => {
+  const legacy = {...watermark, mode: "single"};
+  const h = annotation(documentWith([legacy]), {selectedMarkId: legacy.id});
+  h.ref.current.updateSelectionAppearance({colorPreset: "white"}); h.component.render();
+  assert.deepEqual((await h.ref.current.exportResult()).document.marks, [legacy]);
+  h.ref.current.editWatermark(); h.component.render();
+  h.ref.current.updateSelectionAppearance({textFontSize: 30}); h.component.render();
+  assert.equal(watermarkEditor(h).props.editing.text, legacy.text);
+  assert.deepEqual((await h.ref.current.exportResult()).document.marks, [legacy]);
+  assert.deepEqual(h.changes, [], "opening and saving unchanged legacy data must not migrate it");
+  h.ref.current.editWatermark(); h.component.render();
+  watermarkEditor(h).props.onTextChange("modified single 中文"); h.component.render();
+  assert.equal(h.frames.at(-1).marks[0].mode, "tiled");
+  h.ref.current.cancelTextEditing(); h.component.render();
+  assert.deepEqual((await h.ref.current.exportResult()).document.marks, [legacy]);
+  h.ref.current.updateSelectionAppearance({watermarkOpacity: 35}, true); h.component.render();
+  h.ref.current.finishAppearanceAdjustment(); h.component.render();
+  const saved = (await h.ref.current.exportResult()).document.marks[0];
+  assert.equal(saved.mode, "tiled"); assert.equal(saved.text, legacy.text); assert.equal(saved.opacity, .35);
+  h.ref.current.undo(); h.component.render();
+  assert.deepEqual((await h.ref.current.exportResult()).document.marks, [legacy]);
+  h.ref.current.editWatermark(); h.component.render();
+  watermarkEditor(h).props.onTextChange("modified single 中文"); h.component.render();
+  watermarkEditor(h).props.onCommit(); h.component.render();
+  assert.equal((await h.ref.current.exportResult()).document.marks[0].mode, "tiled");
+  assert.equal((await h.ref.current.exportResult()).document.marks[0].text, "modified single 中文");
+  h.component.unmount();
+});
+
+test("switching to another existing watermark after deleting a draft resolves its stable id", async () => {
+  const last = {...watermark, id: 94, text: "retained watermark", rect: {...watermark.rect, x: 340}};
+  const h = annotation(documentWith([watermark, last]), {selectedMarkId: watermark.id, tool: "watermark"});
+  h.ref.current.editWatermark(); h.component.render();
+  watermarkEditor(h).props.onTextChange(""); h.component.render();
+  h.pointer("onPointerDown", 390, 140); h.pointer("onPointerUp", 390, 140);
+  assert.equal(watermarkEditor(h).props.editing.id, last.id);
+  assert.equal(watermarkEditor(h).props.editing.text, last.text);
+  assert.deepEqual((await h.ref.current.exportResult()).document.marks, [last]);
+  h.component.unmount();
+});
+
 test("dense watermark updates retain the valid saved and inline states and report the reason", async () => {
   const original = {...watermark, mode: "single", rotation: 0, spacing: 16, rect: {x: 100, y: 100, width: 2, height: 2}};
   const document = {...documentWith([original]), canvas: {width: 10000, height: 10000}, sourcePixels: {width: 10000, height: 10000}};
@@ -256,7 +508,7 @@ test("dense watermark updates retain the valid saved and inline states and repor
   h.ref.current.finishAppearanceAdjustment(); h.component.render();
   assert.deepEqual(h.changes, []);
   assert.equal(errors.at(-1), "Watermark is too dense. Increase its size or spacing.");
-  h.ref.current.updateSelectionAppearance({watermarkOpacity: 200}); h.component.render();
+  h.ref.current.updateSelectionAppearance({watermarkOpacity: 200, watermarkSpacing: 512}); h.component.render();
   assert.match(errors.at(-1), /opacity must be between 0 and 1/);
   assert.deepEqual(h.changes, [], "strict mark validation also rejects invalid API style values");
   h.ref.current.editWatermark(); h.component.render();
@@ -344,6 +596,92 @@ const reflowCallout = {kind: "callout", id: 81, center: {x: 80, y: 80}, number: 
 const initialFrame = {left: 0, top: 0, width: 640, height: 360};
 const inspectorFrame = {left: 80, top: 60, width: 480, height: 270};
 const calloutEditor = h => nodes(h.component.render()).find(node => node?.props?.editing?.callout);
+
+const devCalloutText = "Dev drag abcdef\n中文保存测试";
+const devCalloutMeasure = value => [...value].reduce((width, character) => width + (/\p{Script=Han}/u.test(character) ? 14 : 7.4), 0);
+const calloutLines = (mark, measureText) => layout.layoutTextLines(mark.text,
+  mark.labelRect.width - 2 * Math.max(4, mark.fontSize * .5), measureText);
+
+test("callout save and reopen tolerate fractional text metrics without an extra wrapped line", async () => {
+  const doc = {schemaVersion: 1, canvas: {width: 1440, height: 900}, sourcePixels: {width: 1440, height: 900},
+    marks: [{...reflowCallout, text: "", fontSize: 14, labelRect: {x: 200, y: 180, width: 160, height: 40}}]};
+  const h = annotation(doc, {selectedMarkId: reflowCallout.id, viewSize: {width: 730, height: 456}, measureText: devCalloutMeasure});
+  h.ref.current.editSelectedText(); h.component.render();
+  h.ref.current.updateSelectedCallout({text: devCalloutText}); h.component.render();
+  const saved = await h.ref.current.exportResult(), mark = saved.document.marks[0];
+  const fractionalMetrics = value => devCalloutMeasure(value) + (value === "Dev drag abcdef" ? .02 : 0);
+  assert.deepEqual(calloutLines(mark, fractionalMetrics), ["Dev drag abcdef", "中文保存测试"],
+    "fitting exactly at the longest line cannot survive even fractional measurement differences");
+  assert.ok(mark.labelRect.height >= calloutLines(mark, fractionalMetrics).length * 14 * 1.25 + 14);
+  const reopened = annotation(saved.document, {selectedMarkId: mark.id,
+    viewSize: {width: 730, height: 456}, measureText: fractionalMetrics});
+  reopened.ref.current.editSelectedText(); reopened.component.render();
+  assert.deepEqual(calloutEditor(reopened).props.editing.rect, mark.labelRect);
+  assert.deepEqual((await reopened.ref.current.exportResult()).document.marks, [mark]);
+  assert.deepEqual(reopened.changes, [], "reopening a fitting saved frame adds no invisible history entry");
+});
+
+test("editing a legacy short callout repairs only missing height, with cancellable and undoable persistence", async () => {
+  const mark = {...reflowCallout, text: devCalloutText, fontSize: 14,
+    labelRect: {x: 200, y: 180, width: 118, height: 49}};
+  const measureText = value => devCalloutMeasure(value) + (value === "Dev drag abcdef" ? .02 : 0);
+  const h = annotation(documentWith([mark]), {selectedMarkId: mark.id, measureText});
+  const neededHeight = Math.ceil(calloutLines(mark, measureText).length * mark.fontSize * 1.25 + 14);
+  assert.ok(neededHeight > mark.labelRect.height);
+  h.ref.current.editSelectedText(); h.component.render();
+  assert.deepEqual(calloutEditor(h).props.editing.rect, {...mark.labelRect, height: neededHeight});
+  assert.deepEqual(h.changes, [], "repair remains an inline draft until committed");
+  h.ref.current.cancelTextEditing(); h.component.render();
+  assert.deepEqual((await h.ref.current.exportResult()).document.marks, [mark]);
+  h.ref.current.editSelectedText(); h.component.render();
+  const repaired = (await h.ref.current.exportResult()).document.marks[0];
+  assert.deepEqual(repaired, {...mark, labelRect: {...mark.labelRect, height: neededHeight}});
+  assert.equal(h.changes.length, 1);
+  h.ref.current.undo(); h.component.render(); assert.deepEqual(h.changes.at(-1), [mark]);
+  h.ref.current.redo(); h.component.render(); assert.deepEqual(h.changes.at(-1), [repaired]);
+  const reopened = annotation(documentWith([repaired]), {selectedMarkId: mark.id, measureText});
+  reopened.ref.current.editSelectedText(); reopened.component.render();
+  assert.deepEqual((await reopened.ref.current.exportResult()).document.marks, [repaired]);
+  assert.deepEqual(reopened.changes, []);
+});
+
+test("a native editor height repair retains the saved position even above its badge", async () => {
+  const mark = {...reflowCallout, text: devCalloutText, fontSize: 14, center: {x: 230, y: 180},
+    labelRect: {x: 200, y: 80, width: 118, height: 49}};
+  const h = annotation(documentWith([mark]), {selectedMarkId: mark.id, measureText: devCalloutMeasure});
+  h.ref.current.editSelectedText(); h.component.render();
+  const frame = calloutEditor(h).props.editing.rect;
+  calloutEditor(h).props.onRectChange({...frame, height: frame.height + 18}); h.component.render();
+  assert.deepEqual(calloutEditor(h).props.editing.rect, {...frame, height: frame.height + 18},
+    "repairing the saved height must not run the grow-away-from-badge placement algorithm");
+  const result = (await h.ref.current.exportResult()).document.marks[0];
+  assert.equal(result.labelRect.x, mark.labelRect.x); assert.equal(result.labelRect.y, mark.labelRect.y);
+  assert.equal(result.labelRect.width, mark.labelRect.width);
+});
+
+test("a legacy callout height repair moves upward only as needed at the canvas bottom", async () => {
+  const mark = {...reflowCallout, text: devCalloutText, fontSize: 14,
+    labelRect: {x: 200, y: 320, width: 118, height: 30}};
+  const h = annotation(documentWith([mark]), {selectedMarkId: mark.id, measureText: devCalloutMeasure});
+  const height = Math.ceil(calloutLines(mark, devCalloutMeasure).length * 14 * 1.25 + 14);
+  h.ref.current.editSelectedText(); h.component.render();
+  const rect = {...mark.labelRect, y: 360 - height, height};
+  assert.deepEqual(calloutEditor(h).props.editing.rect, rect);
+  assert.equal(rect.y + rect.height, 360);
+  h.ref.current.cancelTextEditing(); h.component.render();
+  assert.deepEqual((await h.ref.current.exportResult()).document.marks, [mark]);
+  h.ref.current.editSelectedText(); h.component.render();
+  // The native textarea may measure a taller frame; this remains a height
+  // repair, not a request to separate the description from its saved badge.
+  calloutEditor(h).props.onRectChange({...rect, y: rect.y - 18, height: rect.height + 18}); h.component.render();
+  assert.deepEqual(calloutEditor(h).props.editing.rect, {...rect, y: rect.y - 18, height: rect.height + 18});
+  const saved = (await h.ref.current.exportResult()).document.marks[0];
+  assert.equal(saved.labelRect.x, mark.labelRect.x); assert.equal(saved.labelRect.width, mark.labelRect.width);
+  assert.ok(saved.labelRect.y + saved.labelRect.height <= 360);
+  assert.ok(saved.labelRect.height >= height); assert.equal(h.changes.length, 1);
+  h.ref.current.undo(); h.component.render(); assert.deepEqual(h.changes.at(-1), [mark]);
+  h.ref.current.redo(); h.component.render(); assert.deepEqual(h.changes.at(-1), [saved]);
+});
 
 for (const part of ["badge", "description"]) {
   test(`the ${part} body drags directly without selecting a handle, with one undo`, () => {

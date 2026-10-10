@@ -49,6 +49,7 @@ import {
   viewPointToDocument,
 } from "./project.js";
 import { fitTextEditorFrame, layoutTextLines, textEditorInsets, TEXT_TAB_SIZE } from "./text-layout.js";
+import { calloutLabelSize, repairCalloutLabelHeight } from "./callout-layout.js";
 import { cropAnnotationDocument, isFullCrop, type CropPixels } from "./crop.js";
 import { t } from "../i18n";
 import { validateWatermarkDensity } from "./watermark-geometry.js";
@@ -162,7 +163,11 @@ function editingCalloutMark(editing: EditingState): CalloutMark {
 }
 
 function editingWatermarkMark(editing: EditingState): WatermarkMark {
-  return {...editing.watermark!, text: editing.text, color: editing.color, fontSize: editing.fontSize};
+  const mark = {...editing.watermark!, text: editing.text, color: editing.color, fontSize: editing.fontSize};
+  // Keep untouched legacy single marks byte-compatible. An actual content or
+  // geometry edit uses the current tiled-only workflow, including its preview.
+  return mark.mode === "single" && editing.watermarkOriginal &&
+    JSON.stringify(mark) !== JSON.stringify(editing.watermarkOriginal) ? {...mark, mode: "tiled"} : mark;
 }
 
 function editingTextMark(editing: EditingState): Extract<AnnotationMark, {kind: "text"}> {
@@ -472,7 +477,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       let nextRect = rect;
       if (current.callout) {
         const note = editingCalloutMark(current);
-        nextRect = resizeCalloutLabel({...note, labelRect: rect}, note,
+        const repairingSavedHeight = current.text === current.callout.text &&
+          current.fontSize === current.callout.fontSize && rect.width === current.rect.width &&
+          rect.x === current.rect.x && rect.height >= current.rect.height;
+        if (!repairingSavedHeight) nextRect = resizeCalloutLabel({...note, labelRect: rect}, note,
           documentSize, 32 * current.uiScale).labelRect;
       }
       const nextFont = fontSize ?? current.fontSize;
@@ -624,9 +632,20 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       if (current.callout && current.index !== null) {
         const mark = editingCalloutMark(current);
         const previous = history.elements[current.index];
+        const context = canvasRef.current?.getContext("2d");
+        const fittedRect = (rect: Rect) => {
+          if (!mark.text || !context) return rect;
+          context.save(); context.font = textFont(mark.fontSize);
+          const size = calloutLabelSize({text: mark.text, fontSize: mark.fontSize, width: rect.width,
+            boundsWidth: documentSize.width, measureText: value => context.measureText(value).width});
+          context.restore();
+          return repairCalloutLabelHeight(rect, size, documentSize.height);
+        };
         if (previous?.kind === "callout" && previous.text === mark.text && previous.color === mark.color &&
           previous.fontSize === mark.fontSize && previous.number === mark.number && previous.size === mark.size && previous.style === mark.style) {
-          mark.labelRect = {...previous.labelRect, x: mark.labelRect.x, y: mark.labelRect.y};
+          mark.labelRect = fittedRect({...previous.labelRect, x: mark.labelRect.x, y: mark.labelRect.y});
+        } else {
+          mark.labelRect = fittedRect(mark.labelRect);
         }
         if (JSON.stringify(previous) !== JSON.stringify(mark)) {
           history.replace(current.index, mark); syncMarks();
@@ -693,7 +712,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       // Return key additionally finishes the capture — handled in the
       // TextEditor's Enter branch so other commit triggers (tool switch,
       // undo, export) do not complete the capture.
-    }, [history, publishHistory, syncMarks, appendMark, selectMark, validateEditingWatermark]);
+    }, [history, publishHistory, syncMarks, appendMark, selectMark, validateEditingWatermark, documentSize.width, documentSize.height]);
 
     const editText=useCallback((index:number)=>{
       const mark=history.elements[index];if(!mark||mark.kind!=="text")return;
@@ -708,8 +727,23 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
     },[history,documentSize.width,documentSize.height,selectMark,publishHistory,hitTestScale.radial]);
 
     const startWatermark = useCallback((index: number | null, point?: Point) => {
+      const current = editingRef.current;
+      if (current?.watermark && (index === null || index === current.index)) {
+        // A repeated toolbar/inspector action keeps the native input and undo
+        // stack alive. Its mount-only focus effect does not run a second time.
+        canvasRef.current?.parentElement?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+        return;
+      }
+      if (index === null) {
+        const selected = selectedIndexRef.current;
+        if (selected !== null && history.elements[selected]?.kind === "watermark") index = selected;
+        else for (let i = history.elements.length - 1; i >= 0; i--) {
+          if (history.elements[i].kind === "watermark") { index = i; break; }
+        }
+      }
       const previous = index === null ? null : history.elements[index];
       if (previous && previous.kind !== "watermark") return;
+      if (index !== null && !previous) return;
       const ap = appearanceRef.current, uiScale = hitTestScale.radial;
       const insets = textEditorInsets(uiScale);
       const width = Math.max(1, Math.min(180 * uiScale, documentSize.width - 2 * insets.x));
@@ -718,7 +752,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       const mark: WatermarkMark = previous ?? {kind: "watermark", id: Date.now() + Math.random(), text: "",
         rect: {x: center.x - width / 2, y: center.y - height / 2, width, height},
         color: ap.watermarkColor, fontSize: ap.watermarkFontSize, opacity: ap.watermarkOpacity / 100,
-        rotation: ap.watermarkRotation, mode: ap.watermarkMode, spacing: ap.watermarkSpacing};
+        rotation: ap.watermarkRotation, mode: "tiled", spacing: ap.watermarkSpacing};
       if (!validateMarks([...history.elements.filter((_, i) => i !== index), mark])) return;
       const frameWidth = Math.min(documentSize.width, mark.rect.width + 2 * insets.x);
       const frameHeight = Math.min(documentSize.height, mark.rect.height + 2 * insets.y);
@@ -730,6 +764,9 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           width: frameWidth, height: frameHeight,
         }};
       editingRef.current = next; setEditing(next); selectMark(index); publishHistory();
+      // Tool actions may commit and reopen the same id in one React batch.
+      // That preserves this native textarea, so restore focus explicitly too.
+      canvasRef.current?.parentElement?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
     }, [history, documentSize.width, documentSize.height, hitTestScale.radial, validateMarks, selectMark, publishHistory]);
 
     const fitLabelRef = useRef<(mark:AnnotationMark)=>AnnotationMark>(mark=>mark);
@@ -742,21 +779,20 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       if (!mark.text.trim() || !context) return {...mark, size, center};
       let fontSize = mark.fontSize;
       let width = 1, height = 1;
+      context.save();
       for (let attempt = 0; attempt < 32; attempt++) {
         context.font = textFont(fontSize);
-        const pad = Math.max(4, fontSize * .5);
-        const longest = Math.max(...mark.text.split("\n").map(line => context.measureText(line).width));
-        width = Math.min(documentSize.width, Math.max(Math.min(72, documentSize.width), Math.min(280, longest + pad * 2)));
-        const lines = layoutTextLines(mark.text, Math.max(1, width - pad * 2), value => context.measureText(value).width);
-        height = lines.length * fontSize * 1.25 + pad * 2;
+        ({width, height} = calloutLabelSize({text: mark.text, fontSize, uiScale: hitTestScale.radial,
+          boundsWidth: documentSize.width, measureText: value => context.measureText(value).width}));
         if (height <= documentSize.height || fontSize <= .1) break;
         fontSize *= .8;
       }
+      context.restore();
       height = Math.min(height, documentSize.height);
       return {...mark, size, center, fontSize, labelRect: {
         x: Math.max(0, Math.min(documentSize.width - width, mark.labelRect.x)),
         y: Math.max(0, Math.min(documentSize.height - height, mark.labelRect.y)), width, height}};
-    }, [documentSize.width, documentSize.height]);
+    }, [documentSize.width, documentSize.height, hitTestScale.radial]);
     const createCallout = useCallback((start: Point, end: Point, id: number): CalloutMark => {
       const ap = appearanceRef.current;
       const size = Math.min(ap.calloutSize, documentSize.width, documentSize.height);
@@ -774,8 +810,16 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       const mark = history.elements[index]; if (!mark || mark.kind !== "callout") return;
       // Opening a saved note preserves the user's placement. Only creation
       // and automatic size changes need an initial spacing correction.
+      const context = canvasRef.current?.getContext("2d");
+      let rect = mark.labelRect;
+      if (mark.text && context) {
+        context.save(); context.font = textFont(mark.fontSize);
+        const size = calloutLabelSize({text: mark.text, fontSize: mark.fontSize, width: rect.width,
+          boundsWidth: documentSize.width, measureText: value => context.measureText(value).width});
+        context.restore(); rect = repairCalloutLabelHeight(rect, size, documentSize.height);
+      }
       const note = mark;
-      const next: EditingState = {id: note.id, index, callout: note, text: note.text, rect: note.labelRect,
+      const next: EditingState = {id: note.id, index, callout: note, text: note.text, rect,
         maxWidth: Math.min(280, documentSize.width), uiScale: hitTestScale.radial,
         color: note.color, background: "transparent", fontSize: note.fontSize};
       editingRef.current = next; setEditing(next); selectMark(index); publishHistory();
@@ -814,7 +858,9 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       const editing=editingRef.current;
       if(editing){
         if (editing.watermark) {
-          const mark = applyAnnotationAppearance(editingWatermarkMark(editing), patch) as WatermarkMark;
+          if (!Object.entries(patch).some(([key, value]) => key.startsWith("watermark") && value !== undefined)) return;
+          const watermarkPatch = {...patch, watermarkMode: "tiled" as const};
+          const mark = applyAnnotationAppearance(editingWatermarkMark(editing), watermarkPatch) as WatermarkMark;
           const next = {...editing, watermark: mark, color: mark.color, fontSize: mark.fontSize};
           if (!validateEditingWatermark(next)) return;
           editingRef.current = next; setEditing(next); return;
@@ -835,8 +881,11 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
       }
       const index=selectedIndexRef.current;if(index===null)return;
       const mark=history.elements[index];if(!mark)return;
+      if (mark.kind === "watermark" && !Object.entries(patch).some(([key, value]) => key.startsWith("watermark") && value !== undefined)) return;
       styleAdjustment.current??={index,original:mark};
-      const updated=applyAnnotationAppearance(mark,patch);
+      const watermarkPatch = mark.kind === "watermark" && Object.keys(patch).some(key => key.startsWith("watermark"))
+        ? {...patch, watermarkMode: "tiled" as const} : patch;
+      const updated=applyAnnotationAppearance(mark,watermarkPatch);
       const next=updated.kind === "callout" && mark.kind === "callout"
         ? resizeCalloutLabel(fitCallout(updated), mark, documentSize, 32 * hitTestScale.radial)
         : updated.kind === "text" && updated.labelDirection ? fitLabelRef.current(updated) : updated;
@@ -910,19 +959,34 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         const t = toolRef.current;
         const ap = appearanceRef.current;
 
+        if (t === "watermark") {
+          const hit = markIndexAt(history.elements, p, hitTestScale);
+          const watermarkIndex = hit !== null && history.elements[hit].kind === "watermark" ? hit : null;
+          if (editingRef.current?.watermark && (watermarkIndex === null || watermarkIndex === editingRef.current.index)) {
+            startWatermark(watermarkIndex, p);
+            return;
+          }
+          const watermarkId = watermarkIndex === null ? null : history.elements[watermarkIndex].id;
+          if (editingRef.current) commitText();
+          if (editingRef.current) return; // A rejected edit must remain visible.
+          const index = watermarkId === null ? null : history.elements.findIndex(mark => mark.id === watermarkId);
+          startWatermark(index === -1 ? null : index, p);
+          return;
+        }
+
         if (editingRef.current) {
           commitText();
         }
 
-        if (t === "watermark") {
-          const hit = markIndexAt(history.elements, p, hitTestScale);
-          startWatermark(hit !== null && history.elements[hit].kind === "watermark" ? hit : null, p);
-          return;
-        }
-
-        if (t === "text" || t === "label") {
-          const hit=markIndexAt(history.elements,p,hitTestScale);
-          if(hit!==null&&history.elements[hit].kind==="text"){editText(hit);return;}
+        const current = history.elements;
+        const selectedLine = selectedIndex === null ? null : current[selectedIndex];
+        const textTool = t === "text" || t === "label";
+        const textHit = textTool ? markIndexAt(current, p, hitTestScale) : null;
+        const editingExistingText = textTool && (
+          (textHit !== null && current[textHit].kind === "text") ||
+          (selectedLine?.kind === "text" && hitTestHandle(p, selectionBounds(selectedLine), 9 * hitTestScale.radial) !== null)
+        );
+        if (textTool && !editingExistingText) {
           const width = Math.max(1, Math.min(180*hitTestScale.radial, documentSize.width));
           const height = Math.max(1, Math.min(34*hitTestScale.radial, documentSize.height));
           const frame: Rect = {
@@ -933,9 +997,9 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           };
           const nextEditing: EditingState = {
             id: Date.now() + Math.random(),
-            // The Text tool always creates a new mark. Existing text is edited
-            // only through the Select tool's double-click path below; carrying
-            // a stale selection index here would replace the selected mark.
+            // Blank text-tool presses create a new mark; a stale selection
+            // must not replace an existing mark. Body presses use the same
+            // move/resize path as Select, and double-click reopens the editor.
             index: null,
             uiScale:hitTestScale.radial,
             text: "",
@@ -953,8 +1017,6 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
           return;
         }
 
-        const current = history.elements;
-        const selectedLine = selectedIndex === null ? null : current[selectedIndex];
         const editingSelectedLine =
           (t === "line" || t === "arrow") &&
           selectedLine?.kind === t &&
@@ -964,19 +1026,19 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         const calloutHit = t === "callout" ? markIndexAt(current, p, hitTestScale) : null;
         const editingCallout = (calloutHit !== null && current[calloutHit].kind === "callout") ||
           (t === "callout" && selectedLine?.kind === "callout" && calloutHandleAt(selectedLine, p, 9 * hitTestScale.radial) !== null);
-        if (t === "select" || editingSelectedLine || editingCallout) {
+        if (t === "select" || editingSelectedLine || editingCallout || editingExistingText) {
           let handleInteraction: string | null = null;
-          const selectedMark = selectedIndex === null ? null : current[selectedIndex];
+          const selectedMark = selectedIndex === null || (textTool && selectedLine?.kind !== "text") ? null : current[selectedIndex];
           if (selectedMark?.kind === "callout") {
             handleInteraction = calloutHandleAt(selectedMark, p, 9 * hitTestScale.radial);
-          } else if (selectedIndex !== null && current[selectedIndex] && !["line","arrow"].includes(current[selectedIndex].kind)) {
+          } else if (selectedMark && !["line","arrow"].includes(selectedMark.kind)) {
             handleInteraction = hitTestHandle(
               p,
-              selectionBounds(current[selectedIndex]),
+              selectionBounds(selectedMark),
               9 * hitTestScale.radial,
             );
-          } else if (selectedIndex !== null) {
-            const mark = current[selectedIndex];
+          } else if (selectedMark) {
+            const mark = selectedMark;
             if (mark && (mark.kind === "line" || mark.kind === "arrow")) {
               if (
                 Math.hypot(p.x - mark.start.x, p.y - mark.start.y) <=
@@ -1001,7 +1063,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             return;
           }
           const mark = current[index];
-          if (mark.kind === "text" && e.detail >= 2) {editText(index);return;}
+          if (t === "select" && mark.kind === "text" && e.detail >= 2) {editText(index);return;}
           if (!handleInteraction && mark.kind === "callout") handleInteraction = calloutPartAt(mark, p);
           selectMark(index);
           if (handleInteraction === "start" || handleInteraction === "end") {
@@ -1140,7 +1202,8 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         if (interaction.kind === "none") {
           if (toolRef.current === "mosaic" && mosaicShapeRef.current==="brush") setBrushCursor(p);
           else if (brushCursorRef.current) setBrushCursor(null);
-          if (toolRef.current === "select" || toolRef.current === "line" || toolRef.current === "arrow") {
+          const textTool = toolRef.current === "text" || toolRef.current === "label";
+          if (toolRef.current === "select" || toolRef.current === "line" || toolRef.current === "arrow" || textTool) {
             // Spec §6.7: handle → crosshair, over a mark → open hand,
             // otherwise arrow.
             const current = history.elements;
@@ -1157,7 +1220,8 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             }
             if (toolRef.current === "select" && selectedMark?.kind === "callout") {
               if (calloutHandleAt(selectedMark, p, 9 * hitTestScale.radial)) cursor = "crosshair";
-            } else if (toolRef.current === "select" && selected !== null && current[selected] && !["line","arrow"].includes(current[selected].kind)) {
+            } else if ((toolRef.current === "select" || (textTool && selectedMark?.kind === "text")) &&
+              selected !== null && current[selected] && !["line","arrow"].includes(current[selected].kind)) {
               if (
                 hitTestHandle(
                   p,
@@ -1170,8 +1234,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
             }
             if (
               cursor === "default" &&
-              (toolRef.current === "select" || activeLine) &&
-              (toolRef.current === "select"
+              (toolRef.current === "select" || activeLine || textTool) &&
+              (textTool
+                ? current[markIndexAt(current, p, hitTestScale) ?? -1]?.kind === "text"
+                : toolRef.current === "select"
                 ? markIndexAt(current, p, hitTestScale) !== null
                 : markIndexAt(current, p, hitTestScale) === selected)
             ) {
@@ -1665,12 +1731,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
         }},
         editWatermark: () => {
           if (interactionsDisabled()) return;
+          if (editingRef.current?.watermark) { startWatermark(editingRef.current.index); return; }
           commitText(); finishAppearanceAdjustment();
-          let index: number | null = null;
-          for (let i = history.elements.length - 1; i >= 0; i--) {
-            if (history.elements[i].kind === "watermark") { index = i; break; }
-          }
-          startWatermark(index);
+          if (editingRef.current) return;
+          startWatermark(null);
         },
         clearSelection:()=>{if(!interactionsDisabled()){finishAppearanceAdjustment();selectMark(null);}},
         cancelInteraction,
@@ -1720,7 +1784,7 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
                 ? "progress"
                 : tool === "mosaic"
                 ? "crosshair"
-                : tool === "select"
+                : tool === "select" || tool === "text" || tool === "label"
                   ? selectCursor
                   : "default",
           }}
@@ -1738,7 +1802,10 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
               ? eligible : blankDoubleClickRef.current && eligible;
           }}
           onDoubleClick={(event) => {
-            if (interactionsDisabled() || toolRef.current !== "select" || editingRef.current) return;
+            const activeTool = toolRef.current;
+            if (interactionsDisabled() || editingRef.current ||
+              !["select", "text", "label"].includes(activeTool) ||
+              (activeTool !== "select" && canvasClickRef.current.moved)) return;
             // The inspector may shrink the stage on the first click and hide
             // again on the second. Resolve the second click in its own frame,
             // rather than the layout React rendered after that click ended.
@@ -1749,6 +1816,8 @@ const AnnotationCanvas = forwardRef<AnnotationCanvasHandle, Props>(
               documentUnitsPerViewPixel(frame, documentSize));
             if (index !== null && history.elements[index].kind === "text") {
               editText(index);
+            } else if (activeTool !== "select") {
+              return;
             } else if (index !== null && history.elements[index].kind === "watermark") {
               startWatermark(index);
             } else if (index === null) {
@@ -1930,12 +1999,17 @@ function TextEditor(props: {
     if (editing.watermarkOriginal && editing.text === editing.watermarkOriginal.text &&
       editing.fontSize === editing.watermarkOriginal.fontSize) return;
     if (editing.callout) {
-      if (editing.text === editing.callout.text && editing.fontSize === editing.callout.fontSize) return;
-      const pad = Math.max(4, editing.fontSize * .5);
-      const width = editing.text ? Math.min(bounds.width, Math.max(Math.min(72, bounds.width),
-        Math.min(280, Math.ceil(Math.max(...editing.text.split("\n").map(line => ctx.measureText(line).width))) + pad * 2))) : editing.rect.width;
-      const height = Math.min(bounds.height, Math.max(editing.fontSize * 2.25,
-        layoutTextLines(editing.text, Math.max(1, width - pad * 2), value => ctx.measureText(value).width).length * editing.fontSize * 1.25 + pad * 2));
+      const unchanged = editing.text === editing.callout.text && editing.fontSize === editing.callout.fontSize;
+      const size = calloutLabelSize({text: editing.text, fontSize: editing.fontSize, uiScale: editing.uiScale,
+        boundsWidth: bounds.width, measureText: value => ctx.measureText(value).width,
+        width: unchanged || !editing.text ? editing.rect.width : undefined});
+      if (unchanged) {
+        const rect = repairCalloutLabelHeight(editing.rect, size, bounds.height);
+        if (rect !== editing.rect) onRectChange(rect);
+        return;
+      }
+      const {width} = size;
+      const height = Math.min(bounds.height, Math.max(editing.fontSize * 2.25, size.height));
       onRectChange({...editing.rect, width, height,
         x: Math.max(0, Math.min(editing.rect.x, bounds.width - width)),
         y: Math.max(0, Math.min(editing.rect.y, bounds.height - height))});
@@ -2080,14 +2154,49 @@ function TextEditor(props: {
 export default AnnotationCanvas;
 
 
+// Native-button gesture state survives a parent render without changing the
+// canvas or inline editor's hook identity during development refreshes.
+const labelDotPresses = new WeakMap<EventTarget, {pointerId:number; x:number; y:number; moved:boolean; pressed:boolean}>();
+
 function LabelDot({x, y, radius, color, direction, disabled, onToggle}: {
   x:number; y:number; radius:number; color:string; direction:LabelDirection; disabled:boolean; onToggle():void;
 }) {
   const size = Math.max(radius * 2 + 10, 22);
   const title = t(direction === "left" ? "Point label right" : "Point label left");
+  const trackPointer = (event: React.PointerEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    const press = labelDotPresses.get(event.currentTarget);
+    if (press?.pointerId === event.pointerId && Math.hypot(event.clientX - press.x, event.clientY - press.y) >= 3) press.moved = true;
+  };
   return <button type="button" className="kiri-label-dot" title={title} aria-label={title} disabled={disabled}
-    onPointerDown={event => {event.stopPropagation(); event.preventDefault();}}
-    onClick={event => {event.stopPropagation(); onToggle();}}
+    onPointerDown={event => {
+      event.stopPropagation(); event.preventDefault();
+      if (disabled || event.button !== 0) return;
+      labelDotPresses.set(event.currentTarget, {pointerId:event.pointerId, x:event.clientX, y:event.clientY, moved:false, pressed:true});
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }}
+    onPointerMove={trackPointer}
+    onPointerUp={event => {
+      trackPointer(event);
+      const press = labelDotPresses.get(event.currentTarget);
+      if (press?.pointerId === event.pointerId) press.pressed = false;
+    }}
+    onPointerCancel={event => {
+      event.stopPropagation();
+      const press = labelDotPresses.get(event.currentTarget);
+      if (press) {press.moved = true; press.pressed = false;}
+    }}
+    onLostPointerCapture={event => {
+      const press = labelDotPresses.get(event.currentTarget);
+      if (press?.pressed) {press.moved = true; press.pressed = false;}
+    }}
+    onClick={event => {
+      event.stopPropagation();
+      const press = labelDotPresses.get(event.currentTarget);
+      labelDotPresses.delete(event.currentTarget);
+      if (disabled || (event.detail !== 0 && press?.moved)) return;
+      onToggle();
+    }}
     onDoubleClick={event => {event.stopPropagation(); event.preventDefault();}}
     onKeyDown={event => {if(event.key==="Enter"||event.key===" ")event.stopPropagation();}}
     onKeyUp={event => {if(event.key==="Enter"||event.key===" ")event.stopPropagation();}}

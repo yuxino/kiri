@@ -1048,8 +1048,8 @@ button:active:not(:disabled) {
 .kiri-image-editor-toolbar { height:56px; flex:0 0 56px; box-sizing:border-box; display:flex; flex-wrap:wrap; align-content:center; align-items:center; gap:4px 10px; padding:6px 10px; border-bottom:1px solid #383838; background:#101010; }
 .kiri-image-editor-tools { display:flex; flex-wrap:wrap; align-items:center; gap:4px 0; min-width:0; }
 .kiri-image-editor-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:flex-end; gap:4px; margin-left:auto; }
-/* This height depends only on viewport width, never tool, selection or editing. */
-.kiri-image-editor-properties { height:76px; flex:0 0 76px; min-height:0; overflow:auto; background:#101010; border-bottom:1px solid #383838; box-sizing:border-box; }
+/* Reserve complete control rows without moving the canvas between selections. */
+.kiri-image-editor-properties { height:128px; flex:0 0 128px; min-height:0; overflow:auto; background:#101010; border-bottom:1px solid #383838; box-sizing:border-box; }
 .kiri-image-editor-properties, .kiri-capture-tool-options { scrollbar-width:thin; scrollbar-color:#777 transparent; scrollbar-gutter:stable; overscroll-behavior:contain; }
 .kiri-image-editor-properties::-webkit-scrollbar, .kiri-capture-tool-options::-webkit-scrollbar { width:6px; height:6px; }
 .kiri-image-editor-properties::-webkit-scrollbar-thumb, .kiri-capture-tool-options::-webkit-scrollbar-thumb { background:#777; border-radius:6px; }
@@ -1063,11 +1063,12 @@ button:active:not(:disabled) {
 .kiri-image-editor-crop-options { position:sticky; top:0; z-index:1; display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; padding:6px 10px; background:#101010; color:#f7f7f4; font:500 11px var(--kiri-font-ui); }
 @media (max-width:740px) {
   .kiri-image-editor-toolbar { height:88px; flex-basis:88px; }
+  .kiri-image-editor-properties { height:160px; flex-basis:160px; }
 }
 @media (max-width:470px) {
   .kiri-image-editor-toolbar { height:124px; flex-basis:124px; }
   .kiri-image-editor-tools { width:100%; }
-  .kiri-image-editor-properties { height:92px; flex-basis:92px; }
+  .kiri-image-editor-properties { height:224px; flex-basis:224px; }
 }
 
 .kiri-toolbar-swatch {

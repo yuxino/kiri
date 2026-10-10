@@ -1300,11 +1300,16 @@ export function OverlayWindow() {
           tool={tool}
           setTool={(next) => {
             canvasRef.current?.finishAppearanceAdjustment();
+            if (next === "watermark") {
+              if (phase === "selecting") setPhase("annotating");
+              setTool(next);
+              canvasRef.current?.editWatermark();
+              return;
+            }
             canvasRef.current?.commitTextEditing();
             if (next !== "select") canvasRef.current?.clearSelection();
             if (phase === "selecting") setPhase("annotating");
             setTool(next);
-            if (next === "watermark") canvasRef.current?.editWatermark();
           }}
           appearance={appearance}
           setAppearance={setAppearance}
